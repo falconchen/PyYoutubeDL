@@ -1,0 +1,44 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    background: #f8f9fa;
+}
+
+.player-container {
+    display: flex;
+    height: 100vh;
+}
+
+.video-section {
+    flex: 3;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #000;
+}
+
+.list-section {
+    flex: 1;
+    padding: 1em;
+    overflow-y: auto;
+    background: #fff;
+}
+
+.list-section h3 {
+    margin-top: 0;
+}
+
+#video-list {
+    list-style: none;
+    padding: 0;
+}
+
+#video-list li {
+    margin-bottom: 10px;
+    cursor: pointer;
+    color: #1890ff;
+}
+
+#video-list li:hover {
+    text-decoration: underline;
+}

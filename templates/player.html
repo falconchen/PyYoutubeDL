@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>视频播放器</title>
+  <link href="https://unpkg.com/video.js/dist/video-js.min.css" rel="stylesheet">
+  <style>
+    body { display: flex; padding: 20px; }
+    .player { flex: 3; margin-right: 20px; }
+    .playlist { flex: 1; }
+    .playlist a { display: block; margin-bottom: 10px; text-decoration: none; color: blue; }
+  </style>
+</head>
+<body>
+  <div class="player">
+    <video
+      id="video-player"
+      class="video-js vjs-default-skin"
+      controls
+      preload="auto"
+      width="800"
+      height="450"
+      data-setup='{}'
+    >
+      {% if video_files %}
+      <source src="{{ url_for('serve_file', filename=video_files[0]) }}" type="video/mp4">
+      {% endif %}
+    </video>
+  </div>
+
+  <div class="playlist">
+    {% for file in video_files %}
+      <a href="#" onclick="event.preventDefault(); playVideo('{{ url_for('serve_file', filename=file) }}')">{{ file }}</a>
+    {% endfor %}
+  </div>
+
+  <script src="https://unpkg.com/video.js/dist/video.min.js"></script>
+  <script>
+    var player = videojs('video-player');
+    var currentIndex = 0;
+    var video_files = {{ video_files | tojson }};  // 获取服务器端传过来的文件列表
+
+    // 播放视频函数
+    function playVideo(src) {
+      player.src({ type: "video/mp4", src: src });
+      player.play();
+    }
+
+    // 页面加载完成后自动播放第一个视频
+    window.onload = function() {
+      if (video_files.length > 0) {
+        player.src({ type: "video/mp4", src: "{{ url_for('serve_file', filename=video_files[0]) }}" });
+        player.play();
+      }
+    };
+
+    // 当视频播放完后，自动播放下一个视频
+    player.on('ended', function() {
+      currentIndex++;
+      if (currentIndex < video_files.length) {
+        playVideo("{{ url_for('serve_file', filename='') }}" + video_files[currentIndex]);
+      }
+    });
+
+  </script>
+</body>
+</html>

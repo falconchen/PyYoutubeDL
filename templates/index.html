@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>YouTube 下载器</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>YouTube 下载器</h1>
+        <form method="post">
+            <input type="url" name="url" placeholder="请输入 YouTube 视频链接" required class="input">
+            <div class="checkbox-group">
+                <label><input type="checkbox" name="type" value="video" checked> 视频</label>
+                <label><input type="checkbox" name="type" value="audio"> 音频</label>
+            </div>
+            <button type="submit" class="btn">提交</button>
+        </form>
+        <a href="{{ url_for('player') }}" class="player-link">🎬 前往播放页</a>
+    </div>
+</body>
+</html>
