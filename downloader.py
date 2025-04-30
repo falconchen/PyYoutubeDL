@@ -145,30 +145,44 @@ class DownloadHandler(FileSystemEventHandler):
         if not webdav:
             logger.warning("WebDAV未连接，跳过上传")
             return
+    
         ext = os.path.splitext(file_path)[1].lower()
-        category = 'Video' if ext in ['.mp4', '.mkv', '.webm', '.mov'] else 'Audio'
+        if ext in ['.mp4', '.mkv', '.webm', '.mov']:
+            category = 'Video'
+        elif ext == '.mp3':
+            category = 'Audio'
+        else:
+            logger.info(f"文件类型不支持，跳过上传: {file_path}")
+            return
+    
         today_str = datetime.now().strftime('%Y%m%d')
         remote_dir = f"/{category}/{today_str}"
         remote_path = f"{remote_dir}/{os.path.basename(file_path)}"
-
+    
         try:
             if not webdav.check(remote_dir):
                 webdav.mkdir(remote_dir)
-
+    
             if webdav.check(remote_path):
                 logger.info(f"WebDAV已存在相同文件，跳过上传: {remote_path}")
                 return
-
-            logger.info(f"开始上传: {file_path} -> {remote_path}")
+    
+            file_size = os.path.getsize(file_path)  # 单位: 字节
+            file_size_mb = file_size / (1024 * 1024)  # 转为 MB
+            logger.info(f"开始上传: {file_path} -> {remote_path}，文件大小: {file_size_mb:.2f} MB")
+    
             start_time = time.time()
             webdav.upload_sync(remote_path=remote_path, local_path=file_path)
             elapsed = time.time() - start_time
-            logger.info(f"上传完成: {remote_path}，耗时: {elapsed:.2f} 秒")
-
+            speed = file_size_mb / elapsed if elapsed > 0 else 0
+    
+            logger.info(f"上传完成: {remote_path}，耗时: {elapsed:.2f} 秒，平均速度: {speed:.2f} MB/s")
+    
             os.remove(file_path)
             logger.info(f"本地文件已删除: {file_path}")
         except Exception as e:
             logger.error(f"上传到WebDAV失败: {file_path}，错误: {e}")
+
 
 def start_monitor(folder, mode):
     executor = ThreadPoolExecutor(max_workers=config["MAX_WORKERS"])
