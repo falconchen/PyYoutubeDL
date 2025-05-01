@@ -11,6 +11,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from datetime import datetime
 from webdav3.client import Client
+from BarkNotificator import BarkNotificator
 
 # 加载配置
 def load_config():
@@ -28,6 +29,7 @@ def load_config():
         "MAX_LOG_SIZE": 10 * 1024 * 1024,
         "BACKUP_COUNT": 5,
         "YT_DLP_OUTPUT_TEMPLATE": "%(title.0:20)s-%(id)s.%(ext)s",
+        "BARK_DEVICE_TOKEN": "bark_device_token",
         "WEBDAV_OPTIONS": {}
     }
 
@@ -140,6 +142,14 @@ class DownloadHandler(FileSystemEventHandler):
                 self.upload_to_webdav(dst)
             except Exception as e:
                 logger.error(f"移动文件失败: {src}, 错误信息: {e}")
+    
+        # 无论处理结果如何，尝试删除临时目录（前提是它存在）
+        if os.path.exists(tmp_dir):
+            try:
+                shutil.rmtree(tmp_dir)
+                logger.info(f"已删除临时目录: {tmp_dir}")
+            except Exception as e:
+                logger.error(f"删除临时目录失败: {tmp_dir}, 错误信息: {e}")
 
     def upload_to_webdav(self, file_path):
         if not webdav:
@@ -175,11 +185,13 @@ class DownloadHandler(FileSystemEventHandler):
             webdav.upload_sync(remote_path=remote_path, local_path=file_path)
             elapsed = time.time() - start_time
             speed = file_size_mb / elapsed if elapsed > 0 else 0
-    
+            
             logger.info(f"上传完成: {remote_path}，耗时: {elapsed:.2f} 秒，平均速度: {speed:.2f} MB/s")
+            bark = BarkNotificator(device_token=config['BARK_DEVICE_TOKEN'])
+            bark.send(title=f"上传完成{file_size_mb:.2f} MB", content=f"{remote_path}，耗时: {elapsed:.2f} 秒，平均速度: {speed:.2f} MB/s")
     
-            os.remove(file_path)
-            logger.info(f"本地文件已删除: {file_path}")
+            # os.remove(file_path)
+            # logger.info(f"本地文件已删除: {file_path}")
         except Exception as e:
             logger.error(f"上传到WebDAV失败: {file_path}，错误: {e}")
 
