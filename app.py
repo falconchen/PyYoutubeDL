@@ -3,6 +3,7 @@ import os
 import time
 import json
 from urllib.parse import unquote
+import hashlib
 
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
@@ -39,6 +40,22 @@ FILES_DIR = config["FILES_DIR"]
 os.makedirs(VIDEO_DIR, exist_ok=True)
 os.makedirs(AUDIO_DIR, exist_ok=True)
 os.makedirs(FILES_DIR, exist_ok=True)
+
+def get_file_hash(filepath):
+    """获取文件的MD5哈希值"""
+    if not os.path.exists(filepath):
+        return None
+    with open(filepath, 'rb') as f:
+        return hashlib.md5(f.read()).hexdigest()
+
+@app.template_filter('versioned')
+def versioned_static(filename):
+    """生成带版本号的静态文件URL"""
+    filepath = os.path.join(app.static_folder, filename)
+    file_hash = get_file_hash(filepath)
+    if file_hash:
+        return f"{url_for('static', filename=filename)}?v={file_hash[:8]}"
+    return url_for('static', filename=filename)
 
 @app.route('/', methods=['GET', 'POST'])
 def index():

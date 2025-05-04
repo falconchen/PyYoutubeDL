@@ -2,21 +2,39 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YouTube 下载器</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ 'style.css' | versioned }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
     <div class="container">
-        <h1>YouTube 下载器</h1>
-        <form method="post">
-            <input type="url" name="url" placeholder="请输入 YouTube 视频链接" required class="input">
-            <div class="checkbox-group">
-                <label><input type="checkbox" name="type" value="video" checked> 视频</label>
-                <label><input type="checkbox" name="type" value="audio"> 音频</label>
+        <div class="header">
+            <h1><i class="fab fa-youtube"></i> YouTube 下载器</h1>
+            <p class="subtitle">轻松下载您喜爱的视频和音频</p>
+        </div>
+        <form method="post" class="download-form">
+            <div class="input-group">
+                <i class="fas fa-link"></i>
+                <input type="url" name="url" placeholder="请输入 YouTube 视频链接" required class="input">
             </div>
-            <button type="submit" class="btn">提交</button>
+            <div class="checkbox-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="type" value="video" checked>
+                    <i class="fas fa-video"></i> 视频
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" name="type" value="audio">
+                    <i class="fas fa-music"></i> 音频
+                </label>
+            </div>
+            <button type="submit" class="btn">
+                <i class="fas fa-download"></i> 开始下载
+            </button>
         </form>
-        <a href="{{ url_for('player') }}" class="player-link">🎬 前往播放页</a>
+        <a href="{{ url_for('player') }}" class="player-link">
+            <i class="fas fa-play-circle"></i> 前往播放页
+        </a>
     </div>
 </body>
 </html>
