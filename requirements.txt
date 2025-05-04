@@ -1,0 +1,6 @@
+Flask==3.1.0
+yt-dlp>=2025.4.30
+watchdog==6.0.0
+webdavclient3==3.14.6
+barkcli>=1.0.5
+barknotificator==0.2.0
