@@ -10,8 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from datetime import datetime
-from webdav3.client import Client
-from BarkNotificator import BarkNotificator
+from bark_util import bark_notify
 
 # 加载配置
 def load_config():
@@ -29,8 +28,7 @@ def load_config():
         "MAX_LOG_SIZE": 10 * 1024 * 1024,
         "BACKUP_COUNT": 5,
         "YT_DLP_OUTPUT_TEMPLATE": "%(title.0:20)s-%(id)s.%(ext)s",
-        "BARK_DEVICE_TOKEN": "bark_device_token",
-        "WEBDAV_OPTIONS": {}
+        "BARK_DEVICE_TOKEN": ""
     }
 
     if os.path.exists(config_path):
@@ -51,24 +49,23 @@ config = load_config()
 for folder in [config["LOG_DIR"], config["URLS_DIR"], config["VIDEO_DIR"], config["AUDIO_DIR"], config["TMP_DIR"], config["FILES_DIR"]]:
     os.makedirs(folder, exist_ok=True)
 
+# 配置日志
 logger = logging.getLogger('downloader')
 logger.setLevel(logging.INFO)
-log_file = os.path.join(config["LOG_DIR"], 'downloader.log')
-handler = RotatingFileHandler(log_file, maxBytes=config["MAX_LOG_SIZE"], backupCount=config["BACKUP_COUNT"])
-formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
 
-webdav = Client(config["WEBDAV_OPTIONS"])
-try:
-    if not webdav.check():
-        logger.error("WebDAV连接失败")
-        webdav = None
-    else:
-        logger.info("WebDAV连接成功")
-except Exception as e:
-    logger.error(f"WebDAV连接失败: {e}")
-    webdav = None
+# 创建格式化器
+formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+
+# 文件处理器
+log_file = os.path.join(config["LOG_DIR"], 'downloader.log')
+file_handler = RotatingFileHandler(log_file, maxBytes=config["MAX_LOG_SIZE"], backupCount=config["BACKUP_COUNT"])
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
+# 控制台处理器
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
 class DownloadHandler(FileSystemEventHandler):
     def __init__(self, mode, executor):
@@ -77,14 +74,19 @@ class DownloadHandler(FileSystemEventHandler):
         self.executor = executor
 
     def on_created(self, event):
-        if not event.is_directory and event.src_path.endswith('.txt'):
+        if not event.is_directory and event.src_path.endswith('.txt') and os.path.exists(event.src_path):
             logger.info(f"检测到新文件: {event.src_path}")
             self.executor.submit(self.process_file, event.src_path)
 
     def on_modified(self, event):
-        if not event.is_directory and event.src_path.endswith('.txt'):
+        if not event.is_directory and event.src_path.endswith('.txt') and os.path.exists(event.src_path):
             logger.info(f"检测到文件修改(touch): {event.src_path}")
             self.executor.submit(self.process_file, event.src_path)
+
+    def on_moved(self, event):
+        if not event.is_directory and event.dest_path.endswith('.txt') and os.path.exists(event.dest_path):
+            logger.info(f"检测到文件重命名为txt: {event.src_path} -> {event.dest_path}")
+            self.executor.submit(self.process_file, event.dest_path)
 
     def process_file(self, filepath):
         time.sleep(0.5)
@@ -104,8 +106,14 @@ class DownloadHandler(FileSystemEventHandler):
             new_filepath = filepath.rsplit('.', 1)[0] + new_extension
             os.rename(filepath, new_filepath)
             logger.info(f"任务完成，文件重命名为: {new_filepath}")
+            bark_notify(config['BARK_DEVICE_TOKEN'],
+                        title="下载完成",
+                        content=f"{url} 下载完成，文件: {os.path.basename(new_filepath)}")
         except Exception as e:
             logger.error(f"处理文件失败: {filepath}, 错误信息: {e}")
+            bark_notify(config['BARK_DEVICE_TOKEN'],
+                        title="下载失败",
+                        content=f"{url} 下载失败，错误信息: {e}")
 
     def download(self, url, base_name):
         logger.info(f"开始下载: {url} ({self.mode})")
@@ -114,35 +122,55 @@ class DownloadHandler(FileSystemEventHandler):
 
         prefix = 'v' if self.mode == 'video' else 'a'
         task_tmp_dir = os.path.join(config["TMP_DIR"], f"{prefix}{base_name}")
-        os.makedirs(task_tmp_dir, exist_ok=True)
+        
+        try:
+            os.makedirs(task_tmp_dir, exist_ok=True)
+        except Exception as e:
+            logger.error(f"创建临时目录失败: {e}")
+            return False
 
         cmd = [
             'yt-dlp',
-            '--config-location', conf_path,
+            '--config-location', conf_path,            
             '-o', os.path.join(task_tmp_dir, config["YT_DLP_OUTPUT_TEMPLATE"]),
             url
         ]
 
         try:
             subprocess.run(cmd, check=True)
-            self.move_and_upload(task_tmp_dir)
+            self.move_files(task_tmp_dir)
             logger.info(f"下载完成: {url}")
             return True
         except subprocess.CalledProcessError as e:
             logger.error(f"下载失败: {url}，错误信息: {e}")
+            # 下载失败时删除临时目录
+            if os.path.exists(task_tmp_dir):
+                try:
+                    shutil.rmtree(task_tmp_dir)
+                    logger.info(f"下载失败，已删除临时目录: {task_tmp_dir}")
+                except Exception as e:
+                    logger.error(f"下载失败，删除临时目录失败: {task_tmp_dir}, 错误信息: {e}")
+            bark_notify(config['BARK_DEVICE_TOKEN'],
+                        title="下载失败",
+                        content=f"{url} 下载失败，错误信息: {e}")
             return False
 
-    def move_and_upload(self, tmp_dir):
+    def move_files(self, tmp_dir):
         for filename in os.listdir(tmp_dir):
             src = os.path.join(tmp_dir, filename)
             dst = os.path.join(config["FILES_DIR"], filename)
+            
+            # 检查源文件是否存在
+            if not os.path.exists(src):
+                logger.warning(f"源文件不存在，跳过处理: {src}")
+                continue
+            
             try:
                 shutil.move(src, dst)
                 logger.info(f"已移动文件: {src} -> {dst}")
-                self.upload_to_webdav(dst)
             except Exception as e:
                 logger.error(f"移动文件失败: {src}, 错误信息: {e}")
-    
+        
         # 无论处理结果如何，尝试删除临时目录（前提是它存在）
         if os.path.exists(tmp_dir):
             try:
@@ -150,51 +178,6 @@ class DownloadHandler(FileSystemEventHandler):
                 logger.info(f"已删除临时目录: {tmp_dir}")
             except Exception as e:
                 logger.error(f"删除临时目录失败: {tmp_dir}, 错误信息: {e}")
-
-    def upload_to_webdav(self, file_path):
-        if not webdav:
-            logger.warning("WebDAV未连接，跳过上传")
-            return
-    
-        ext = os.path.splitext(file_path)[1].lower()
-        if ext in ['.mp4', '.mkv', '.webm', '.mov']:
-            category = 'Video'
-        elif ext == '.mp3':
-            category = 'Audio'
-        else:
-            logger.info(f"文件类型不支持，跳过上传: {file_path}")
-            return
-    
-        today_str = datetime.now().strftime('%Y%m%d')
-        remote_dir = f"/{category}/{today_str}"
-        remote_path = f"{remote_dir}/{os.path.basename(file_path)}"
-    
-        try:
-            if not webdav.check(remote_dir):
-                webdav.mkdir(remote_dir)
-    
-            if webdav.check(remote_path):
-                logger.info(f"WebDAV已存在相同文件，跳过上传: {remote_path}")
-                return
-    
-            file_size = os.path.getsize(file_path)  # 单位: 字节
-            file_size_mb = file_size / (1024 * 1024)  # 转为 MB
-            logger.info(f"开始上传: {file_path} -> {remote_path}，文件大小: {file_size_mb:.2f} MB")
-    
-            start_time = time.time()
-            webdav.upload_sync(remote_path=remote_path, local_path=file_path)
-            elapsed = time.time() - start_time
-            speed = file_size_mb / elapsed if elapsed > 0 else 0
-            
-            logger.info(f"上传完成: {remote_path}，耗时: {elapsed:.2f} 秒，平均速度: {speed:.2f} MB/s")
-            bark = BarkNotificator(device_token=config['BARK_DEVICE_TOKEN'])
-            bark.send(title=f"上传完成{file_size_mb:.2f} MB", content=f"{remote_path}，耗时: {elapsed:.2f} 秒，平均速度: {speed:.2f} MB/s")
-    
-            # os.remove(file_path)
-            # logger.info(f"本地文件已删除: {file_path}")
-        except Exception as e:
-            logger.error(f"上传到WebDAV失败: {file_path}，错误: {e}")
-
 
 def start_monitor(folder, mode):
     executor = ThreadPoolExecutor(max_workers=config["MAX_WORKERS"])
