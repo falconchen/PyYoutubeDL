@@ -1,35 +1,14 @@
-from flask import Flask, request, render_template, redirect, url_for, send_from_directory
+from flask import Flask, request, render_template, redirect, url_for, send_from_directory, jsonify
 import os
 import time
 import json
 from urllib.parse import unquote
 import hashlib
-
+from config_util import load_config
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 
 # 加载配置
-def load_config():
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(BASE_DIR, 'config.json')
-    default_config = {
-        "VIDEO_DIR": "./urls/video",
-        "AUDIO_DIR": "./urls/audio",
-        "FILES_DIR": "./files"
-    }
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, 'r') as f:
-                user_config = json.load(f)
-            default_config.update(user_config)
-        except Exception as e:
-            print(f"加载配置失败，使用默认配置: {e}")
-
-    for key in ["VIDEO_DIR", "AUDIO_DIR", "FILES_DIR"]:
-        default_config[key] = os.path.abspath(os.path.join(BASE_DIR, default_config[key]))
-
-    return default_config
-
 config = load_config()
 
 VIDEO_DIR = config["VIDEO_DIR"]
@@ -63,8 +42,9 @@ def index():
         url = request.form.get('url')
         types = request.form.getlist('type')
 
-        timestamp = time.strftime('%Y%m%d%H%M%S') + f'{int(time.time() * 1000) % 1000:03d}'
+        
         for t in types:
+            timestamp = time.strftime('%Y%m%d%H%M%S') + f'{int(time.time() * 1000) % 1000:03d}'
             folder = VIDEO_DIR if t == 'video' else AUDIO_DIR
             filename = os.path.join(folder, f"{timestamp}.txt")
             with open(filename, 'w') as f:
@@ -92,5 +72,28 @@ def serve_file(filename):
     decoded_filename = unquote(filename)  
     return send_from_directory(FILES_DIR, decoded_filename)
 
+@app.route('/api/add_task', methods=['POST'])
+def api_add_task():
+    data = request.get_json() if request.is_json else request.form
+    url = data.get('url')
+    types = data.get('types')
+    if not url or not types:
+        return jsonify({"success": False, "msg": "Missing required parameters: url and types"}), 400
+    if not isinstance(types, list):
+        # 支持表单传递的字符串类型
+        types = [types]
+
+    
+    tasks = []
+    for t in types:
+        timestamp = time.strftime('%Y%m%d%H%M%S') + f'{int(time.time() * 1000) % 1000:03d}'
+        folder = VIDEO_DIR if t == 'video' else AUDIO_DIR
+        filename = os.path.join(folder, f"{timestamp}.txt")
+        with open(filename, 'w') as f:
+            f.write(url)
+        # 只返回相对路径
+        tasks.append(f"{t}/{timestamp}")
+    return jsonify({"success": True, "msg": "Task(s) added successfully", "tasks": tasks})
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run()

@@ -11,61 +11,25 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from datetime import datetime
 from bark_util import bark_notify
+from config_util import load_config
+from log_util import setup_logger
 
 # 加载配置
-def load_config():
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(BASE_DIR, 'config.json')
-
-    default_config = {
-        "URLS_DIR": "./urls",
-        "VIDEO_DIR": "./urls/video",
-        "AUDIO_DIR": "./urls/audio",
-        "TMP_DIR": "./tmp",
-        "FILES_DIR": "./files",
-        "LOG_DIR": "../logs",
-        "MAX_WORKERS": 4,
-        "MAX_LOG_SIZE": 10 * 1024 * 1024,
-        "BACKUP_COUNT": 5,
-        "YT_DLP_OUTPUT_TEMPLATE": "%(title.0:20)s-%(id)s.%(ext)s",
-        "BARK_DEVICE_TOKEN": ""
-    }
-
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, 'r') as f:
-                user_config = json.load(f)
-            default_config.update(user_config)
-        except Exception as e:
-            print(f"加载配置文件失败，使用默认配置: {e}")
-
-    for key in ["URLS_DIR", "VIDEO_DIR", "AUDIO_DIR", "TMP_DIR", "FILES_DIR", "LOG_DIR"]:
-        default_config[key] = os.path.abspath(os.path.join(BASE_DIR, default_config[key]))
-
-    return default_config
-
 config = load_config()
 
+# 创建必要的目录
 for folder in [config["LOG_DIR"], config["URLS_DIR"], config["VIDEO_DIR"], config["AUDIO_DIR"], config["TMP_DIR"], config["FILES_DIR"]]:
     os.makedirs(folder, exist_ok=True)
 
 # 配置日志
-logger = logging.getLogger('downloader')
-logger.setLevel(logging.INFO)
-
-# 创建格式化器
-formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
-
-# 文件处理器
-log_file = os.path.join(config["LOG_DIR"], 'downloader.log')
-file_handler = RotatingFileHandler(log_file, maxBytes=config["MAX_LOG_SIZE"], backupCount=config["BACKUP_COUNT"])
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
-
-# 控制台处理器
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
+logger = setup_logger(
+    name='downloader',
+    log_dir=config["LOG_DIR"],
+    log_file='downloader.log',
+    max_bytes=config["MAX_LOG_SIZE"],
+    backup_count=config["BACKUP_COUNT"],
+    timezone=config.get("TIMEZONE", "UTC")
+)
 
 class DownloadHandler(FileSystemEventHandler):
     def __init__(self, mode, executor):
@@ -78,10 +42,6 @@ class DownloadHandler(FileSystemEventHandler):
             logger.info(f"检测到新文件: {event.src_path}")
             self.executor.submit(self.process_file, event.src_path)
 
-    def on_modified(self, event):
-        if not event.is_directory and event.src_path.endswith('.txt') and os.path.exists(event.src_path):
-            logger.info(f"检测到文件修改(touch): {event.src_path}")
-            self.executor.submit(self.process_file, event.src_path)
 
     def on_moved(self, event):
         if not event.is_directory and event.dest_path.endswith('.txt') and os.path.exists(event.dest_path):
