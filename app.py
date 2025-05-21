@@ -5,6 +5,8 @@ import json
 from urllib.parse import unquote
 import hashlib
 from config_util import load_config
+import random
+import string
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 
@@ -36,15 +38,17 @@ def versioned_static(filename):
         return f"{url_for('static', filename=filename)}?v={file_hash[:8]}"
     return url_for('static', filename=filename)
 
+def random_str(length=3):
+    return ''.join(random.choices(string.ascii_letters, k=length))
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
         url = request.form.get('url')
         types = request.form.getlist('type')
 
-        
         for t in types:
-            timestamp = time.strftime('%Y%m%d%H%M%S') + f'{int(time.time() * 1000) % 1000:03d}'
+            timestamp = time.strftime('%Y%m%d%H%M%S') + random_str(3)
             folder = VIDEO_DIR if t == 'video' else AUDIO_DIR
             filename = os.path.join(folder, f"{timestamp}.txt")
             with open(filename, 'w') as f:
@@ -83,17 +87,17 @@ def api_add_task():
         # 支持表单传递的字符串类型
         types = [types]
 
-    
     tasks = []
     for t in types:
-        timestamp = time.strftime('%Y%m%d%H%M%S') + f'{int(time.time() * 1000) % 1000:03d}'
+        timestamp = time.strftime('%Y%m%d%H%M%S') + random_str(3)
         folder = VIDEO_DIR if t == 'video' else AUDIO_DIR
         filename = os.path.join(folder, f"{timestamp}.txt")
         with open(filename, 'w') as f:
             f.write(url)
         # 只返回相对路径
         tasks.append(f"{t}/{timestamp}")
-    return jsonify({"success": True, "msg": "Task(s) added successfully", "tasks": tasks})
+    msg = "Task added successfully" if len(tasks) == 1 else "Tasks added successfully"
+    return jsonify({"success": True, "msg": msg, "tasks": tasks})
 
 if __name__ == "__main__":
     app.run()
