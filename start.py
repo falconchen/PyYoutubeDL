@@ -33,6 +33,21 @@ def restart_in_venv():
             print("错误：未找到虚拟环境，请先创建虚拟环境")
             sys.exit(1)
 
+def has_devil():
+    """判断devil命令是否存在于PATH中"""
+    from shutil import which
+    return which('devil') is not None
+
+def get_domain_from_path():
+    """从当前脚本路径中提取domains/后的目录名作为域名"""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    parts = base_dir.split(os.sep)
+    if 'domains' in parts:
+        idx = parts.index('domains')
+        if idx + 1 < len(parts):
+            return parts[idx + 1]
+    return None
+
 def start_processes():
     """启动下载器、上传器和Web应用进程"""
     # 确保在虚拟环境中运行
@@ -45,8 +60,7 @@ def start_processes():
     processes = []
     scripts = [
         ('downloader.py', '下载器'),
-        ('webdav_uploader.py', '上传器'),
-        ('app.py', 'Web应用')
+        ('webdav_uploader.py', '上传器')
     ]
 
     try:
@@ -62,6 +76,33 @@ def start_processes():
             )
             processes.append((process, name))
             print(f"{name}已启动，PID: {process.pid}")
+
+        # 启动app.py
+        if has_devil():
+            domain = get_domain_from_path()
+            if not domain:
+                print("未能自动识别域名目录，devil命令启动失败！")
+                sys.exit(1)
+            print(f"检测到devil命令，使用devil方式启动Web应用({domain})...")
+            app_process = subprocess.Popen(
+                ['devil', 'www', 'restart', domain],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            processes.append((app_process, f'Web应用(devil:{domain})'))
+            print(f"Web应用(devil:{domain})已启动，PID: {app_process.pid}")
+        else:
+            script_path = os.path.join(base_dir, 'app.py')
+            print("未检测到devil命令，使用python方式启动Web应用...")
+            app_process = subprocess.Popen(
+                [sys.executable, script_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            processes.append((app_process, 'Web应用'))
+            print(f"Web应用已启动，PID: {app_process.pid}")
 
         print("\n所有服务已启动，按 Ctrl+C 停止所有服务\n")
 
