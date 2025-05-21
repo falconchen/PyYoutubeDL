@@ -109,6 +109,9 @@ def start_processes():
         # 监控进程输出
         while True:
             for process, name in processes:
+                # devil方式启动的Web应用不监控输出
+                if 'devil:' in name:
+                    continue
                 # 读取输出
                 output = process.stdout.readline()
                 if output:
