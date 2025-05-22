@@ -100,4 +100,4 @@ def api_add_task():
     return jsonify({"success": True, "msg": msg, "tasks": tasks})
 
 if __name__ == "__main__":
-    app.run()
+    app.run(host='0.0.0.0')
