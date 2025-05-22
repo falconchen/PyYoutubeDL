@@ -12,8 +12,10 @@ class TimezoneFormatter(logging.Formatter):
         self.timezone = pytz.timezone(timezone) if timezone else pytz.UTC
 
     def formatTime(self, record, datefmt=None):
-        dt = datetime.fromtimestamp(record.created)
-        dt = self.timezone.localize(dt)
+        # 先获取UTC时间
+        dt = datetime.utcfromtimestamp(record.created).replace(tzinfo=pytz.utc)
+        # 转换为目标时区
+        dt = dt.astimezone(self.timezone)
         if datefmt:
             return dt.strftime(datefmt)
         return dt.strftime("%Y-%m-%d %H:%M:%S")
