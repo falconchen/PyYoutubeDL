@@ -20,7 +20,7 @@
             </div>
             <div class="checkbox-group">
                 <label class="checkbox-label">
-                    <input type="checkbox" name="type" value="video" checked>
+                    <input type="checkbox" name="type" value="video">
                     <i class="fas fa-video"></i> 视频
                 </label>
                 <label class="checkbox-label">
@@ -36,5 +36,24 @@
             <i class="fas fa-play-circle"></i> 前往播放页
         </a>
     </div>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // 获取所有 type 复选框
+        const checkboxes = document.querySelectorAll('input[name="type"]');
+        // 读取本地存储的选择
+        const savedTypes = JSON.parse(localStorage.getItem('selectedTypes') || '["video"]');
+        // 先全部取消勾选
+        checkboxes.forEach(cb => cb.checked = false);
+        // 恢复上次勾选
+        checkboxes.forEach(cb => {
+            if (savedTypes.includes(cb.value)) cb.checked = true;
+        });
+        // 提交表单时保存选择
+        document.querySelector('.download-form').addEventListener('submit', function() {
+            const selected = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+            localStorage.setItem('selectedTypes', JSON.stringify(selected));
+        });
+    });
+    </script>
 </body>
 </html>
