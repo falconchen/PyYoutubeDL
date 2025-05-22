@@ -1,3 +1,4 @@
+#!venv/bin/python
 from flask import Flask, request, render_template, redirect, url_for, send_from_directory, jsonify
 import os
 import time

@@ -2,6 +2,7 @@
 import os
 import sys
 import psutil
+import subprocess
 
 def kill_existing_processes():
     """终止已存在的相关进程，包括start.py自身"""
@@ -33,6 +34,28 @@ def kill_existing_processes():
         except Exception:
             pass
 
+def has_devil():
+    from shutil import which
+    return which('devil') is not None
+
+def get_domain_from_path():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    parts = base_dir.split(os.sep)
+    if 'domains' in parts:
+        idx = parts.index('domains')
+        if idx + 1 < len(parts):
+            return parts[idx + 1]
+    return None
+
 if __name__ == '__main__':
     kill_existing_processes()
-    print("All related processes have been terminated.") 
+    print("All related processes have been terminated.")
+
+    # 检查是否需要重启 devil
+    if has_devil():
+        domain = get_domain_from_path()
+        if domain:
+            print(f"检测到devil命令，重启Web应用({domain})...")
+            subprocess.run(['devil', 'www', 'restart', domain])
+        else:
+            print("未能自动识别域名目录，devil命令重启失败！") 
