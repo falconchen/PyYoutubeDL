@@ -10,8 +10,8 @@ if [ -d "$SCRIPT_DIR/venv" ]; then
 fi
 
 cd ${SCRIPT_DIR}
-echo "正在安装/更新依赖..."
-pip install -r requirements.txt
+echo "正在更新yt-dlp..."
+pip install --upgrade yt-dlp
 
 echo "正在停止已有进程..."
 python ./stop.py
