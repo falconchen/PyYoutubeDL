@@ -62,10 +62,18 @@ class DownloadHandler(FileSystemEventHandler):
                     return
 
             base_name = os.path.splitext(os.path.basename(filepath))[0]
+            # 下载前先重命名为.downloading
+            downloading_path = filepath.rsplit('.', 1)[0] + '.downloading'
+            try:
+                os.rename(filepath, downloading_path)
+                logger.info(f"任务开始，文件重命名为: {downloading_path}")
+            except Exception as e:
+                logger.error(f"重命名为.downloading失败: {e}")
+                return
             result = self.download(url, base_name)
             new_extension = '.ok' if result else '.fail'
-            new_filepath = filepath.rsplit('.', 1)[0] + new_extension
-            os.rename(filepath, new_filepath)
+            new_filepath = downloading_path.rsplit('.', 1)[0] + new_extension
+            os.rename(downloading_path, new_filepath)
             logger.info(f"任务完成，文件重命名为: {new_filepath}")
             bark_notify(config['BARK_DEVICE_TOKEN'],
                         title="下载完成",
@@ -90,6 +98,8 @@ class DownloadHandler(FileSystemEventHandler):
             logger.error(f"创建临时目录失败: {e}")
             return False
 
+        log_basename = os.path.basename(task_tmp_dir)
+        log_path = os.path.join(config["LOG_DIR"], f"{log_basename}.log")
         cmd = [
             'yt-dlp',
             '--config-location', conf_path,            
@@ -98,7 +108,14 @@ class DownloadHandler(FileSystemEventHandler):
         ]
 
         try:
-            subprocess.run(cmd, check=True)
+            with open(log_path, 'w', encoding='utf-8') as log_file:
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+                for line in process.stdout:
+                    print(line, end='')
+                    log_file.write(line)
+                process.wait()
+                if process.returncode != 0:
+                    raise subprocess.CalledProcessError(process.returncode, cmd)
             self.move_files(task_tmp_dir)
             logger.info(f"下载完成: {url}")
             return True
