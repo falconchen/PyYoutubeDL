@@ -19,7 +19,7 @@ from log_util import setup_logger
 config = load_config()
 
 # 创建必要的目录
-for folder in [config["LOG_DIR"], config["URLS_DIR"], config["VIDEO_DIR"], config["AUDIO_DIR"], config["TMP_DIR"], config["FILES_DIR"]]:
+for folder in [config["LOG_DIR"], config["URLS_DIR"], config["TMP_DIR"], config["FILES_DIR"]]:
     os.makedirs(folder, exist_ok=True)
 
 # 配置日志
@@ -33,16 +33,14 @@ logger = setup_logger(
 )
 
 class DownloadHandler(FileSystemEventHandler):
-    def __init__(self, mode, executor):
+    def __init__(self, executor):
         super().__init__()
-        self.mode = mode
         self.executor = executor
 
     def on_created(self, event):
         if not event.is_directory and event.src_path.endswith('.txt') and os.path.exists(event.src_path):
             logger.info(f"检测到新文件: {event.src_path}")
             self.executor.submit(self.process_file, event.src_path)
-
 
     def on_moved(self, event):
         if not event.is_directory and event.dest_path.endswith('.txt') and os.path.exists(event.dest_path):
@@ -70,34 +68,29 @@ class DownloadHandler(FileSystemEventHandler):
             except Exception as e:
                 logger.error(f"重命名为.downloading失败: {e}")
                 return
-            result = self.download(url, base_name)
+            # 根据首字母判断模式
+            mode = 'audio' if base_name[0] == 'a' else 'video'
+            result = self.download(url, base_name, mode)
             new_extension = '.ok' if result else '.fail'
             new_filepath = downloading_path.rsplit('.', 1)[0] + new_extension
             os.rename(downloading_path, new_filepath)
             logger.info(f"任务完成，文件重命名为: {new_filepath}")
             bark_notify(config['BARK_DEVICE_TOKEN'],
-                        title="下载完成",
-                        content=f"{url} 下载完成，文件: {os.path.basename(new_filepath)}")
+                        title="下载完成" if result else "下载失败",
+                        content=f"{url} 下载{'完成' if result else '失败'}，文件: {os.path.basename(new_filepath)}")
         except Exception as e:
             logger.error(f"处理文件失败: {filepath}, 错误信息: {e}")
             bark_notify(config['BARK_DEVICE_TOKEN'],
                         title="下载失败",
                         content=f"{url} 下载失败，错误信息: {e}")
 
-    def download(self, url, base_name):
-        logger.info(f"开始下载: {url} ({self.mode})")
-        conf_file = 'yt-dlp.conf' if self.mode == 'video' else 'yta-dlp.conf'
+    def download(self, url, base_name, mode):
+        logger.info(f"开始下载: {url} ({mode})")
+        conf_file = 'yt-dlp.conf' if mode == 'video' else 'yta-dlp.conf'
         conf_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), conf_file)
 
-        prefix = 'v' if self.mode == 'video' else 'a'
-        task_tmp_dir = os.path.join(config["TMP_DIR"], f"{prefix}{base_name}")
-        
-        try:
-            os.makedirs(task_tmp_dir, exist_ok=True)
-        except Exception as e:
-            logger.error(f"创建临时目录失败: {e}")
-            return False
-
+        #prefix = 'v' if mode == 'video' else 'a'
+        task_tmp_dir = os.path.join(config["TMP_DIR"], f"{base_name}")
         log_basename = os.path.basename(task_tmp_dir)
         log_path = os.path.join(config["LOG_DIR"], f"{log_basename}.log")
         cmd = [
@@ -106,6 +99,12 @@ class DownloadHandler(FileSystemEventHandler):
             '-o', os.path.join(task_tmp_dir, config["YT_DLP_OUTPUT_TEMPLATE"]),
             url
         ]
+
+        try:
+            os.makedirs(task_tmp_dir, exist_ok=True)
+        except Exception as e:
+            logger.error(f"创建临时目录失败: {e}")
+            return False
 
         try:
             with open(log_path, 'w', encoding='utf-8') as log_file:
@@ -137,19 +136,14 @@ class DownloadHandler(FileSystemEventHandler):
         for filename in os.listdir(tmp_dir):
             src = os.path.join(tmp_dir, filename)
             dst = os.path.join(config["FILES_DIR"], filename)
-            
-            # 检查源文件是否存在
             if not os.path.exists(src):
                 logger.warning(f"源文件不存在，跳过处理: {src}")
                 continue
-            
             try:
                 shutil.move(src, dst)
                 logger.info(f"已移动文件: {src} -> {dst}")
             except Exception as e:
                 logger.error(f"移动文件失败: {src}, 错误信息: {e}")
-        
-        # 无论处理结果如何，尝试删除临时目录（前提是它存在）
         if os.path.exists(tmp_dir):
             try:
                 shutil.rmtree(tmp_dir)
@@ -157,28 +151,23 @@ class DownloadHandler(FileSystemEventHandler):
             except Exception as e:
                 logger.error(f"删除临时目录失败: {tmp_dir}, 错误信息: {e}")
 
-def start_monitor(folder, mode):
+def start_monitor(folder):
     executor = ThreadPoolExecutor(max_workers=config["MAX_WORKERS"])
-    event_handler = DownloadHandler(mode, executor)
+    event_handler = DownloadHandler(executor)
     observer = Observer()
     observer.schedule(event_handler, folder, recursive=False)
     observer.start()
-    logger.info(f"开始监控目录: {folder} (模式: {mode})")
+    logger.info(f"开始监控目录: {folder}")
     return observer
 
 def main():
-    video_observer = start_monitor(config["VIDEO_DIR"], 'video')
-    audio_observer = start_monitor(config["AUDIO_DIR"], 'audio')
-
+    observer = start_monitor(config["URLS_DIR"])
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        video_observer.stop()
-        audio_observer.stop()
-
-    video_observer.join()
-    audio_observer.join()
+        observer.stop()
+    observer.join()
 
 if __name__ == '__main__':
     main()

@@ -14,13 +14,11 @@ app = Flask(__name__, static_url_path='/static', static_folder='static')
 # 加载配置
 config = load_config()
 
-VIDEO_DIR = config["VIDEO_DIR"]
-AUDIO_DIR = config["AUDIO_DIR"]
+URLS_DIR = config["URLS_DIR"]
 FILES_DIR = config["FILES_DIR"]
 
 # 保证文件夹存在
-os.makedirs(VIDEO_DIR, exist_ok=True)
-os.makedirs(AUDIO_DIR, exist_ok=True)
+os.makedirs(URLS_DIR, exist_ok=True)
 os.makedirs(FILES_DIR, exist_ok=True)
 
 def get_file_hash(filepath):
@@ -50,8 +48,8 @@ def index():
 
         for t in types:
             timestamp = time.strftime('%Y%m%d%H%M%S') + random_str(3)
-            folder = VIDEO_DIR if t == 'video' else AUDIO_DIR
-            filename = os.path.join(folder, f"{timestamp}.txt")
+            prefix = 'v' if t == 'video' else 'a'
+            filename = os.path.join(URLS_DIR, f"{prefix}{timestamp}.txt")
             with open(filename, 'w') as f:
                 f.write(url)
         return redirect(url_for('index'))
@@ -91,14 +89,57 @@ def api_add_task():
     tasks = []
     for t in types:
         timestamp = time.strftime('%Y%m%d%H%M%S') + random_str(3)
-        folder = VIDEO_DIR if t == 'video' else AUDIO_DIR
-        filename = os.path.join(folder, f"{timestamp}.txt")
+        prefix = 'v' if t == 'video' else 'a'
+        filename = os.path.join(URLS_DIR, f"{prefix}{timestamp}.txt")
         with open(filename, 'w') as f:
             f.write(url)
-        # 只返回相对路径
-        tasks.append(f"{t}/{timestamp}")
+        # 只返回不带后缀的文件名
+        tasks.append(f"{prefix}{timestamp}")
     msg = "Task added successfully" if len(tasks) == 1 else "Tasks added successfully"
     return jsonify({"success": True, "msg": msg, "tasks": tasks})
+
+@app.route('/api/task_info', methods=['POST'])
+def api_task_info():
+    data = request.get_json() if request.is_json else request.form
+    tasks = data.get('tasks')
+    if not tasks:
+        return jsonify({"success": False, "msg": "Missing required parameter: tasks"}), 400
+    if not isinstance(tasks, list):
+        tasks = [tasks]
+    result = []
+    for task in tasks:
+        # 直接用task作为文件名（不带后缀）
+        try:
+            if not task or len(task) < 2:
+                result.append({"task": task, "exists": False, "msg": "Invalid task id"})
+                continue
+            filename = os.path.join(URLS_DIR, f"{task}.txt")
+            if not os.path.exists(filename):
+                result.append({"task": task, "exists": False, "msg": "Task file not found"})
+                continue
+            with open(filename, 'r') as f:
+                url = f.read().strip()
+            # 解析类型和时间
+            t = 'video' if task[0] == 'v' else 'audio'
+            ts = task[1:]
+            time_str = ts[:14]  # 20240601123456
+            try:
+                task_time = time.strptime(time_str, '%Y%m%d%H%M%S')
+                time_fmt = time.strftime('%Y-%m-%d %H:%M:%S', task_time)
+            except Exception:
+                time_fmt = time_str
+            result.append({
+                "task": task,
+                "exists": True,
+                "type": t,
+                "timestamp": ts,
+                "time": time_fmt,
+                "url": url
+            })
+        except Exception as e:
+            result.append({"task": task, "exists": False, "msg": f"Parse error: {e}"})
+    return jsonify({"success": True, "tasks": result})
+
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0')
