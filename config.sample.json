@@ -1,7 +1,5 @@
 {
   "URLS_DIR": "./urls",
-  "VIDEO_DIR": "./urls/video",
-  "AUDIO_DIR": "./urls/audio",
   "TMP_DIR": "./tmp",
   "FILES_DIR": "./files",
   "LOG_DIR": "../logs",

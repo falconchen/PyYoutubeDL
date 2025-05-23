@@ -5,8 +5,6 @@ import json
 DEFAULT_CONFIG = {
     # 下载器配置
     "URLS_DIR": "./urls",
-    "VIDEO_DIR": "./urls/video",
-    "AUDIO_DIR": "./urls/audio",
     "TMP_DIR": "./tmp",
     "FILES_DIR": "./files",
     "LOG_DIR": "../logs",
@@ -27,7 +25,7 @@ DEFAULT_CONFIG = {
 
 # 需要转换为绝对路径的配置项
 PATH_CONFIG_KEYS = [
-    "URLS_DIR", "VIDEO_DIR", "AUDIO_DIR", "TMP_DIR", 
+    "URLS_DIR",  "TMP_DIR", 
     "FILES_DIR", "LOG_DIR"
 ]
 
