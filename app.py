@@ -8,6 +8,7 @@ import hashlib
 from config_util import load_config
 import random
 import string
+import yt_dlp
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 
@@ -45,16 +46,37 @@ def index():
     if request.method == 'POST':
         url = request.form.get('url')
         types = request.form.getlist('type')
-
+        
+        # 存储任务ID列表
+        task_ids = []
+        
         for t in types:
             timestamp = time.strftime('%Y%m%d%H%M%S') + random_str(3)
             prefix = 'v' if t == 'video' else 'a'
-            filename = os.path.join(URLS_DIR, f"{prefix}{timestamp}.txt")
+            task_id = f"{prefix}{timestamp}"
+            task_ids.append(task_id)
+            
+            filename = os.path.join(URLS_DIR, f"{task_id}.txt")
             with open(filename, 'w') as f:
                 f.write(url)
-        return redirect(url_for('index'))
+        
+        # 构建重定向URL，包含所有参数
+        redirect_url = url_for('index', 
+                             url=url,
+                             types=','.join(types),
+                             tasks=','.join(task_ids))
+        
+        return redirect(redirect_url)
 
-    return render_template('index.html')
+    # GET请求处理
+    url = request.args.get('url', '')
+    types = request.args.get('types', '').split(',') if request.args.get('types') else []
+    tasks = request.args.get('tasks', '').split(',') if request.args.get('tasks') else []
+    
+    return render_template('index.html', 
+                         url=url,
+                         types=types,
+                         tasks=tasks)
 
 @app.route('/player')
 def player():
@@ -144,6 +166,62 @@ def api_task_info():
 def favicon():
     return send_from_directory(os.path.join(app.static_folder, 'images'),
                              'favicon.ico', mimetype='image/vnd.microsoft.icon')
+
+@app.route('/api/video_info', methods=['POST'])
+def api_video_info():
+    data = request.get_json() if request.is_json else request.form
+    url = data.get('url')
+    
+    if not url:
+        return jsonify({"success": False, "msg": "Missing required parameter: url"}), 400
+    
+    try:
+        # 配置yt-dlp选项
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,  # 不下载视频，只获取信息
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # 获取视频信息
+            info = ydl.extract_info(url, download=False)
+            
+            # 提取需要的信息
+            video_info = {
+                "success": True,
+                "title": info.get('title'),
+                "description": info.get('description'),
+                "duration": info.get('duration'),
+                "uploader": info.get('uploader'),
+                "upload_date": info.get('upload_date'),
+                "view_count": info.get('view_count'),
+                "like_count": info.get('like_count'),
+                "thumbnail": info.get('thumbnail'),
+                "formats": [{
+                    "format_id": f.get('format_id'),
+                    "ext": f.get('ext'),
+                    "resolution": f.get('resolution'),
+                    "filesize": f.get('filesize'),
+                    "format_note": f.get('format_note'),
+                    "vcodec": f.get('vcodec'),
+                    "acodec": f.get('acodec'),
+                } for f in info.get('formats', []) if f.get('vcodec') != 'none'],
+                "audio_formats": [{
+                    "format_id": f.get('format_id'),
+                    "ext": f.get('ext'),
+                    "filesize": f.get('filesize'),
+                    "acodec": f.get('acodec'),
+                } for f in info.get('formats', []) if f.get('vcodec') == 'none'],
+            }
+            
+            return jsonify(video_info)
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "msg": f"Failed to get video info: {str(e)}"
+        }), 500
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0')

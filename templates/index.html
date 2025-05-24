@@ -8,6 +8,113 @@
     <title>YouTube 下载器</title>
     <link rel="stylesheet" href="{{ 'style.css' | versioned }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            background-color: #f0f2f5;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem 0;
+        }
+        .container {
+            width: 90%;
+            max-width: 550px;
+            margin-bottom: 2rem;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.2s ease;
+        }
+        /* .container:hover {
+            transform: translateY(-2px);
+        } */
+        .task-container {
+            background: white;
+            padding: 1.5rem;
+        }
+        .task-container h3 {
+            color: #1a73e8;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .task-info {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+        .task-url {
+            color: #1a73e8;
+            word-break: break-all;
+            margin-bottom: 1rem;
+            padding: 0.5rem;
+            background: #e8f0fe;
+            border-radius: 4px;
+        }
+        .task-list {
+            list-style: none;
+            padding: 0;
+        }
+        .task-list li {
+            padding: 1rem;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            transition: background-color 0.2s ease;
+        }
+        .task-list li:hover {
+            background-color: #f8f9fa;
+        }
+        .task-list li:last-child {
+            border-bottom: none;
+        }
+        .badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .badge.video {
+            background-color: #e8f0fe;
+            color: #1a73e8;
+        }
+        .badge.audio {
+            background-color: #fce8e6;
+            color: #d93025;
+        }
+        .task-id {
+            font-family: monospace;
+            background: #f1f3f4;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.875rem;
+        }
+        /* 添加响应式样式 */
+        @media screen and (max-width: 480px) {
+            .badge span {
+                display: none;  /* 在小屏幕下隐藏文字 */
+            }
+            .badge {
+                padding: 0.25rem;  /* 减小内边距 */
+            }
+            .task-id {
+                font-size: 0.75rem;  /* 减小任务ID字体大小 */
+            }
+            .task-list li {
+                padding: 0.75rem;  /* 减小列表项内边距 */
+                gap: 0.5rem;  /* 减小间距 */
+            }
+            .task-url {
+                font-size: 0.875rem;  /* 减小URL字体大小 */
+            }
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -18,15 +125,15 @@
         <form method="post" class="download-form">
             <div class="input-group">
                 <i class="fas fa-link"></i>
-                <input type="text" name="url" placeholder="请输入 YouTube 视频链接或ID" required class="input">
+                <input type="text" name="url" placeholder="请输入 YouTube 视频链接或ID" required class="input" value="">
             </div>
             <div class="checkbox-group">
                 <label class="checkbox-label">
-                    <input type="checkbox" name="type" value="video">
+                    <input type="checkbox" name="type" value="video" {% if 'video' in types %}checked{% endif %}>
                     <i class="fas fa-video"></i> 视频
                 </label>
                 <label class="checkbox-label">
-                    <input type="checkbox" name="type" value="audio">
+                    <input type="checkbox" name="type" value="audio" {% if 'audio' in types %}checked{% endif %}>
                     <i class="fas fa-music"></i> 音频
                 </label>
             </div>
@@ -38,6 +145,36 @@
             <i class="fas fa-play-circle"></i> 前往播放页
         </a>
     </div>
+
+    {% if tasks %}
+    <div class="container task-container">
+        <h3><i class="fas fa-tasks"></i> 任务已创建</h3>
+        <div class="task-info">
+            <div class="task-url">
+                <i class="fas fa-link"></i> 视频链接：{{ url }}
+            </div>
+            <ul class="task-list">
+            {% for task in tasks %}
+                <li>
+                    <span class="task-id">{{ task }}</span>
+                    {% if task.startswith('v') %}
+                        <span class="badge video">
+                            <i class="fas fa-video"></i>
+                            <span>视频</span>
+                        </span>
+                    {% else %}
+                        <span class="badge audio">
+                            <i class="fas fa-music"></i>
+                            <span>音频</span>
+                        </span>
+                    {% endif %}
+                </li>
+            {% endfor %}
+            </ul>
+        </div>
+    </div>
+    {% endif %}
+
     <script>
     document.addEventListener('DOMContentLoaded', function() {
         // 获取所有 type 复选框
