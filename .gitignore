@@ -9,3 +9,4 @@ files/
 config.json
 test/
 logs/
+*.local.conf
