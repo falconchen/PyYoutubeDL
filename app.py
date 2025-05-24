@@ -140,6 +140,10 @@ def api_task_info():
             result.append({"task": task, "exists": False, "msg": f"Parse error: {e}"})
     return jsonify({"success": True, "tasks": result})
 
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(os.path.join(app.static_folder, 'images'),
+                             'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0')
