@@ -86,10 +86,18 @@ class DownloadHandler(FileSystemEventHandler):
 
     def download(self, url, base_name, mode):
         logger.info(f"开始下载: {url} ({mode})")
-        conf_file = 'yt-dlp.conf' if mode == 'video' else 'yta-dlp.conf'
-        conf_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), conf_file)
-
-        #prefix = 'v' if mode == 'video' else 'a'
+        default_conf_file = 'yt-dlp.conf' if mode == 'video' else 'yta-dlp.conf'
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # 检查是否存在.local.conf文件
+        local_conf_file = default_conf_file.replace('.conf', '.local.conf')
+        local_conf_path = os.path.join(script_dir, local_conf_file)
+        default_conf_path = os.path.join(script_dir, default_conf_file)
+        
+        # 优先使用.local.conf文件，如果不存在则使用默认配置文件
+        conf_path = local_conf_path if os.path.exists(local_conf_path) else default_conf_path
+        logger.info(f"使用配置文件: {conf_path}")
+        
         task_tmp_dir = os.path.join(config["TMP_DIR"], f"{base_name}")
         log_basename = os.path.basename(task_tmp_dir)
         log_path = os.path.join(config["LOG_DIR"], f"{log_basename}.log")

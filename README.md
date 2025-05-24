@@ -30,3 +30,14 @@ yt-dlp --cookies-from-browser firefox https://www.youtube.com/shorts/gD2iMAzW918
 yt-dlp --cookies firefox-cookie.txt https://www.youtube.com/shorts/gD2iMAzW918
 ```
 
+### 使用 yt-dlp lib
+
+``` python
+import yt_dlp
+
+url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+ydl_opts = {}
+
+with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    ydl.download([url])
+```
