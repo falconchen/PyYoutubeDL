@@ -9,6 +9,8 @@ from config_util import load_config
 import random
 import string
 import yt_dlp
+import pytz
+from datetime import datetime
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 
@@ -41,24 +43,43 @@ def versioned_static(filename):
 def random_str(length=3):
     return ''.join(random.choices(string.ascii_letters, k=length))
 
+def create_tasks(url, types):
+    """创建下载任务并返回任务ID列表
+    
+    Args:
+        url (str): 要下载的URL
+        types (list): 下载类型列表，可以是 ['video'] 或 ['audio'] 或两者都有
+        
+    Returns:
+        list: 创建的任务ID列表
+    """
+    task_ids = []
+    # 获取配置的时区
+    timezone = pytz.timezone(config["TIMEZONE"])
+    # 获取当前时间并转换为指定时区
+    current_time = datetime.now(timezone)
+    
+    for t in types:
+        # 使用时区时间格式化时间戳
+        timestamp = current_time.strftime('%Y%m%d%H%M%S') + random_str(3)
+        prefix = 'v' if t == 'video' else 'a'
+        task_id = f"{prefix}{timestamp}"
+        task_ids.append(task_id)
+        
+        filename = os.path.join(URLS_DIR, f"{task_id}.txt")
+        with open(filename, 'w') as f:
+            f.write(url)
+    
+    return task_ids
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
         url = request.form.get('url')
         types = request.form.getlist('type')
         
-        # 存储任务ID列表
-        task_ids = []
-        
-        for t in types:
-            timestamp = time.strftime('%Y%m%d%H%M%S') + random_str(3)
-            prefix = 'v' if t == 'video' else 'a'
-            task_id = f"{prefix}{timestamp}"
-            task_ids.append(task_id)
-            
-            filename = os.path.join(URLS_DIR, f"{task_id}.txt")
-            with open(filename, 'w') as f:
-                f.write(url)
+        # 使用新的辅助函数创建任务
+        task_ids = create_tasks(url, types)
         
         # 构建重定向URL，包含所有参数
         redirect_url = url_for('index', 
@@ -108,15 +129,9 @@ def api_add_task():
         # 支持表单传递的字符串类型
         types = [types]
 
-    tasks = []
-    for t in types:
-        timestamp = time.strftime('%Y%m%d%H%M%S') + random_str(3)
-        prefix = 'v' if t == 'video' else 'a'
-        filename = os.path.join(URLS_DIR, f"{prefix}{timestamp}.txt")
-        with open(filename, 'w') as f:
-            f.write(url)
-        # 只返回不带后缀的文件名
-        tasks.append(f"{prefix}{timestamp}")
+    # 使用新的辅助函数创建任务
+    tasks = create_tasks(url, types)
+    
     msg = "Task added successfully" if len(tasks) == 1 else "Tasks added successfully"
     return jsonify({"success": True, "msg": msg, "tasks": tasks})
 
