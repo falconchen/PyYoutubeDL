@@ -23,6 +23,9 @@ body {
     justify-content: center;
     align-items: center;
     padding: 20px;
+    background-color: #f0f2f5;
+    flex-direction: column;
+    padding: 2rem 0;
 }
 
 .container {
@@ -32,6 +35,13 @@ body {
     box-shadow: var(--box-shadow);
     width: 100%;
     max-width: 500px;
+    width: 90%;
+    max-width: 550px;
+    margin-bottom: 2rem;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    transition: transform 0.2s ease;
 }
 
 .header {
@@ -150,6 +160,85 @@ body {
     margin-right: 0.5em;
 }
 
+/* 任务相关样式 */
+.task-container {
+    background: white;
+    padding: 1.5rem;
+}
+
+.task-container h3 {
+    color: #1a73e8;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.task-info {
+    background: #f8f9fa;
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.task-url {
+    color: #1a73e8;
+    word-break: break-all;
+    margin-bottom: 1rem;
+    padding: 0.5rem;
+    background: #e8f0fe;
+    border-radius: 4px;
+}
+
+.task-list {
+    list-style: none;
+    padding: 0;
+}
+
+.task-list li {
+    padding: 1rem;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    transition: background-color 0.2s ease;
+}
+
+.task-list li:hover {
+    background-color: #f8f9fa;
+}
+
+.task-list li:last-child {
+    border-bottom: none;
+}
+
+.badge {
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.875rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.badge.video {
+    background-color: #e8f0fe;
+    color: #1a73e8;
+}
+
+.badge.audio {
+    background-color: #fce8e6;
+    color: #d93025;
+}
+
+.task-id {
+    font-family: monospace;
+    background: #f1f3f4;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.875rem;
+}
+
 @media (max-width: 480px) {
     .container {
         padding: 1.5em;
@@ -166,5 +255,26 @@ body {
     .checkbox-label {
         width: 100%;
         justify-content: center;
+    }
+
+    .badge span {
+        display: none;  /* 在小屏幕下隐藏文字 */
+    }
+
+    .badge {
+        padding: 0.25rem;  /* 减小内边距 */
+    }
+
+    .task-id {
+        font-size: 0.75rem;  /* 减小任务ID字体大小 */
+    }
+
+    .task-list li {
+        padding: 0.75rem;  /* 减小列表项内边距 */
+        gap: 0.5rem;  /* 减小间距 */
+    }
+
+    .task-url {
+        font-size: 0.875rem;  /* 减小URL字体大小 */
     }
 }
