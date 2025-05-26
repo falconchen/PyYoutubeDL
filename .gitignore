@@ -10,3 +10,5 @@ config.json
 test/
 logs/
 *.local.conf
+firefox-cookies.txt
+youtube-cookies.txt

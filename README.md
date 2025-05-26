@@ -41,3 +41,18 @@ ydl_opts = {}
 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
     ydl.download([url])
 ```
+
+### 自动重载
+ Flask 提供了开发模式下的自动重载功能。有两种方式可以实现：
+使用 Flask 的开发服务器：
+
+```bash
+flask --app app.py --debug
+```
+
+
+
+```bash
+export FLASK_APP=app.py && export FLASK_DEBUG=1 && flask run --host=0.0.0.0
+```
+

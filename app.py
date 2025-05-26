@@ -191,11 +191,22 @@ def api_video_info():
         return jsonify({"success": False, "msg": "Missing required parameter: url"}), 400
     
     try:
+        # 检查是否存在.local.conf文件
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        default_conf_file = 'yt-dlp.conf'
+        local_conf_file = default_conf_file.replace('.conf', '.local.conf')
+        local_conf_path = os.path.join(script_dir, local_conf_file)
+        default_conf_path = os.path.join(script_dir, default_conf_file)
+        
+        # 优先使用.local.conf文件，如果不存在则使用默认配置文件
+        conf_path = local_conf_path if os.path.exists(local_conf_path) else default_conf_path
+        
         # 配置yt-dlp选项
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'extract_flat': True,  # 不下载视频，只获取信息
+            'config_location': conf_path,  # 使用检测到的配置文件路径
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
