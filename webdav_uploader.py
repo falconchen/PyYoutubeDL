@@ -39,6 +39,11 @@ try:
         webdav = None
     else:
         logger.info("WebDAV连接成功")
+        # 测试服务器支持的方法
+        try:
+            logger.info(f"WebDAV服务器支持的方法: {webdav.get_methods()}")
+        except Exception as e:
+            logger.warning(f"无法获取服务器支持的方法: {e}")
 except Exception as e:
     logger.error(f"WebDAV连接失败: {e}")
     webdav = None
@@ -110,7 +115,18 @@ class WebDAVUploadHandler(FileSystemEventHandler):
             logger.info(f"开始上传: {file_path} -> {remote_path}，文件大小: {file_size_mb:.2f} MB")
 
             start_time = time.time()
-            webdav.upload_sync(remote_path=remote_path, local_path=file_path)
+            try:
+                # 尝试使用不同的上传方法
+                webdav.upload_sync(remote_path=remote_path, local_path=file_path)
+            except Exception as upload_error:
+                logger.error(f"标准上传方法失败，尝试备用方法: {upload_error}")
+                try:
+                    # 尝试使用PUT方法直接上传
+                    with open(file_path, 'rb') as f:
+                        webdav.put(remote_path, f.read())
+                except Exception as put_error:
+                    raise Exception(f"所有上传方法都失败: {put_error}")
+
             elapsed = time.time() - start_time
             speed = file_size_mb / elapsed if elapsed > 0 else 0
 
