@@ -14,7 +14,6 @@ from datetime import datetime
 from bark_util import bark_notify
 from config_util import load_config
 from log_util import setup_logger
-import yt_dlp
 
 # 加载配置
 config = load_config()
@@ -102,43 +101,32 @@ class DownloadHandler(FileSystemEventHandler):
         task_tmp_dir = os.path.join(config["TMP_DIR"], f"{base_name}")
         log_basename = os.path.basename(task_tmp_dir)
         log_path = os.path.join(config["LOG_DIR"], f"{log_basename}.log")
-
-        # 构造 logger
-        file_logger = logging.getLogger(f"yt-dlp-{base_name}")
-        file_logger.setLevel(logging.DEBUG)
-        file_handler = logging.FileHandler(log_path, encoding='utf-8')
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        file_handler.setFormatter(formatter)
-        file_logger.handlers = []  # 避免重复添加
-        file_logger.addHandler(file_handler)
-        file_logger.propagate = False  # 防止日志向上传播
-
-        class YTDlpLogger:
-            def debug(self, msg): file_logger.debug(msg)
-            def info(self, msg): file_logger.info(msg)
-            def warning(self, msg): file_logger.warning(msg)
-            def error(self, msg): file_logger.error(msg)
-
-        ydl_opts = {
-            'outtmpl': os.path.join(task_tmp_dir, config["YT_DLP_OUTPUT_TEMPLATE"]),
-            'logger': YTDlpLogger(),
-            'config_locations': [conf_path],
-            'verbose': True,  # 增加详细日志
-            'progress_hooks': [lambda d: file_logger.info(f"下载进度: {d.get('_percent_str', '0%')}")],
-            'quiet': False,  # 不安静模式
-            'no_warnings': False,  # 显示警告
-            'debug_printtraffic': True,  # 打印网络请求和响应
-            'extract_flat': False,  # 获取完整信息
-        }
+        cmd = [
+            'yt-dlp',
+            '--config-location', conf_path,            
+            '-o', os.path.join(task_tmp_dir, config["YT_DLP_OUTPUT_TEMPLATE"]),
+            url
+        ]
 
         try:
             os.makedirs(task_tmp_dir, exist_ok=True)
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                result = ydl.download([url])
+        except Exception as e:
+            logger.error(f"创建临时目录失败: {e}")
+            return False
+
+        try:
+            with open(log_path, 'w', encoding='utf-8') as log_file:
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+                for line in process.stdout:
+                    print(line, end='')
+                    log_file.write(line)
+                process.wait()
+                if process.returncode != 0:
+                    raise subprocess.CalledProcessError(process.returncode, cmd)
             self.move_files(task_tmp_dir)
             logger.info(f"下载完成: {url}")
             return True
-        except Exception as e:
+        except subprocess.CalledProcessError as e:
             logger.error(f"下载失败: {url}，错误信息: {e}")
             # 下载失败时删除临时目录
             if os.path.exists(task_tmp_dir):
