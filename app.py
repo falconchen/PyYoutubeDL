@@ -11,11 +11,29 @@ import string
 import yt_dlp
 import pytz
 from datetime import datetime
+import requests
+from requests.auth import HTTPBasicAuth
+from log_util import setup_logger
+import click
+from flask.cli import with_appcontext
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 
 # 加载配置
 config = load_config()
+
+# 配置日志
+logger = setup_logger(
+    name='app',
+    log_dir=config["LOG_DIR"],
+    log_file='app.log',
+    max_bytes=config["MAX_LOG_SIZE"],
+    backup_count=config["BACKUP_COUNT"],
+    timezone=config.get("TIMEZONE", "UTC")
+)
+
+# 将logger赋值给app.logger
+app.logger = logger
 
 URLS_DIR = config["URLS_DIR"]
 FILES_DIR = config["FILES_DIR"]
@@ -249,6 +267,59 @@ def api_video_info():
             "msg": f"Failed to get video info: {str(e)}"
         }), 500
 
+def get_youtube_cookie():
+    """从API获取YouTube cookie并保存到文件"""
+    try:
+        ytc_config = config.get('YTC', {})
+        api_url = ytc_config.get('API_URL')
+        auth_username = ytc_config.get('AUTH_USERNAME')
+        auth_password = ytc_config.get('AUTH_PASSWORD')
+        cookie_file = ytc_config.get('COOKIE_FILE')
+
+        if not all([api_url, auth_username, auth_password, cookie_file]):
+            app.logger.error("YTC配置不完整，请检查config.json")
+            return False
+
+        # 确保cookie文件所在目录存在
+        cookie_dir = os.path.dirname(cookie_file)
+        if cookie_dir:
+            os.makedirs(cookie_dir, exist_ok=True)
+
+        # 使用Basic认证获取cookie
+        response = requests.get(
+            api_url,
+            auth=HTTPBasicAuth(auth_username, auth_password),
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            # 写入cookie文件
+            with open(cookie_file, 'w') as f:
+                f.write(response.text)
+            app.logger.info(f"成功更新YouTube cookie文件: {cookie_file}")
+            return True
+        else:
+            app.logger.error(f"获取cookie失败，状态码: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        app.logger.error(f"获取YouTube cookie时发生错误: {str(e)}")
+        return False
+
+@app.cli.command("get-cookie")
+@with_appcontext
+def get_cookie_command():
+    """获取 YouTube cookie 的命令行工具"""
+    try:
+        if get_youtube_cookie():
+            click.echo("成功获取并更新 YouTube cookie")
+        else:
+            click.echo("获取 YouTube cookie 失败，请检查日志获取详细信息", err=True)
+    except Exception as e:
+        click.echo(f"执行过程中发生错误: {str(e)}", err=True)
+
 if __name__ == "__main__":
+    # 启动时获取cookie
+    get_youtube_cookie()
     app.run(host='0.0.0.0', debug=True)
 
