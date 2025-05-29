@@ -13,6 +13,7 @@ from bark_util import bark_notify
 import threading
 from config_util import load_config
 from log_util import setup_logger
+import requests
 
 # 加载配置
 config = load_config()
@@ -36,6 +37,16 @@ video_webdav = None
 audio_webdav = None
 video_webdav_host = None
 audio_webdav_host = None
+
+def get_webdav_methods(url, username, password):
+    try:
+        resp = requests.options(url, auth=(username, password), timeout=10)
+        allow = resp.headers.get('Allow', '')
+        return allow
+    except Exception as e:
+        logger.warning(f"OPTIONS 请求失败: {e}")
+        return None
+
 try:
     video_webdav = Client(config["VIDEO_WEBDAV_OPTIONS"])
     video_webdav_host = config["VIDEO_WEBDAV_OPTIONS"]["webdav_hostname"].split("//")[-1]
@@ -44,10 +55,15 @@ try:
         video_webdav = None
     else:
         logger.info(f"视频WebDAV连接成功，主机: {video_webdav_host}")
-        try:
-            logger.info(f"视频WebDAV服务器支持的方法: {video_webdav.get_methods()}")
-        except Exception as e:
-            logger.warning(f"无法获取视频服务器支持的方法: {e}")
+        allow_methods = get_webdav_methods(
+            config["VIDEO_WEBDAV_OPTIONS"]["webdav_hostname"],
+            config["VIDEO_WEBDAV_OPTIONS"]["webdav_login"],
+            config["VIDEO_WEBDAV_OPTIONS"]["webdav_password"]
+        )
+        if allow_methods:
+            logger.info(f"视频WebDAV服务器支持的方法: {allow_methods}")
+        else:
+            logger.warning("无法获取视频服务器支持的方法")
 except Exception as e:
     logger.error(f"视频WebDAV连接失败: {e}")
     video_webdav = None
@@ -60,10 +76,15 @@ try:
         audio_webdav = None
     else:
         logger.info(f"音频WebDAV连接成功，主机: {audio_webdav_host}")
-        try:
-            logger.info(f"音频WebDAV服务器支持的方法: {audio_webdav.get_methods()}")
-        except Exception as e:
-            logger.warning(f"无法获取音频服务器支持的方法: {e}")
+        allow_methods = get_webdav_methods(
+            config["AUDIO_WEBDAV_OPTIONS"]["webdav_hostname"],
+            config["AUDIO_WEBDAV_OPTIONS"]["webdav_login"],
+            config["AUDIO_WEBDAV_OPTIONS"]["webdav_password"]
+        )
+        if allow_methods:
+            logger.info(f"音频WebDAV服务器支持的方法: {allow_methods}")
+        else:
+            logger.warning("无法获取音频服务器支持的方法")
 except Exception as e:
     logger.error(f"音频WebDAV连接失败: {e}")
     audio_webdav = None

@@ -6,3 +6,4 @@ barkcli>=1.0.5
 barknotificator==0.2.0
 pytz>=2025.2
 psutil>=7.0.0
+requests
