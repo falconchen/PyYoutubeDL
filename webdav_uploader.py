@@ -14,6 +14,7 @@ import threading
 from config_util import load_config
 from log_util import setup_logger
 import requests
+import pytz
 
 # 加载配置
 config = load_config()
@@ -135,7 +136,9 @@ class WebDAVUploadHandler(FileSystemEventHandler):
             logger.warning(f"{category} WebDAV未连接，跳过上传 (host: {webdav_host})")
             return
 
-        today_str = datetime.now().strftime('%Y%m%d')
+        timezone_str = config.get('TIMEZONE', 'UTC')
+        tz = pytz.timezone(timezone_str)
+        today_str = datetime.now(tz).strftime('%Y%m%d')
         remote_dir = f"/{category}/{today_str}"
         remote_path = f"{remote_dir}/{os.path.basename(file_path)}"
 
