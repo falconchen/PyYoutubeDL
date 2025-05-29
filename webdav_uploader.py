@@ -31,22 +31,42 @@ logger = setup_logger(
     timezone=config.get("TIMEZONE", "UTC")
 )
 
-# 初始化WebDAV客户端
-webdav = Client(config["WEBDAV_OPTIONS"])
+# 初始化WebDAV客户端（分别为视频和音频）
+video_webdav = None
+audio_webdav = None
+video_webdav_host = None
+audio_webdav_host = None
 try:
-    if not webdav.check():
-        logger.error("WebDAV连接失败")
-        webdav = None
+    video_webdav = Client(config["VIDEO_WEBDAV_OPTIONS"])
+    video_webdav_host = config["VIDEO_WEBDAV_OPTIONS"]["webdav_hostname"].split("//")[-1]
+    if not video_webdav.check():
+        logger.error("视频WebDAV连接失败")
+        video_webdav = None
     else:
-        logger.info("WebDAV连接成功")
-        # 测试服务器支持的方法
+        logger.info(f"视频WebDAV连接成功，主机: {video_webdav_host}")
         try:
-            logger.info(f"WebDAV服务器支持的方法: {webdav.get_methods()}")
+            logger.info(f"视频WebDAV服务器支持的方法: {video_webdav.get_methods()}")
         except Exception as e:
-            logger.warning(f"无法获取服务器支持的方法: {e}")
+            logger.warning(f"无法获取视频服务器支持的方法: {e}")
 except Exception as e:
-    logger.error(f"WebDAV连接失败: {e}")
-    webdav = None
+    logger.error(f"视频WebDAV连接失败: {e}")
+    video_webdav = None
+
+try:
+    audio_webdav = Client(config["AUDIO_WEBDAV_OPTIONS"])
+    audio_webdav_host = config["AUDIO_WEBDAV_OPTIONS"]["webdav_hostname"].split("//")[-1]
+    if not audio_webdav.check():
+        logger.error("音频WebDAV连接失败")
+        audio_webdav = None
+    else:
+        logger.info(f"音频WebDAV连接成功，主机: {audio_webdav_host}")
+        try:
+            logger.info(f"音频WebDAV服务器支持的方法: {audio_webdav.get_methods()}")
+        except Exception as e:
+            logger.warning(f"无法获取音频服务器支持的方法: {e}")
+except Exception as e:
+    logger.error(f"音频WebDAV连接失败: {e}")
+    audio_webdav = None
 
 # 读取最大重试次数
 UPLOAD_MAX_RETRIES = config.get("UPLOAD_MAX_RETRIES", 3)
@@ -76,18 +96,22 @@ class WebDAVUploadHandler(FileSystemEventHandler):
             self.process_file(event.dest_path)
 
     def process_file(self, file_path):
-        if not webdav:
-            logger.warning("WebDAV未连接，跳过上传")
-            return
-
         ext = os.path.splitext(file_path)[1].lower()
         if ext in ['.mp4', '.mkv', '.webm', '.mov']:
             category = 'Video'
+            webdav_client = video_webdav
+            webdav_host = video_webdav_host
         elif ext == '.mp3':
             category = 'Audio'
+            webdav_client = audio_webdav
+            webdav_host = audio_webdav_host
         else:
             logger.info(f"文件类型不支持，跳过上传,并删除文件: {file_path}")
             os.remove(file_path)
+            return
+
+        if not webdav_client:
+            logger.warning(f"{category} WebDAV未连接，跳过上传 (host: {webdav_host})")
             return
 
         today_str = datetime.now().strftime('%Y%m%d')
@@ -95,45 +119,45 @@ class WebDAVUploadHandler(FileSystemEventHandler):
         remote_path = f"{remote_dir}/{os.path.basename(file_path)}"
 
         try:
-            if not webdav.check(remote_dir):
-                webdav.mkdir(remote_dir)
+            if not webdav_client.check(remote_dir):
+                webdav_client.mkdir(remote_dir)
 
-            if webdav.check(remote_path):
-                logger.info(f"WebDAV已存在相同文件，跳过上传，并删除文件: {remote_path}")
+            if webdav_client.check(remote_path):
+                logger.info(f"WebDAV已存在相同文件，跳过上传，并删除文件: {remote_path} | 类型: {category} | 服务器: {webdav_host}")
                 os.remove(file_path)
                 return
 
             # 上传前检查本地文件是否存在
             if not os.path.exists(file_path):
-                logger.warning(f"文件不存在，跳过上传: {file_path}")
+                logger.warning(f"文件不存在，跳过上传: {file_path} | 类型: {category} | 服务器: {webdav_host}")
                 with retry_lock:
                     retry_count.pop(file_path, None)
                 return
 
             file_size = os.path.getsize(file_path)
             file_size_mb = file_size / (1024 * 1024)
-            logger.info(f"开始上传: {file_path} -> {remote_path}，文件大小: {file_size_mb:.2f} MB")
+            logger.info(f"开始上传: {file_path} -> {remote_path}，文件大小: {file_size_mb:.2f} MB | 类型: {category} | 服务器: {webdav_host}")
 
             start_time = time.time()
             try:
                 # 尝试使用不同的上传方法
-                webdav.upload_sync(remote_path=remote_path, local_path=file_path)
+                webdav_client.upload_sync(remote_path=remote_path, local_path=file_path)
             except Exception as upload_error:
-                logger.error(f"标准上传方法失败，尝试备用方法: {upload_error}")
+                logger.error(f"标准上传方法失败，尝试备用方法: {upload_error} | 类型: {category} | 服务器: {webdav_host}")
                 try:
                     # 尝试使用PUT方法直接上传
                     with open(file_path, 'rb') as f:
-                        webdav.put(remote_path, f.read())
+                        webdav_client.put(remote_path, f.read())
                 except Exception as put_error:
                     raise Exception(f"所有上传方法都失败: {put_error}")
 
             elapsed = time.time() - start_time
             speed = file_size_mb / elapsed if elapsed > 0 else 0
 
-            logger.info(f"上传完成: {remote_path}，耗时: {elapsed:.2f} 秒，平均速度: {speed:.2f} MB/s")
+            logger.info(f"上传完成: {remote_path}，耗时: {elapsed:.2f} 秒，平均速度: {speed:.2f} MB/s | 类型: {category} | 服务器: {webdav_host}")
             bark_notify(
                 config['BARK_DEVICE_TOKEN'],
-                title=f"上传完成{file_size_mb:.2f} MB",
+                title=f"上传完成{file_size_mb:.2f} MB [{category}] [{webdav_host}]",
                 content=f"{remote_path}，耗时: {elapsed:.2f} 秒，平均速度: {speed:.2f} MB/s"
             )
 
@@ -142,18 +166,18 @@ class WebDAVUploadHandler(FileSystemEventHandler):
                 retry_count.pop(file_path, None)
 
         except Exception as e:
-            logger.error(f"上传到WebDAV失败: {file_path}，错误: {e}")
+            logger.error(f"上传到WebDAV失败: {file_path}，错误: {e} | 类型: {category} | 服务器: {webdav_host}")
             with retry_lock:
                 count = retry_count.get(file_path, 0) + 1
                 if count < UPLOAD_MAX_RETRIES:
                     retry_count[file_path] = count
-                    logger.info(f"将在{UPLOAD_RETRY_DELAY}秒后重试（第{count}次）: {file_path}")
+                    logger.info(f"将在{UPLOAD_RETRY_DELAY}秒后重试（第{count}次）: {file_path} | 类型: {category} | 服务器: {webdav_host}")
                     threading.Timer(UPLOAD_RETRY_DELAY, self.process_file, args=[file_path]).start()
                 else:
-                    logger.error(f"文件已达到最大重试次数({UPLOAD_MAX_RETRIES})，放弃上传: {file_path}")
+                    logger.error(f"文件已达到最大重试次数({UPLOAD_MAX_RETRIES})，放弃上传: {file_path} | 类型: {category} | 服务器: {webdav_host}")
                     bark_notify(
                         config['BARK_DEVICE_TOKEN'],
-                        title="上传失败",
+                        title=f"上传失败 [{category}] [{webdav_host}]",
                         content=f"文件 {os.path.basename(file_path)} 上传失败，已达到最大重试次数"
                     )
                     retry_count.pop(file_path, None)
