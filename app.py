@@ -61,6 +61,10 @@ def versioned_static(filename):
 def random_str(length=3):
     return ''.join(random.choices(string.ascii_letters, k=length))
 
+def get_current_time():
+    timezone = pytz.timezone(config["TIMEZONE"])
+    return datetime.now(timezone)
+
 def create_tasks(url, types):
     """创建下载任务并返回任务ID列表
     
@@ -72,22 +76,15 @@ def create_tasks(url, types):
         list: 创建的任务ID列表
     """
     task_ids = []
-    # 获取配置的时区
-    timezone = pytz.timezone(config["TIMEZONE"])
-    # 获取当前时间并转换为指定时区
-    current_time = datetime.now(timezone)
-    
+    current_time = get_current_time()
     for t in types:
-        # 使用时区时间格式化时间戳
         timestamp = current_time.strftime('%Y%m%d%H%M%S') + random_str(3)
         prefix = 'v' if t == 'video' else 'a'
         task_id = f"{prefix}{timestamp}"
         task_ids.append(task_id)
-        
         filename = os.path.join(URLS_DIR, f"{task_id}.txt")
         with open(filename, 'w') as f:
             f.write(url)
-    
     return task_ids
 
 @app.route('/', methods=['GET', 'POST'])
@@ -320,16 +317,18 @@ def get_cookie_command():
 
 @app.route('/api/get-cookie', methods=['GET', 'POST'])
 def api_get_cookie():
+    current_time = get_current_time()
+    time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
     success = get_youtube_cookie()
     if success:
         return app.response_class(
-            response=json.dumps({"success": True, "msg": "成功获取并更新 YouTube cookie"}, ensure_ascii=False),
+            response=json.dumps({"success": True, "msg": "成功获取并更新 YouTube cookie", "time": time_str}, ensure_ascii=False),
             status=200,
             mimetype='application/json'
         )
     else:
         return app.response_class(
-            response=json.dumps({"success": False, "msg": "获取 YouTube cookie 失败，请检查日志获取详细信息"}, ensure_ascii=False),
+            response=json.dumps({"success": False, "msg": "获取 YouTube cookie 失败，请检查日志获取详细信息", "time": time_str}, ensure_ascii=False),
             status=500,
             mimetype='application/json'
         )
