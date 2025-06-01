@@ -318,6 +318,14 @@ def get_cookie_command():
     except Exception as e:
         click.echo(f"执行过程中发生错误: {str(e)}", err=True)
 
+@app.route('/api/get-cookie', methods=['GET', 'POST'])
+def api_get_cookie():
+    success = get_youtube_cookie()
+    if success:
+        return jsonify({"success": True, "msg": "成功获取并更新 YouTube cookie"})
+    else:
+        return jsonify({"success": False, "msg": "获取 YouTube cookie 失败，请检查日志获取详细信息"}), 500
+
 if __name__ == "__main__":
     # 启动时获取cookie
     get_youtube_cookie()
