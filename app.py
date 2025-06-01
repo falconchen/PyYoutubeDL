@@ -322,9 +322,17 @@ def get_cookie_command():
 def api_get_cookie():
     success = get_youtube_cookie()
     if success:
-        return jsonify({"success": True, "msg": "成功获取并更新 YouTube cookie"})
+        return app.response_class(
+            response=json.dumps({"success": True, "msg": "成功获取并更新 YouTube cookie"}, ensure_ascii=False),
+            status=200,
+            mimetype='application/json'
+        )
     else:
-        return jsonify({"success": False, "msg": "获取 YouTube cookie 失败，请检查日志获取详细信息"}), 500
+        return app.response_class(
+            response=json.dumps({"success": False, "msg": "获取 YouTube cookie 失败，请检查日志获取详细信息"}, ensure_ascii=False),
+            status=500,
+            mimetype='application/json'
+        )
 
 if __name__ == "__main__":
     # 启动时获取cookie
