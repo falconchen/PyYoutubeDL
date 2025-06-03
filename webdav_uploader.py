@@ -51,7 +51,7 @@ def get_webdav_methods(url, username, password):
 try:
     video_webdav = Client(config["VIDEO_WEBDAV_OPTIONS"])
     video_webdav_host = config["VIDEO_WEBDAV_OPTIONS"]["webdav_hostname"].split("//")[-1]
-    if not video_webdav.check():
+    if not video_webdav.list("/"):
         logger.error("视频WebDAV连接失败")
         video_webdav = None
     else:
@@ -72,7 +72,7 @@ except Exception as e:
 try:
     audio_webdav = Client(config["AUDIO_WEBDAV_OPTIONS"])
     audio_webdav_host = config["AUDIO_WEBDAV_OPTIONS"]["webdav_hostname"].split("//")[-1]
-    if not audio_webdav.check():
+    if not audio_webdav.list("/"):
         logger.error("音频WebDAV连接失败")
         audio_webdav = None
     else:
