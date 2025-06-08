@@ -104,7 +104,7 @@ class DownloadHandler(FileSystemEventHandler):
         cmd = [
             'yt-dlp',
             '--config-location', conf_path,            
-            '-o', os.path.join(task_tmp_dir, config["YT_DLP_OUTPUT_TEMPLATE"]),
+            '-o', os.path.join(task_tmp_dir, config["YT_DLP_OUTPUT_TEMPLATE"] if mode == 'video' else config["YTA_DLP_OUTPUT_TEMPLATE"]),
             url
         ]
 
