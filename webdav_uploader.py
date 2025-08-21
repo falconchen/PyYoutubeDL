@@ -1,10 +1,7 @@
 #!/usr/bin/env python
 import os
-import sys
 import time
-import json
-import logging
-from logging.handlers import RotatingFileHandler
+import re
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from datetime import datetime
@@ -102,6 +99,35 @@ class WebDAVUploadHandler(FileSystemEventHandler):
     def __init__(self):
         super().__init__()
 
+    def sanitize_filename(self, filename):
+        """
+        清理文件名中的特殊字符，避免WebDAV上传问题
+        """
+        
+        # 移除或替换可能导致问题的字符
+        # 替换 % 为 emoji百分号
+        filename = filename.replace('%', '﹪')
+        
+        # 替换其他可能导致问题的字符
+        filename = filename.replace('\\', '_')
+        filename = filename.replace('/', '_')
+        filename = filename.replace(':', '_')
+        filename = filename.replace('*', '_')
+        filename = filename.replace('?', '_')
+        filename = filename.replace('"', '_')
+        filename = filename.replace('<', '_')
+        filename = filename.replace('>', '_')
+        filename = filename.replace('|', '_')
+        
+        # 移除控制字符
+        filename = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', filename)
+        
+        # 确保文件名不为空
+        if not filename.strip():
+            filename = "unnamed_file"
+            
+        return filename
+
     def on_created(self, event):
         if not event.is_directory and os.path.exists(event.src_path):
             logger.info(f"检测到新文件: {event.src_path}")
@@ -140,7 +166,15 @@ class WebDAVUploadHandler(FileSystemEventHandler):
         tz = pytz.timezone(timezone_str)
         today_str = datetime.now(tz).strftime('%Y%m%d')
         remote_dir = f"/{category}/{today_str}"
-        remote_path = f"{remote_dir}/{os.path.basename(file_path)}"
+        
+        # 处理文件名中的特殊字符，避免WebDAV上传问题
+        original_filename = os.path.basename(file_path)
+        safe_filename = self.sanitize_filename(original_filename)
+        remote_path = f"{remote_dir}/{safe_filename}"
+        
+        # 如果文件名被修改，记录日志
+        if original_filename != safe_filename:
+            logger.info(f"文件名已清理: '{original_filename}' -> '{safe_filename}'")
 
         try:
             if not webdav_client.check(remote_dir):
