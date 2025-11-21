@@ -75,9 +75,9 @@ class DownloadHandler(FileSystemEventHandler):
             new_filepath = downloading_path.rsplit('.', 1)[0] + new_extension
             os.rename(downloading_path, new_filepath)
             logger.info(f"任务完成，文件重命名为: {new_filepath}")
-            bark_notify(config['BARK_DEVICE_TOKEN'],
-                        title="下载完成" if result else "下载失败",
-                        content=f"{url} 下载{'完成' if result else '失败'}，文件: {os.path.basename(new_filepath)}")
+            # bark_notify(config['BARK_DEVICE_TOKEN'],
+            #             title="下载完成" if result else "下载失败",
+            #             content=f"{url} 下载{'完成' if result else '失败'}，文件: {os.path.basename(new_filepath)}")
         except Exception as e:
             logger.error(f"处理文件失败: {filepath}, 错误信息: {e}")
             bark_notify(config['BARK_DEVICE_TOKEN'],
