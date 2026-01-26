@@ -5,7 +5,7 @@ import re
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from datetime import datetime
-from webdav3.client import Client
+from requests.auth import HTTPBasicAuth
 from bark_util import bark_notify
 import threading
 from config_util import load_config
@@ -30,6 +30,58 @@ logger = setup_logger(
     timezone=config.get("TIMEZONE", "UTC")
 )
 
+class SimpleWebDAVClient:
+    def __init__(self, options):
+        self.hostname = options['webdav_hostname'].rstrip('/')
+        self.auth = HTTPBasicAuth(options['webdav_login'], options['webdav_password'])
+
+    def _get_url(self, path):
+        path = path.lstrip('/')
+        return f"{self.hostname}/{path}"
+
+    def list(self, path="/"):
+        """简单检查路径是否可访问"""
+        url = self._get_url(path)
+        try:
+            # 尝试使用 OPTIONS 或 PROPFIND (Depth 0)
+            resp = requests.options(url, auth=self.auth, timeout=10)
+            if resp.status_code < 400:
+                return [True]
+            return []
+        except:
+            return []
+
+    def check(self, path):
+        """检查文件或目录是否存在"""
+        url = self._get_url(path)
+        try:
+            resp = requests.head(url, auth=self.auth, timeout=10)
+            return resp.status_code < 400
+        except:
+            return False
+
+    def mkdir(self, path):
+        """创建目录 (MKCOL)"""
+        url = self._get_url(path)
+        try:
+            resp = requests.request('MKCOL', url, auth=self.auth, timeout=10)
+            return resp.status_code in [201, 405]
+        except:
+            return False
+
+    def upload_sync(self, remote_path, local_path):
+        """同步上传文件"""
+        url = self._get_url(remote_path)
+        with open(local_path, 'rb') as f:
+            resp = requests.put(url, data=f, auth=self.auth, timeout=300)
+        resp.raise_for_status()
+
+    def put(self, remote_path, data):
+        """直接上传数据"""
+        url = self._get_url(remote_path)
+        resp = requests.put(url, data=data, auth=self.auth, timeout=300)
+        resp.raise_for_status()
+
 # 初始化WebDAV客户端（分别为视频和音频）
 video_webdav = None
 audio_webdav = None
@@ -46,7 +98,7 @@ def get_webdav_methods(url, username, password):
         return None
 
 try:
-    video_webdav = Client(config["VIDEO_WEBDAV_OPTIONS"])
+    video_webdav = SimpleWebDAVClient(config["VIDEO_WEBDAV_OPTIONS"])
     video_webdav_host = config["VIDEO_WEBDAV_OPTIONS"]["webdav_hostname"].split("//")[-1]
     if not video_webdav.list("/"):
         logger.error("视频WebDAV连接失败")
@@ -67,7 +119,7 @@ except Exception as e:
     video_webdav = None
 
 try:
-    audio_webdav = Client(config["AUDIO_WEBDAV_OPTIONS"])
+    audio_webdav = SimpleWebDAVClient(config["AUDIO_WEBDAV_OPTIONS"])
     audio_webdav_host = config["AUDIO_WEBDAV_OPTIONS"]["webdav_hostname"].split("//")[-1]
     if not audio_webdav.list("/"):
         logger.error("音频WebDAV连接失败")
