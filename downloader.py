@@ -84,83 +84,83 @@ class DownloadHandler(FileSystemEventHandler):
                         title="下载失败",
                         content=f"{url} 下载失败，错误信息: {e}")
 
-def download(self, url, base_name, mode):
-        logger.info(f"开始下载: {url} ({mode})")
-        default_conf_file = 'yt-dlp.conf' if mode == 'video' else 'yta-dlp.conf'
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # 检查是否存在.local.conf文件
-        local_conf_file = default_conf_file.replace('.conf', '.local.conf')
-        local_conf_path = os.path.join(script_dir, local_conf_file)
-        default_conf_path = os.path.join(script_dir, default_conf_file)
-        
-        # 优先使用.local.conf文件，如果不存在则使用默认配置文件
-        conf_path = local_conf_path if os.path.exists(local_conf_path) else default_conf_path
-        logger.info(f"使用配置文件: {conf_path}")
-        
-        task_tmp_dir = os.path.join(config["TMP_DIR"], f"{base_name}")
-        log_basename = os.path.basename(task_tmp_dir)
-        log_path = os.path.join(config["LOG_DIR"], f"{log_basename}.log")
-        
-        # 核心修改：添加 --newline 和 --progress 确保进度条被捕获
-        cmd = [
-            'yt-dlp',
-            '--config-location', conf_path,
-            '--newline',           # 强制进度输出换行，以便逐行读取
-            '--progress',          # 强制显示进度条（即使在管道中运行）
-            '-o', os.path.join(task_tmp_dir, config["YT_DLP_OUTPUT_TEMPLATE"] if mode == 'video' else config["YTA_DLP_OUTPUT_TEMPLATE"]),
-            url
-        ]
+    def download(self, url, base_name, mode):
+            logger.info(f"开始下载: {url} ({mode})")
+            default_conf_file = 'yt-dlp.conf' if mode == 'video' else 'yta-dlp.conf'
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            
+            # 检查是否存在.local.conf文件
+            local_conf_file = default_conf_file.replace('.conf', '.local.conf')
+            local_conf_path = os.path.join(script_dir, local_conf_file)
+            default_conf_path = os.path.join(script_dir, default_conf_file)
+            
+            # 优先使用.local.conf文件，如果不存在则使用默认配置文件
+            conf_path = local_conf_path if os.path.exists(local_conf_path) else default_conf_path
+            logger.info(f"使用配置文件: {conf_path}")
+            
+            task_tmp_dir = os.path.join(config["TMP_DIR"], f"{base_name}")
+            log_basename = os.path.basename(task_tmp_dir)
+            log_path = os.path.join(config["LOG_DIR"], f"{log_basename}.log")
+            
+            # 核心修改：添加 --newline 和 --progress 确保进度条被捕获
+            cmd = [
+                'yt-dlp',
+                '--config-location', conf_path,
+                '--newline',           # 强制进度输出换行，以便逐行读取
+                '--progress',          # 强制显示进度条（即使在管道中运行）
+                '-o', os.path.join(task_tmp_dir, config["YT_DLP_OUTPUT_TEMPLATE"] if mode == 'video' else config["YTA_DLP_OUTPUT_TEMPLATE"]),
+                url
+            ]
 
-        try:
-            os.makedirs(task_tmp_dir, exist_ok=True)
-        except Exception as e:
-            logger.error(f"创建临时目录失败: {e}")
-            return False
+            try:
+                os.makedirs(task_tmp_dir, exist_ok=True)
+            except Exception as e:
+                logger.error(f"创建临时目录失败: {e}")
+                return False
 
-        try:
-            # buffering=1 开启行级缓存
-            with open(log_path, 'w', encoding='utf-8', buffering=1) as log_file:
-                process = subprocess.Popen(
-                    cmd, 
-                    stdout=subprocess.PIPE, 
-                    stderr=subprocess.STDOUT, 
-                    universal_newlines=True,
-                    bufsize=1  # 对应 Popen 的行缓冲
-                )
+            try:
+                # buffering=1 开启行级缓存
+                with open(log_path, 'w', encoding='utf-8', buffering=1) as log_file:
+                    process = subprocess.Popen(
+                        cmd, 
+                        stdout=subprocess.PIPE, 
+                        stderr=subprocess.STDOUT, 
+                        universal_newlines=True,
+                        bufsize=1  # 对应 Popen 的行缓冲
+                    )
+                    
+                    # 实时循环读取
+                    for line in process.stdout:
+                        # 1. 实时打印到控制台（如果终端支持，你会看到滚动进度）
+                        print(line, end='', flush=True)
+                        # 2. 实时写入日志文件
+                        log_file.write(line)
+                        # 3. 强制刷新，确保在 log 文件里能即时看到内容
+                        log_file.flush()
+                    
+                    process.wait()
+                    if process.returncode != 0:
+                        raise subprocess.CalledProcessError(process.returncode, cmd)
                 
-                # 实时循环读取
-                for line in process.stdout:
-                    # 1. 实时打印到控制台（如果终端支持，你会看到滚动进度）
-                    print(line, end='', flush=True)
-                    # 2. 实时写入日志文件
-                    log_file.write(line)
-                    # 3. 强制刷新，确保在 log 文件里能即时看到内容
-                    log_file.flush()
+                self.move_files(task_tmp_dir)
+                logger.info(f"下载完成: {url}")
+                return True
                 
-                process.wait()
-                if process.returncode != 0:
-                    raise subprocess.CalledProcessError(process.returncode, cmd)
-            
-            self.move_files(task_tmp_dir)
-            logger.info(f"下载完成: {url}")
-            return True
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"下载失败: {url}，错误信息: {e}")
-            # 下载失败时删除临时目录
-            if os.path.exists(task_tmp_dir):
-                try:
-                    import shutil
-                    shutil.rmtree(task_tmp_dir)
-                    logger.info(f"下载失败，已删除临时目录: {task_tmp_dir}")
-                except Exception as del_e:
-                    logger.error(f"下载失败，删除临时目录失败: {task_tmp_dir}, 错误信息: {del_e}")
-            
-            bark_notify(config['BARK_DEVICE_TOKEN'],
-                        title="下载失败",
-                        content=f"{url} 下载失败，错误信息: {e}")
-            return False
+            except subprocess.CalledProcessError as e:
+                logger.error(f"下载失败: {url}，错误信息: {e}")
+                # 下载失败时删除临时目录
+                if os.path.exists(task_tmp_dir):
+                    try:
+                        import shutil
+                        shutil.rmtree(task_tmp_dir)
+                        logger.info(f"下载失败，已删除临时目录: {task_tmp_dir}")
+                    except Exception as del_e:
+                        logger.error(f"下载失败，删除临时目录失败: {task_tmp_dir}, 错误信息: {del_e}")
+                
+                bark_notify(config['BARK_DEVICE_TOKEN'],
+                            title="下载失败",
+                            content=f"{url} 下载失败，错误信息: {e}")
+                return False
 
     def move_files(self, tmp_dir):
         for filename in os.listdir(tmp_dir):
