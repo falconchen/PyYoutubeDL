@@ -7,3 +7,4 @@ barknotificator==0.2.0
 pytz>=2025.2
 psutil>=7.0.0
 requests
+bgutil-ytdlp-pot-provider>=1.2.2
