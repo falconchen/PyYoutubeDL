@@ -131,12 +131,13 @@ class DownloadHandler(FileSystemEventHandler):
                     
                     # 实时循环读取
                     for line in process.stdout:
-                        # 1. 实时打印到控制台（如果终端支持，你会看到滚动进度）
-                        print(line, end='', flush=True)
-                        # 2. 实时写入日志文件
+                        stripped = line.rstrip('\n')
+                        # 1. 实时写入任务专属日志文件
                         log_file.write(line)
-                        # 3. 强制刷新，确保在 log 文件里能即时看到内容
+                        # 2. 强制刷新，确保在 log 文件里能即时看到内容
                         log_file.flush()
+                        # 3. 同时写入 logger（downloader.log），级别使用 info
+                        logger.info(stripped)
                     
                     process.wait()
                     if process.returncode != 0:
