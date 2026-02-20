@@ -335,6 +335,11 @@ def api_get_cookie():
 
 if __name__ == "__main__":
     # 启动时获取cookie
-    get_youtube_cookie()
-    app.run(host='0.0.0.0', debug=True)
+    # 仅当配置了 YTC 时才在启动时获取 cookie
+    if config.get("YTC"):
+        get_youtube_cookie()
+    app.run(
+        host=config.get("FLASK_HOST", "0.0.0.0"),
+        debug=config.get("FLASK_DEBUG", True)
+    )
 

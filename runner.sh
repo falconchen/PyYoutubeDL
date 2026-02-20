@@ -26,10 +26,10 @@ if ! command -v devil >/dev/null 2>&1; then
 fi
 
 echo "正在启动下载器..."
-nohup ./downloader.py >>logs/app.log 2>&1 &
+nohup ./downloader.py >>/dev/null 2>&1 &
 
 echo "正在启动上传器..."
-nohup ./webdav_uploader.py >>logs/app.log 2>&1 &
+nohup ./webdav_uploader.py >>/dev/null 2>&1 &
 
 
 echo "所有服务已启动完成！"
