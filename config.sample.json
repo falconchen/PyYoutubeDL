@@ -2,8 +2,39 @@
   "URLS_DIR": "./urls",
   "TMP_DIR": "./tmp",
   "FILES_DIR": "./files",
-  "LOG_DIR": "../logs",
+  "LOG_DIR": "./logs",
   "MAX_WORKERS": 4,
   "MAX_LOG_SIZE": 10485760,
-  "BACKUP_COUNT": 5
+  "BACKUP_COUNT": 5,
+  "YT_DLP_OUTPUT_TEMPLATE": "%(title.0:25)s_%(uploader.0:3)s_%(height)s.%(ext)s",
+  "YTA_DLP_OUTPUT_TEMPLATE": "%(uploader.0:3)s-%(title.0:10)s...%(title.-5:)s.%(ext)s",
+  "BARK_DEVICE_TOKEN": "your_bark_device_token",
+  "BARK_ICON_URL": "https://photo.cellmean.com/i/2025/05/22/jyxhwo-0.webp",
+  "VIDEO_WEBDAV_OPTIONS": {
+    "webdav_hostname": "https://your.webdav.host",
+    "webdav_login": "your_login",
+    "webdav_password": "your_password",
+    "webdav_root": "/dav/Youtube",
+    "webdav_timeout": 30,
+    "webdav_verbose": true
+  },
+  "AUDIO_WEBDAV_OPTIONS": {
+    "webdav_hostname": "https://your.webdav.host",
+    "webdav_login": "your_login",
+    "webdav_password": "your_password",
+    "webdav_root": "/dav/Youtube",
+    "webdav_timeout": 30,
+    "webdav_verbose": true
+  },
+  "UPLOAD_MAX_RETRIES": 3,
+  "UPLOAD_RETRY_DELAY": 60,
+  "TIMEZONE": "Asia/Shanghai",
+  "YTC": {
+    "API_URL": "http://localhost:5001/cookies/mozilla?format=text",
+    "AUTH_USERNAME": "admin",
+    "AUTH_PASSWORD": "your_password",
+    "COOKIE_FILE": "/etc/youtube-cookie.txt"
+  },
+  "FLASK_HOST": "0.0.0.0",
+  "FLASK_DEBUG": true
 }
