@@ -37,6 +37,17 @@ video_webdav_host = None
 audio_webdav_host = None
 
 def get_webdav_methods(url, username, password):
+    """
+    获取 WebDAV 服务器支持的所有 HTTP 方法。
+
+    Args:
+        url (str): 服务器 URL。
+        username (str): 登录用户名。
+        password (str): 登录密码。
+
+    Returns:
+        str: 服务器响应的 'Allow' 头信息，包含支持的方法；请求失败则返回 None。
+    """
     try:
         resp = requests.options(url, auth=(username, password), timeout=10)
         allow = resp.headers.get('Allow', '')
@@ -129,21 +140,45 @@ class WebDAVUploadHandler(FileSystemEventHandler):
         return filename
 
     def on_created(self, event):
+        """
+        当目录中创建了新文件时触发的处理函数。
+
+        Args:
+            event: 文件系统事件对象。
+        """
         if not event.is_directory and os.path.exists(event.src_path):
             logger.info(f"检测到新文件: {event.src_path}")
             self.process_file(event.src_path)
 
     def on_modified(self, event):
+        """
+        当监控的文件被修改时触发的处理函数。
+
+        Args:
+            event: 文件系统事件对象。
+        """
         if not event.is_directory and os.path.exists(event.src_path):
             logger.info(f"检测到文件修改: {event.src_path}")
             self.process_file(event.src_path)
 
     def on_moved(self, event):
+        """
+        当监控的文件被移动或重命名时触发的处理函数。
+
+        Args:
+            event: 文件系统加密事件对象。
+        """
         if not event.is_directory and os.path.exists(event.dest_path):
             logger.info(f"检测到文件重命名: {event.src_path} -> {event.dest_path}")
             self.process_file(event.dest_path)
 
     def process_file(self, file_path):
+        """
+        处理文件上传流程：判断分类、连接WebDAV、执行上传、清理本地文件
+        
+        Args:
+            file_path: 本地文件路径
+        """
         ext = os.path.splitext(file_path)[1].lower()
         if ext in ['.mp4', '.mkv', '.webm', '.mov']:
             category = 'Video'
@@ -181,8 +216,12 @@ class WebDAVUploadHandler(FileSystemEventHandler):
                 webdav_client.mkdir(remote_dir)
 
             if webdav_client.check(remote_path):
-                logger.info(f"WebDAV已存在相同文件，跳过上传，并删除文件: {remote_path} | 类型: {category} | 服务器: {webdav_host}")
-                os.remove(file_path)
+                logger.info(f"WebDAV已存在相同文件，跳过上传: {remote_path} | 类型: {category} | 服务器: {webdav_host}")
+                if config.get("DELETE_AFTER_UPLOAD", True):
+                    os.remove(file_path)
+                    logger.info(f"文件已在WebDAV端存在，已删除本地文件: {file_path}")
+                else:
+                    logger.info(f"文件已在WebDAV端存在，保留本地文件 (根据配置): {file_path}")
                 return
 
             # 上传前检查本地文件是否存在
@@ -219,7 +258,12 @@ class WebDAVUploadHandler(FileSystemEventHandler):
                 content=f"{remote_path}，耗时: {elapsed:.2f} 秒，平均速度: {speed:.2f} MB/s"
             )
 
-            os.remove(file_path)
+            if config.get("DELETE_AFTER_UPLOAD", True):
+                os.remove(file_path)
+                logger.info(f"上传成功，已删除本地文件: {file_path}")
+            else:
+                logger.info(f"上传成功，保留本地文件 (根据配置): {file_path}")
+
             with retry_lock:
                 retry_count.pop(file_path, None)
 
@@ -241,6 +285,9 @@ class WebDAVUploadHandler(FileSystemEventHandler):
                     retry_count.pop(file_path, None)
 
 def main():
+    """
+    程序主入口，初始化文件监控器并启动观察者。
+    """
     event_handler = WebDAVUploadHandler()
     observer = Observer()
     observer.schedule(event_handler, config["FILES_DIR"], recursive=False)

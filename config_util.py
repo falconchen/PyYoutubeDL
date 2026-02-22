@@ -18,6 +18,7 @@ DEFAULT_CONFIG = {
     "WEBDAV_OPTIONS": {},
     "UPLOAD_MAX_RETRIES": 3,
     "UPLOAD_RETRY_DELAY": 60,
+    "DELETE_AFTER_UPLOAD": True,
     
     # 通用配置
     "TIMEZONE": "Asia/Shanghai"

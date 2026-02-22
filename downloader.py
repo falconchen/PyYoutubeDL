@@ -38,16 +38,34 @@ class DownloadHandler(FileSystemEventHandler):
         self.executor = executor
 
     def on_created(self, event):
+        """
+        当在监控目录中创建新文件（.txt）时触发。
+
+        Args:
+            event: 文件系统事件对象。
+        """
         if not event.is_directory and event.src_path.endswith('.txt') and os.path.exists(event.src_path):
             logger.info(f"检测到新文件: {event.src_path}")
             self.executor.submit(self.process_file, event.src_path)
 
     def on_moved(self, event):
+        """
+        当在监控目录中文件发生移动或重命名（为 .txt）时触发。
+
+        Args:
+            event: 文件系统事件对象。
+        """
         if not event.is_directory and event.dest_path.endswith('.txt') and os.path.exists(event.dest_path):
             logger.info(f"检测到文件重命名为txt: {event.src_path} -> {event.dest_path}")
             self.executor.submit(self.process_file, event.dest_path)
 
     def process_file(self, filepath):
+        """
+        处理 .txt 任务文件：解析 URL、重命名任务状态、发起下载并根据结果更新状态。
+
+        Args:
+            filepath (str): 任务文件的本地路径。
+        """
         time.sleep(0.5)
         if not os.path.exists(filepath):
             logger.warning(f"文件已不存在: {filepath}")
@@ -85,7 +103,18 @@ class DownloadHandler(FileSystemEventHandler):
                         content=f"{url} 下载失败，错误信息: {e}")
 
     def download(self, url, base_name, mode):
-            logger.info(f"开始下载: {url} ({mode})")
+        """
+        使用 yt-dlp 调用外部命令行执行视频/音频下载。
+
+        Args:
+            url (str): 视频/音频的 URL。
+            base_name (str): 任务基础名称（用于日志和临时目录）。
+            mode (str): 'video' 或 'audio' 模式。
+
+        Returns:
+            bool: 下载成功返回 True，失败返回 False。
+        """
+        logger.info(f"开始下载: {url} ({mode})")
             default_conf_file = 'yt-dlp.conf' if mode == 'video' else 'yta-dlp.conf'
             script_dir = os.path.dirname(os.path.abspath(__file__))
             
@@ -164,6 +193,12 @@ class DownloadHandler(FileSystemEventHandler):
                 return False
 
     def move_files(self, tmp_dir):
+        """
+        将下载完成的文件从临时目录移动到正式的文件输出目录。
+
+        Args:
+            tmp_dir (str): 下载任务的临时目录路径。
+        """
         for filename in os.listdir(tmp_dir):
             src = os.path.join(tmp_dir, filename)
             dst = os.path.join(config["FILES_DIR"], filename)
@@ -183,6 +218,15 @@ class DownloadHandler(FileSystemEventHandler):
                 logger.error(f"删除临时目录失败: {tmp_dir}, 错误信息: {e}")
 
 def start_monitor(folder):
+    """
+    启动文件系统监控器和线程池。
+
+    Args:
+        folder (str): 要监控的目录路径。
+
+    Returns:
+        Observer: 已启动的 watchdog 观察者对象。
+    """
     executor = ThreadPoolExecutor(max_workers=config["MAX_WORKERS"])
     event_handler = DownloadHandler(executor)
     observer = Observer()
@@ -192,6 +236,9 @@ def start_monitor(folder):
     return observer
 
 def main():
+    """
+    程序主入口，监控 URLS_DIR 目录。
+    """
     observer = start_monitor(config["URLS_DIR"])
     try:
         while True:

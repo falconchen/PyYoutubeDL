@@ -50,3 +50,9 @@ with yt_dlp.YoutubeDL(ydl_opts) as ydl:
 export FLASK_APP=app.py && export FLASK_DEBUG=1 && flask run --host=0.0.0.0
 ```
 
+## 配置项说明
+
+在 `config.json` 中可以配置以下选项：
+
+- `DELETE_AFTER_UPLOAD`: 布尔值，WebDAV 上传完成后是否删除原视频，默认为 `true`。
+
