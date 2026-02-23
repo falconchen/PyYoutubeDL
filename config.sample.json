@@ -14,7 +14,7 @@
     "webdav_hostname": "https://your.webdav.host",
     "webdav_login": "your_login",
     "webdav_password": "your_password",
-    "webdav_root": "/dav/Youtube",
+    "webdav_root": "/dav/Youtube/Video",
     "webdav_timeout": 30,
     "webdav_verbose": true
   },
@@ -22,7 +22,7 @@
     "webdav_hostname": "https://your.webdav.host",
     "webdav_login": "your_login",
     "webdav_password": "your_password",
-    "webdav_root": "/dav/Youtube",
+    "webdav_root": "/dav/Youtube/Audio",
     "webdav_timeout": 30,
     "webdav_verbose": true
   },
