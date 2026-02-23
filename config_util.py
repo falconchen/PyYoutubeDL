@@ -20,6 +20,8 @@ DEFAULT_CONFIG = {
     "UPLOAD_RETRY_DELAY": 60,       # 上传失败重试间隔（秒）
     "DELETE_AFTER_UPLOAD": True,    # 上传成功后是否删除本地文件
     "FILES_EXPIRE_DAYS": 1,         # 本地文件过期时间（天），超过此时间将被清理，0表示不清理
+    "VIDEO_WEBDAV_KEEP_COUNT": 3,   # 视频 WebDAV 保留的日期目录数量
+    "AUDIO_WEBDAV_KEEP_COUNT": 5,   # 音频 WebDAV 保留的日期目录数量
     
     # 通用配置
     "TIMEZONE": "Asia/Shanghai"     # 系统使用的时区

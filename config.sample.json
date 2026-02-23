@@ -30,6 +30,8 @@
   "UPLOAD_RETRY_DELAY": 60,
   "DELETE_AFTER_UPLOAD": true,
   "FILES_EXPIRE_DAYS": 1,
+  "VIDEO_WEBDAV_KEEP_COUNT": 3,
+  "AUDIO_WEBDAV_KEEP_COUNT": 5,
   "TIMEZONE": "Asia/Shanghai",
   "YTC": {
     "API_URL": "http://localhost:5001/cookies/mozilla?format=text",

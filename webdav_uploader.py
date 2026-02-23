@@ -56,6 +56,45 @@ def get_webdav_methods(url, username, password):
         logger.warning(f"OPTIONS 请求失败: {e}")
         return None
 
+def cleanup_webdav_directories(client, keep_count, host, category):
+    """
+    清理 WebDAV 服务器上的旧日期目录
+    """
+    if not client:
+        return
+        
+    try:
+        # 获取根目录下的所有内容
+        items = client.list("/")
+        if not items:
+            return
+            
+        # 过滤出日期格式的目录 (YYYYMMDD)
+        date_dirs = []
+        for item in items:
+            # 去掉可能的末尾斜杠
+            name = item.strip('/')
+            if re.match(r'^\d{8}$', name):
+                date_dirs.append(name)
+        
+        # 按日期排序（从旧到新）
+        date_dirs.sort()
+        
+        if len(date_dirs) > keep_count:
+            to_delete = date_dirs[:-keep_count]
+            logger.info(f"[{category}] WebDAV ({host}) 发现 {len(date_dirs)} 个日期目录，保留最近 {keep_count} 个，将删除 {len(to_delete)} 个")
+            for dir_name in to_delete:
+                try:
+                    # webdav3 client.clean 用于删除文件或目录
+                    client.clean(dir_name)
+                    logger.info(f"[{category}] 已删除 WebDAV 过期目录: {dir_name}")
+                except Exception as e:
+                    logger.error(f"[{category}] 删除 WebDAV 目录失败 {dir_name}: {e}")
+        else:
+            logger.info(f"[{category}] WebDAV ({host}) 日期目录数量 ({len(date_dirs)}) 未超过保留限制 ({keep_count})")
+    except Exception as e:
+        logger.error(f"[{category}] 扫描 WebDAV 目录失败: {e}")
+
 try:
     video_webdav = Client(config["VIDEO_WEBDAV_OPTIONS"])
     video_webdav_host = config["VIDEO_WEBDAV_OPTIONS"]["webdav_hostname"].split("//")[-1]
@@ -73,6 +112,10 @@ try:
             logger.info(f"视频WebDAV服务器支持的方法: {allow_methods}")
         else:
             logger.warning("无法获取视频服务器支持的方法")
+        
+        # 清理过期目录
+        video_keep = config.get("VIDEO_WEBDAV_KEEP_COUNT", 3)
+        cleanup_webdav_directories(video_webdav, video_keep, video_webdav_host, "Video")
 except Exception as e:
     logger.error(f"视频WebDAV连接失败: {e}")
     video_webdav = None
@@ -94,6 +137,10 @@ try:
             logger.info(f"音频WebDAV服务器支持的方法: {allow_methods}")
         else:
             logger.warning("无法获取音频服务器支持的方法")
+
+        # 清理过期目录
+        audio_keep = config.get("AUDIO_WEBDAV_KEEP_COUNT", 5)
+        cleanup_webdav_directories(audio_webdav, audio_keep, audio_webdav_host, "Audio")
 except Exception as e:
     logger.error(f"音频WebDAV连接失败: {e}")
     audio_webdav = None
