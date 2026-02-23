@@ -200,7 +200,8 @@ class WebDAVUploadHandler(FileSystemEventHandler):
         timezone_str = config.get('TIMEZONE', 'UTC')
         tz = pytz.timezone(timezone_str)
         today_str = datetime.now(tz).strftime('%Y%m%d')
-        remote_dir = f"/{category}/{today_str}"
+
+        remote_dir = f"/{today_str}"
         
         # 处理文件名中的特殊字符，避免WebDAV上传问题
         original_filename = os.path.basename(file_path)
