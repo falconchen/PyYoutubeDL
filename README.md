@@ -55,4 +55,4 @@ export FLASK_APP=app.py && export FLASK_DEBUG=1 && flask run --host=0.0.0.0
 在 `config.json` 中可以配置以下选项：
 
 - `DELETE_AFTER_UPLOAD`: 布尔值，WebDAV 上传完成后是否删除原视频，默认为 `true`。
-
+- `FILES_EXPIRE_DAYS`: 整数，启动后扫描并删除创建时间超过此天数的文件（如果为 0 则不删除），默认为 `1`。

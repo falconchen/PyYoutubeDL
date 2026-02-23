@@ -284,10 +284,49 @@ class WebDAVUploadHandler(FileSystemEventHandler):
                     )
                     retry_count.pop(file_path, None)
 
+def cleanup_expired_files(directory, days):
+    """
+    扫描并清理超过指定天数的文件
+    """
+    if days <= 0:
+        return
+        
+    logger.info(f"开始扫描并清理 {directory} 中创建时间超过 {days} 天的文件")
+    now = time.time()
+    cutoff_time = now - (days * 86400)
+    
+    try:
+        count = 0
+        for filename in os.listdir(directory):
+            filepath = os.path.join(directory, filename)
+            if os.path.isfile(filepath):
+                stat_info = os.stat(filepath)
+                # 为了兼容 macOS 和 Linux，优先使用 st_birthtime（创建时间），否则使用 st_mtime（修改时间）
+                file_time = getattr(stat_info, 'st_birthtime', stat_info.st_mtime)
+                
+                if file_time < cutoff_time:
+                    try:
+                        os.remove(filepath)
+                        logger.info(f"已清理过期文件: {filepath}")
+                        count += 1
+                    except Exception as e:
+                        logger.error(f"清理文件失败 {filepath}: {e}")
+        if count > 0:
+            logger.info(f"清理完成，共删除了 {count} 个过期文件")
+        else:
+            logger.info("未发现需要清理的过期文件")
+    except Exception as e:
+        logger.error(f"扫描目录失败 {directory}: {e}")
+
 def main():
     """
     程序主入口，初始化文件监控器并启动观察者。
     """
+    # 启动前清理过期文件
+    expire_days = config.get("FILES_EXPIRE_DAYS", 1)
+    if expire_days > 0:
+        cleanup_expired_files(config["FILES_DIR"], expire_days)
+
     event_handler = WebDAVUploadHandler()
     observer = Observer()
     observer.schedule(event_handler, config["FILES_DIR"], recursive=False)
