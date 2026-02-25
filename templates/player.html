@@ -1,67 +1,121 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
-  <meta charset="UTF-8">
-  <title>视频播放器</title>
-  <link href="https://unpkg.com/video.js/dist/video-js.min.css" rel="stylesheet">
-  <style>
-    body { display: flex; padding: 20px; }
-    .player { flex: 3; margin-right: 20px; }
-    .playlist { flex: 1; }
-    .playlist a { display: block; margin-bottom: 10px; text-decoration: none; color: blue; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="{{ url_for('static', filename='images/favicon.png') }}">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
+    <title>视频播放器 - YouTube 下载器</title>
+    <link rel="stylesheet" href="{{ 'style.css' | versioned }}">
+    <link rel="stylesheet" href="{{ 'player.css' | versioned }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://unpkg.com/video.js/dist/video-js.min.css" rel="stylesheet">
 </head>
-<body>
-  <div class="player">
-    <video
-      id="video-player"
-      class="video-js vjs-default-skin"
-      controls
-      preload="auto"
-      width="800"
-      height="450"
-      data-setup='{}'
-    >
-      {% if video_files %}
-      <source src="{{ url_for('serve_file', filename=video_files[0]) }}" type="video/mp4">
-      {% endif %}
-    </video>
-  </div>
 
-  <div class="playlist">
-    {% for file in video_files %}
-      <a href="#" onclick="event.preventDefault(); playVideo('{{ url_for('serve_file', filename=file) }}')">{{ file }}</a>
-    {% endfor %}
-  </div>
+<body class="player-page">
+    <div class="container player-main-container">
+        <div class="header">
+            <h1><i class="fab fa-youtube"></i> 视频播放器</h1>
+            <p class="subtitle">播放已下载的精彩内容</p>
+        </div>
 
-  <script src="https://unpkg.com/video.js/dist/video.min.js"></script>
-  <script>
-    var player = videojs('video-player');
-    var currentIndex = 0;
-    var video_files = {{ video_files | tojson }};  // 获取服务器端传过来的文件列表
+        <div class="player-content">
+            <div class="player-section">
+                <div class="video-wrapper">
+                    <video id="video-player" class="video-js vjs-big-play-centered vjs-16-9" controls preload="auto"
+                        data-setup='{}'>
+                        {% if video_files %}
+                        <source src="{{ url_for('serve_file', filename=video_files[0]) }}" type="video/mp4">
+                        {% endif %}
+                    </video>
+                </div>
+                <div class="video-info-panel">
+                    <h2 id="current-video-title">正在播放: {{ video_files[0] if video_files else '暂无视频' }}</h2>
+                    <div class="player-controls-hint">
+                        <i class="fas fa-info-circle"></i> 视频播完后将自动播放下一条
+                    </div>
+                </div>
+            </div>
 
-    // 播放视频函数
-    function playVideo(src) {
-      player.src({ type: "video/mp4", src: src });
-      player.play();
-    }
+            <div class="playlist-section">
+                <div class="playlist-header">
+                    <h3><i class="fas fa-list"></i> 播放列表 ({{ video_files|length }})</h3>
+                </div>
+                <div class="playlist-items scrollbar-custom" id="video-list">
+                    {% for file in video_files %}
+                    <div class="playlist-item {% if loop.first %}active{% endif %}" data-filename="{{ file }}"
+                        onclick="switchVideo('{{ url_for('serve_file', filename=file) }}', '{{ file }}', this)">
+                        <div class="item-icon">
+                            <i class="fas fa-play"></i>
+                        </div>
+                        <div class="item-details">
+                            <span class="item-name" title="{{ file }}">{{ file }}</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                    {% if not video_files %}
+                    <div class="no-videos">
+                        <i class="fas fa-folder-open"></i>
+                        <p>暂无下载视频</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
 
-    // 页面加载完成后自动播放第一个视频
-    window.onload = function() {
-      if (video_files.length > 0) {
-        player.src({ type: "video/mp4", src: "{{ url_for('serve_file', filename=video_files[0]) }}" });
-        player.play();
-      }
-    };
+        <div class="footer-actions">
+            <a href="{{ url_for('index') }}" class="btn-secondary">
+                <i class="fas fa-arrow-left"></i> 返回下载页
+            </a>
+        </div>
+    </div>
 
-    // 当视频播放完后，自动播放下一个视频
-    player.on('ended', function() {
-      currentIndex++;
-      if (currentIndex < video_files.length) {
-        playVideo("{{ url_for('serve_file', filename='') }}" + video_files[currentIndex]);
-      }
-    });
+    <script src="https://unpkg.com/video.js/dist/video.min.js"></script>
+    <script>
+        var player = videojs('video-player');
+        var video_files = {{ video_files | tojson }};
+        var currentIndex = 0;
 
-  </script>
+        function switchVideo(src, filename, element) {
+            // 更新播放源
+            player.src({ type: "video/mp4", src: src });
+            player.play();
+
+            // 更新标题
+            document.getElementById('current-video-title').textContent = '正在播放: ' + filename;
+
+            // 更新列表状态
+            document.querySelectorAll('.playlist-item').forEach(item => item.classList.remove('active'));
+            if (element) {
+                element.classList.add('active');
+                // 更新当前索引
+                currentIndex = video_files.indexOf(filename);
+            }
+        }
+
+        player.on('ended', function () {
+            currentIndex++;
+            if (currentIndex < video_files.length) {
+                var nextFile = video_files[currentIndex];
+                var nextSrc = "{{ url_for('serve_file', filename='') }}" + encodeURIComponent(nextFile);
+
+                // 找到对应的 DOM 元素以便更新样式
+                var items = document.querySelectorAll('.playlist-item');
+                switchVideo(nextSrc, nextFile, items[currentIndex]);
+            }
+        });
+
+        // 辅助函数：自动滚动到当前播放项
+        function scrollToActive() {
+            var activeItem = document.querySelector('.playlist-item.active');
+            if (activeItem) {
+                activeItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+        player.on('play', scrollToActive);
+    </script>
 </body>
+
 </html>
