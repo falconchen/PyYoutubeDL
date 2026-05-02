@@ -3,6 +3,7 @@ from flask import Flask, request, render_template, redirect, url_for, send_from_
 import os
 import time
 import json
+import re
 from urllib.parse import unquote
 import hashlib
 from config_util import load_config
@@ -61,6 +62,34 @@ def versioned_static(filename):
 def random_str(length=3):
     return ''.join(random.choices(string.ascii_letters, k=length))
 
+def extract_url(text):
+    """从分享文本中提取URL
+
+    支持的格式：
+    - 直接的URL：https://example.com/video
+    - 小红书分享：... http://xhslink.com/o/AxoI91g6MgD  ...
+    - Bilibili分享：【视频标题】 https://b23.tv/Uxjn5Wc
+    - 带口令的分享文本等
+
+    Args:
+        text (str): 包含URL的原始文本
+
+    Returns:
+        str: 提取出的URL，如果未找到返回原始文本
+    """
+    if not text:
+        return text
+
+    # URL正则表达式，匹配 http/https 开头的URL
+    url_pattern = r'https?://[^\s\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]+'
+    matches = re.findall(url_pattern, text)
+
+    if matches:
+        # 返回第一个匹配的URL，并去除末尾可能的标点符号
+        return matches[0].rstrip('.,;:)]\'"。，；：）、）')
+
+    return text
+
 def get_current_time():
     timezone = pytz.timezone(config["TIMEZONE"])
     return datetime.now(timezone)
@@ -92,7 +121,10 @@ def index():
     if request.method == 'POST':
         url = request.form.get('url')
         types = request.form.getlist('type')
-        
+
+        # 从分享文本中提取URL
+        url = extract_url(url)
+
         # 使用新的辅助函数创建任务
         task_ids = create_tasks(url, types)
         
@@ -138,6 +170,10 @@ def api_add_task():
     data = request.get_json() if request.is_json else request.form
     url = data.get('url')
     types = data.get('types')
+
+    # 从分享文本中提取URL
+    url = extract_url(url)
+
     if not url or not types:
         return jsonify({"success": False, "msg": "Missing required parameters: url and types"}), 400
     if not isinstance(types, list):
@@ -201,7 +237,10 @@ def favicon():
 def api_video_info():
     data = request.get_json() if request.is_json else request.form
     url = data.get('url')
-    
+
+    # 从分享文本中提取URL
+    url = extract_url(url)
+
     if not url:
         return jsonify({"success": False, "msg": "Missing required parameter: url"}), 400
     
