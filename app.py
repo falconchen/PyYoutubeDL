@@ -259,8 +259,7 @@ def api_video_info():
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
-            'extract_flat': True,  # 不下载视频，只获取信息
-            'config_locations': [conf_path],  # 使用检测到的配置文件路径            
+            'config_locations': [conf_path],  # 使用检测到的配置文件路径
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
