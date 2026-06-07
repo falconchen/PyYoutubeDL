@@ -4,12 +4,12 @@ import os
 import time
 import json
 import re
+import subprocess
 from urllib.parse import unquote
 import hashlib
 from config_util import load_config
 import random
 import string
-import yt_dlp
 import pytz
 from datetime import datetime
 import requests
@@ -254,52 +254,62 @@ def api_video_info():
         
         # 优先使用.local.conf文件，如果不存在则使用默认配置文件
         conf_path = local_conf_path if os.path.exists(local_conf_path) else default_conf_path
-        
-        # 配置yt-dlp选项
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'config_locations': [conf_path],  # 使用检测到的配置文件路径
+        cmd = [
+            'yt-dlp',
+            '--config-location', conf_path,
+            '--dump-single-json',
+            '--no-playlist',
+            '--no-warnings',
+            url,
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        info = json.loads(result.stdout)
+
+        video_info = {
+            "success": True,
+            "title": info.get('title'),
+            "description": info.get('description'),
+            "duration": info.get('duration'),
+            "uploader": info.get('uploader'),
+            "upload_date": info.get('upload_date'),
+            "view_count": info.get('view_count'),
+            "like_count": info.get('like_count'),
+            "thumbnail": info.get('thumbnail'),
+            "formats": [{
+                "format_id": f.get('format_id'),
+                "ext": f.get('ext'),
+                "resolution": f.get('resolution'),
+                "filesize": f.get('filesize'),
+                "format_note": f.get('format_note'),
+                "vcodec": f.get('vcodec'),
+                "acodec": f.get('acodec'),
+            } for f in info.get('formats', []) if f.get('vcodec') != 'none'],
+            "audio_formats": [{
+                "format_id": f.get('format_id'),
+                "ext": f.get('ext'),
+                "filesize": f.get('filesize'),
+                "acodec": f.get('acodec'),
+            } for f in info.get('formats', []) if f.get('vcodec') == 'none'],
         }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # 获取视频信息
-            info = ydl.extract_info(url, download=False)
-            
-            # 提取需要的信息
-            video_info = {
-                "success": True,
-                "title": info.get('title'),
-                "description": info.get('description'),
-                "duration": info.get('duration'),
-                "uploader": info.get('uploader'),
-                "upload_date": info.get('upload_date'),
-                "view_count": info.get('view_count'),
-                "like_count": info.get('like_count'),
-                "thumbnail": info.get('thumbnail'),
-                "formats": [{
-                    "format_id": f.get('format_id'),
-                    "ext": f.get('ext'),
-                    "resolution": f.get('resolution'),
-                    "filesize": f.get('filesize'),
-                    "format_note": f.get('format_note'),
-                    "vcodec": f.get('vcodec'),
-                    "acodec": f.get('acodec'),
-                } for f in info.get('formats', []) if f.get('vcodec') != 'none'],
-                "audio_formats": [{
-                    "format_id": f.get('format_id'),
-                    "ext": f.get('ext'),
-                    "filesize": f.get('filesize'),
-                    "acodec": f.get('acodec'),
-                } for f in info.get('formats', []) if f.get('vcodec') == 'none'],
-            }
-            
-            return jsonify(video_info)
+
+        return jsonify(video_info)
             
     except Exception as e:
+        if isinstance(e, subprocess.CalledProcessError):
+            stderr = (e.stderr or '').strip()
+            stdout = (e.stdout or '').strip()
+            detail = stderr or stdout or str(e)
+        else:
+            detail = str(e)
         return jsonify({
             "success": False,
-            "msg": f"Failed to get video info: {str(e)}"
+            "msg": f"Failed to get video info: {detail}"
         }), 500
 
 def get_youtube_cookie():
@@ -380,4 +390,3 @@ if __name__ == "__main__":
         host=config.get("FLASK_HOST", "0.0.0.0"),
         debug=config.get("FLASK_DEBUG", True)
     )
-
