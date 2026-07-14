@@ -98,24 +98,22 @@ def cleanup_webdav_directories(client, keep_count, host, category):
 try:
     video_webdav = Client(config["VIDEO_WEBDAV_OPTIONS"])
     video_webdav_host = config["VIDEO_WEBDAV_OPTIONS"]["webdav_hostname"].split("//")[-1]
-    if not video_webdav.list("/"):
-        logger.error("视频WebDAV连接失败")
-        video_webdav = None
+    # list() 成功返回即表示目录可访问；空列表只代表当前没有子目录或文件。
+    video_webdav.list("/")
+    logger.info(f"视频WebDAV连接成功，主机: {video_webdav_host}")
+    allow_methods = get_webdav_methods(
+        config["VIDEO_WEBDAV_OPTIONS"]["webdav_hostname"],
+        config["VIDEO_WEBDAV_OPTIONS"]["webdav_login"],
+        config["VIDEO_WEBDAV_OPTIONS"]["webdav_password"]
+    )
+    if allow_methods:
+        logger.info(f"视频WebDAV服务器支持的方法: {allow_methods}")
     else:
-        logger.info(f"视频WebDAV连接成功，主机: {video_webdav_host}")
-        allow_methods = get_webdav_methods(
-            config["VIDEO_WEBDAV_OPTIONS"]["webdav_hostname"],
-            config["VIDEO_WEBDAV_OPTIONS"]["webdav_login"],
-            config["VIDEO_WEBDAV_OPTIONS"]["webdav_password"]
-        )
-        if allow_methods:
-            logger.info(f"视频WebDAV服务器支持的方法: {allow_methods}")
-        else:
-            logger.warning("无法获取视频服务器支持的方法")
-        
-        # 清理过期目录
-        video_keep = config.get("VIDEO_WEBDAV_KEEP_COUNT", 3)
-        cleanup_webdav_directories(video_webdav, video_keep, video_webdav_host, "Video")
+        logger.warning("无法获取视频服务器支持的方法")
+
+    # 清理过期目录
+    video_keep = config.get("VIDEO_WEBDAV_KEEP_COUNT", 3)
+    cleanup_webdav_directories(video_webdav, video_keep, video_webdav_host, "Video")
 except Exception as e:
     logger.error(f"视频WebDAV连接失败: {e}")
     video_webdav = None
@@ -123,24 +121,22 @@ except Exception as e:
 try:
     audio_webdav = Client(config["AUDIO_WEBDAV_OPTIONS"])
     audio_webdav_host = config["AUDIO_WEBDAV_OPTIONS"]["webdav_hostname"].split("//")[-1]
-    if not audio_webdav.list("/"):
-        logger.error("音频WebDAV连接失败")
-        audio_webdav = None
+    # 与视频目录一致，空目录不能作为连接失败的依据。
+    audio_webdav.list("/")
+    logger.info(f"音频WebDAV连接成功，主机: {audio_webdav_host}")
+    allow_methods = get_webdav_methods(
+        config["AUDIO_WEBDAV_OPTIONS"]["webdav_hostname"],
+        config["AUDIO_WEBDAV_OPTIONS"]["webdav_login"],
+        config["AUDIO_WEBDAV_OPTIONS"]["webdav_password"]
+    )
+    if allow_methods:
+        logger.info(f"音频WebDAV服务器支持的方法: {allow_methods}")
     else:
-        logger.info(f"音频WebDAV连接成功，主机: {audio_webdav_host}")
-        allow_methods = get_webdav_methods(
-            config["AUDIO_WEBDAV_OPTIONS"]["webdav_hostname"],
-            config["AUDIO_WEBDAV_OPTIONS"]["webdav_login"],
-            config["AUDIO_WEBDAV_OPTIONS"]["webdav_password"]
-        )
-        if allow_methods:
-            logger.info(f"音频WebDAV服务器支持的方法: {allow_methods}")
-        else:
-            logger.warning("无法获取音频服务器支持的方法")
+        logger.warning("无法获取音频服务器支持的方法")
 
-        # 清理过期目录
-        audio_keep = config.get("AUDIO_WEBDAV_KEEP_COUNT", 5)
-        cleanup_webdav_directories(audio_webdav, audio_keep, audio_webdav_host, "Audio")
+    # 清理过期目录
+    audio_keep = config.get("AUDIO_WEBDAV_KEEP_COUNT", 5)
+    cleanup_webdav_directories(audio_webdav, audio_keep, audio_webdav_host, "Audio")
 except Exception as e:
     logger.error(f"音频WebDAV连接失败: {e}")
     audio_webdav = None
