@@ -275,13 +275,22 @@ def api_video_info():
             check=True,
         )
         info = json.loads(result.stdout)
+        platform = info.get('extractor_key') or info.get('extractor') or '未知平台'
+        uploader = (
+            info.get('uploader')
+            or info.get('channel')
+            or info.get('creator')
+            or info.get('artist')
+            or platform
+        )
 
         video_info = {
             "success": True,
             "title": info.get('title'),
             "description": info.get('description'),
             "duration": info.get('duration'),
-            "uploader": info.get('uploader'),
+            "uploader": uploader,
+            "platform": platform,
             "upload_date": info.get('upload_date'),
             "view_count": info.get('view_count'),
             "like_count": info.get('like_count'),

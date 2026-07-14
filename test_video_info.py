@@ -59,6 +59,46 @@ class TestVideoInfoAPI(unittest.TestCase):
         self.assertLess(cmd.index('--config-location'), cmd.index('--sleep-requests'))
         self.assertEqual(cmd[-1], 'https://www.youtube.com/watch?v=test')
 
+    @patch('app.subprocess.run')
+    def test_video_info_uploader_falls_back_to_platform(self, run):
+        """作者相关字段缺失时，应显示yt-dlp识别的平台名称。"""
+        cases = [
+            (
+                {'uploader': '作者名称', 'extractor_key': 'TikTok'},
+                '作者名称',
+            ),
+            (
+                {'uploader': None, 'channel': None, 'extractor_key': 'TikTok'},
+                'TikTok',
+            ),
+            (
+                {'uploader': None, 'extractor': 'BiliBili'},
+                'BiliBili',
+            ),
+        ]
+
+        for info, expected in cases:
+            with self.subTest(expected=expected):
+                run.return_value = subprocess.CompletedProcess(
+                    args=[],
+                    returncode=0,
+                    stdout=json.dumps({
+                        'title': 'test',
+                        'formats': [],
+                        **info,
+                    }),
+                    stderr='',
+                )
+
+                response = self.app.post(
+                    '/api/video_info',
+                    json={'url': 'https://example.com/video'},
+                )
+                data = response.get_json()
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(data['uploader'], expected)
+
     def test_valid_video(self):
         """测试有效的视频URL"""
         # 使用一个已知存在的视频

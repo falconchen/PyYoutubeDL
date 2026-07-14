@@ -182,7 +182,13 @@
                     title.textContent = data.title;
 
                     // 设置上传者
-                    uploader.innerHTML = `<i class="fas fa-user"></i> ${data.uploader}`;
+                    const uploaderName = data.uploader || data.platform || '未知平台';
+                    const uploaderIcon = document.createElement('i');
+                    uploaderIcon.className = 'fas fa-user';
+                    uploader.replaceChildren(
+                        uploaderIcon,
+                        document.createTextNode(` ${uploaderName}`)
+                    );
 
                     // 设置时长
                     const minutes = Math.floor(data.duration / 60);
