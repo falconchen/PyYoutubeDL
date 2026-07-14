@@ -26,6 +26,9 @@
                     <video id="video-player" class="video-js vjs-big-play-centered vjs-16-9" controls preload="auto">
                         {% if video_files %}
                         <source src="{{ url_for('serve_file', filename=video_files[0]) }}" type="video/mp4">
+                        {% for track in subtitle_tracks.get(video_files[0], []) %}
+                        <track kind="subtitles" src="{{ track.url }}" srclang="{{ track.language }}" label="{{ track.label }}">
+                        {% endfor %}
                         {% endif %}
                     </video>
                 </div>
@@ -91,6 +94,7 @@
 
         var player = videojs('video-player');
         var video_files = {{ video_files | tojson }};
+        var subtitle_tracks = {{ subtitle_tracks | tojson }};
         var currentIndex = 0;
         var currentFilename = {{ (video_files[0] if video_files else '') | tojson }};
 
@@ -117,6 +121,7 @@
         function switchVideo(src, filename, element) {
             // 更新播放源
             player.src({ type: "video/mp4", src: src });
+            updateSubtitleTracks(filename);
             player.play();
             currentFilename = filename;
 
@@ -130,6 +135,22 @@
                 // 更新当前索引
                 currentIndex = video_files.indexOf(filename);
             }
+        }
+
+        function updateSubtitleTracks(filename) {
+            var currentTracks = player.remoteTextTracks();
+            for (var index = currentTracks.length - 1; index >= 0; index--) {
+                player.removeRemoteTextTrack(currentTracks[index]);
+            }
+
+            (subtitle_tracks[filename] || []).forEach(function (track) {
+                player.addRemoteTextTrack({
+                    kind: 'subtitles',
+                    src: track.url,
+                    srclang: track.language,
+                    label: track.label
+                }, false);
+            });
         }
 
         player.on('ended', function () {

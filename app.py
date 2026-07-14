@@ -1,12 +1,14 @@
 #!venv/bin/python
-from flask import Flask, request, render_template, redirect, url_for, send_from_directory, jsonify
+from flask import Flask, request, render_template, redirect, url_for, send_from_directory, jsonify, abort, Response
 import os
 import time
 import json
 import re
 import subprocess
+from functools import lru_cache
 from urllib.parse import unquote
 import hashlib
+from werkzeug.utils import safe_join
 from config_util import load_config
 import random
 import string
@@ -116,6 +118,90 @@ def create_tasks(url, types):
             f.write(url)
     return task_ids
 
+
+SUBTITLE_LANGUAGE_ALIASES = {
+    "chi": "zh",
+    "zho": "zh",
+    "eng": "en",
+    "jpn": "ja",
+    "kor": "ko",
+}
+
+SUBTITLE_LANGUAGE_LABELS = {
+    "zh": "中文",
+    "en": "English",
+    "ja": "日本語",
+    "ko": "한국어",
+}
+
+
+def normalize_subtitle_language(language):
+    """将 ffprobe 返回的语言代码转换为浏览器常用的 BCP 47 代码。"""
+    normalized = (language or "und").strip().lower()
+    return SUBTITLE_LANGUAGE_ALIASES.get(normalized, normalized)
+
+
+@lru_cache(maxsize=256)
+def _probe_embedded_subtitles(filepath, file_mtime_ns, file_size):
+    """读取 MP4 的内嵌字幕流；文件属性参数用于自动失效缓存。"""
+    del file_mtime_ns, file_size
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "s",
+                "-show_entries", "stream=index:stream_tags=language,title",
+                "-of", "json", filepath,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        streams = json.loads(result.stdout).get("streams", [])
+    except (FileNotFoundError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+        app.logger.warning("读取视频字幕流失败，已跳过字幕: %s (%s)", filepath, exc)
+        return ()
+
+    subtitles = []
+    for stream in streams:
+        if not isinstance(stream.get("index"), int):
+            continue
+        tags = stream.get("tags") or {}
+        language = normalize_subtitle_language(tags.get("language"))
+        base_label = tags.get("title") or SUBTITLE_LANGUAGE_LABELS.get(language, language if language != "und" else "字幕")
+        subtitles.append({
+            "stream_index": stream["index"],
+            "language": language,
+            "base_label": base_label,
+        })
+
+    totals = {}
+    for subtitle in subtitles:
+        totals[subtitle["base_label"]] = totals.get(subtitle["base_label"], 0) + 1
+
+    seen = {}
+    for subtitle in subtitles:
+        base_label = subtitle.pop("base_label")
+        seen[base_label] = seen.get(base_label, 0) + 1
+        subtitle["label"] = (
+            f"{base_label} {seen[base_label]}"
+            if totals[base_label] > 1
+            else base_label
+        )
+    return tuple(subtitles)
+
+
+def get_embedded_subtitles(filename):
+    filepath = safe_join(FILES_DIR, filename)
+    if not filepath or not os.path.isfile(filepath):
+        return []
+    stat = os.stat(filepath)
+    return [dict(subtitle) for subtitle in _probe_embedded_subtitles(
+        filepath,
+        stat.st_mtime_ns,
+        stat.st_size,
+    )]
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -167,12 +253,65 @@ def player():
     # 根据文件的最后修改时间进行降序排序（从晚到早）
     video_files.sort(key=lambda f: os.path.getmtime(os.path.join(FILES_DIR, f)), reverse=True)
 
-    return render_template('player.html', video_files=video_files)
+    subtitle_tracks = {}
+    for filename in video_files:
+        tracks = get_embedded_subtitles(filename)
+        for track in tracks:
+            track["url"] = url_for(
+                "serve_subtitle",
+                filename=filename,
+                stream_index=track["stream_index"],
+            )
+        subtitle_tracks[filename] = tracks
+
+    return render_template(
+        'player.html',
+        video_files=video_files,
+        subtitle_tracks=subtitle_tracks,
+    )
     
 @app.route('/files/<path:filename>')
 def serve_file(filename):
     decoded_filename = unquote(filename)  
     return send_from_directory(FILES_DIR, decoded_filename)
+
+
+@app.route('/subtitles/<path:filename>/<int:stream_index>.vtt')
+def serve_subtitle(filename, stream_index):
+    """将 MP4 内嵌字幕流转换为浏览器可读取的 WebVTT。"""
+    decoded_filename = unquote(filename)
+    filepath = safe_join(FILES_DIR, decoded_filename)
+    if (
+        not filepath
+        or not filepath.lower().endswith('.mp4')
+        or not os.path.isfile(filepath)
+    ):
+        abort(404)
+
+    valid_stream_indexes = {
+        track["stream_index"] for track in get_embedded_subtitles(decoded_filename)
+    }
+    if stream_index not in valid_stream_indexes:
+        abort(404)
+
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-v", "error", "-i", filepath,
+                "-map", f"0:{stream_index}", "-f", "webvtt", "pipe:1",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        app.logger.error("找不到 ffmpeg，无法转换视频字幕")
+        return Response("ffmpeg is required", status=503, content_type="text/plain; charset=utf-8")
+    except (subprocess.SubprocessError, OSError) as exc:
+        app.logger.error("转换视频字幕失败: %s (stream=%s, error=%s)", filepath, stream_index, exc)
+        return Response("subtitle conversion failed", status=500, content_type="text/plain; charset=utf-8")
+
+    return Response(result.stdout, content_type="text/vtt; charset=utf-8")
 
 @app.route('/api/add_task', methods=['POST'])
 def api_add_task():
