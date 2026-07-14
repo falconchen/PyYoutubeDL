@@ -12,6 +12,7 @@ DEFAULT_CONFIG = {
     "MAX_LOG_SIZE": 10 * 1024 * 1024, # 单个日志文件最大字节数
     "BACKUP_COUNT": 5,              # 日志备份保留数量
     "YT_DLP_OUTPUT_TEMPLATE": "%(title.0:20)s-%(id)s.%(ext)s", # yt-dlp 文件名输出模板
+    "PLAYER_FILENAME_EXCLUDE_KEYWORDS": [], # 播放器列表排除的文件名关键词
     "BARK_DEVICE_TOKEN": "",        # Bark 通知推送 Token
     
     # WebDAV上传器配置

@@ -8,6 +8,7 @@
   "BACKUP_COUNT": 5,
   "YT_DLP_OUTPUT_TEMPLATE": "%(title).60s【%(uploader,channel,creator,artist,extractor|未知平台).20s】-%(height)s.%(ext)s",
   "YTA_DLP_OUTPUT_TEMPLATE": "%(title).60s【%(uploader,channel,creator,artist,extractor|未知平台).20s】.%(ext)s",
+  "PLAYER_FILENAME_EXCLUDE_KEYWORDS": [],
   "BARK_DEVICE_TOKEN": "your_bark_device_token",
   "BARK_ICON_URL": "https://photo.cellmean.com/i/2025/05/22/jyxhwo-0.webp",
   "VIDEO_WEBDAV_OPTIONS": {

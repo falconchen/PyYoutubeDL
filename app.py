@@ -148,12 +148,21 @@ def index():
 
 @app.route('/player')
 def player():
-    # 获取 files 目录下的所有 mp4 文件
-    video_files = [f for f in os.listdir(FILES_DIR) if f.endswith('.mp4')]
+    exclude_keywords = config.get("PLAYER_FILENAME_EXCLUDE_KEYWORDS", [])
+    if not isinstance(exclude_keywords, list):
+        app.logger.warning("PLAYER_FILENAME_EXCLUDE_KEYWORDS 必须是字符串数组，已忽略无效配置")
+        exclude_keywords = []
+    exclude_keywords = [
+        keyword for keyword in exclude_keywords
+        if isinstance(keyword, str) and keyword
+    ]
 
-    # 确保 video_files 是一个有效的列表
-    if video_files is None:
-        video_files = []
+    # 获取 files 目录下的所有 mp4 文件
+    video_files = [
+        filename for filename in os.listdir(FILES_DIR)
+        if filename.endswith('.mp4')
+        and not any(keyword in filename for keyword in exclude_keywords)
+    ]
     
     # 根据文件的最后修改时间进行降序排序（从晚到早）
     video_files.sort(key=lambda f: os.path.getmtime(os.path.join(FILES_DIR, f)), reverse=True)

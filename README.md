@@ -102,6 +102,7 @@ curl -X POST http://localhost:5001/api/task_info \
 | `BACKUP_COUNT` | int | 日志文件保留数量，默认 5 |
 | `YT_DLP_OUTPUT_TEMPLATE` | string | 视频文件名模板 |
 | `YTA_DLP_OUTPUT_TEMPLATE` | string | 音频文件名模板 |
+| `PLAYER_FILENAME_EXCLUDE_KEYWORDS` | array | 播放器列表排除的文件名关键词，任一非空关键词命中即隐藏，默认 `[]` |
 | `DELETE_AFTER_UPLOAD` | bool | WebDAV 上传后是否删除本地文件 |
 | `FILES_EXPIRE_DAYS` | int | 启动时清理超过 N 天的旧文件，0 表示不清理 |
 | `VIDEO_WEBDAV_OPTIONS` | object | 视频 WebDAV 远程存储配置 |
@@ -111,6 +112,14 @@ curl -X POST http://localhost:5001/api/task_info \
 | `FLASK_HOST` | string | Flask 监听地址，默认 `0.0.0.0` |
 | `FLASK_DEBUG` | bool | Flask 调试模式 |
 | `SCHEDULED_PLAYLISTS` | array | 定时下载的播放列表配置 |
+
+播放器列表可按文件名关键词隐藏视频，例如：
+
+```json
+"PLAYER_FILENAME_EXCLUDE_KEYWORDS": ["预告", "preview", "sample"]
+```
+
+匹配区分大小写，文件名包含任一非空关键词时不会出现在 `/player` 页面；原文件不会被删除，也不影响下载和 WebDAV 上传。修改后需要重启 Web 应用以重新加载配置。
 
 ## Cookies 配置
 
