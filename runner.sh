@@ -39,6 +39,81 @@ start_service() {
     return 1
 }
 
+show_usage() {
+    echo "用法: $0 [start|stop|restart]"
+    echo "不提供参数时默认执行 restart。"
+}
+
+update_dependencies() {
+    echo "正在更新pip..."
+    if ! pip install --upgrade pip; then
+        echo "更新pip失败，已中止启动。"
+        return 1
+    fi
+
+    echo "正在更新yt-dlp..."
+    if ! pip install --upgrade yt-dlp; then
+        echo "更新yt-dlp失败，已中止启动。"
+        return 1
+    fi
+}
+
+stop_services() {
+    local restart_devil="${1:-false}"
+    local stop_args=()
+
+    if [ "$restart_devil" = "true" ]; then
+        stop_args+=(--restart-devil)
+    fi
+
+    echo "正在停止已有进程..."
+    if ! python ./stop.py "${stop_args[@]}"; then
+        echo "停止已有进程失败。"
+        return 1
+    fi
+}
+
+start_services() {
+    local services_failed=0
+
+    if ! command -v devil >/dev/null 2>&1; then
+        echo "未检测到devil命令，使用python方式启动Web应用..."
+        start_service "Web应用" "app.py" || services_failed=1
+    else
+        echo "检测到devil命令，Web应用由Devil管理。"
+    fi
+
+    start_service "下载器" "downloader.py" || services_failed=1
+    start_service "上传器" "webdav_uploader.py" || services_failed=1
+
+    if [ "$services_failed" -ne 0 ]; then
+        echo "部分服务启动失败，请根据上述原因检查配置或日志。"
+        return 1
+    fi
+
+    echo "所有服务已启动完成！"
+}
+
+if [ "$#" -gt 1 ]; then
+    show_usage
+    exit 2
+fi
+
+action="${1:-restart}"
+case "$action" in
+    start|stop|restart)
+        ;;
+    -h|--help)
+        show_usage
+        exit 0
+        ;;
+    *)
+        echo "无效操作: $action"
+        show_usage
+        exit 2
+        ;;
+esac
+
 # 检查并激活虚拟环境
 if [ -d "$SCRIPT_DIR/venv" ]; then
     # shellcheck disable=SC1091
@@ -47,31 +122,15 @@ if [ -d "$SCRIPT_DIR/venv" ]; then
 fi
 
 cd "$SCRIPT_DIR" || exit 1
-echo "正在更新pip..."
-pip install --upgrade pip
 
-echo "正在更新yt-dlp..."
-pip install --upgrade yt-dlp
-
-echo "正在停止已有进程..."
-if ! python ./stop.py --restart-devil; then
-    echo "停止已有进程失败，已中止启动。"
-    exit 1
-fi
-
-# 检查 devil 命令是否存在
-if ! command -v devil >/dev/null 2>&1; then
-    echo "未检测到devil命令，使用python方式启动Web应用..."
-    nohup ./app.py >/dev/null 2>&1 &
-fi
-
-services_failed=0
-start_service "下载器" "downloader.py" || services_failed=1
-start_service "上传器" "webdav_uploader.py" || services_failed=1
-
-if [ "$services_failed" -eq 0 ]; then
-    echo "所有服务已启动完成！"
-else
-    echo "部分服务启动失败，请根据上述原因检查配置或日志。"
-    exit 1
-fi
+case "$action" in
+    start)
+        update_dependencies && start_services
+        ;;
+    stop)
+        stop_services
+        ;;
+    restart)
+        update_dependencies && stop_services true && start_services
+        ;;
+esac

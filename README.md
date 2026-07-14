@@ -36,10 +36,13 @@ vim config.json
 ### 3. 启动
 
 ```bash
-./runner.sh
+./runner.sh start    # 只启动服务
+./runner.sh stop     # 只停止本项目的 Python 服务
+./runner.sh restart  # 先停止再启动
+./runner.sh          # 默认执行 restart
 ```
 
-脚本会自动激活虚拟环境、更新依赖、停止旧进程，然后启动 Web 应用、下载器和上传器。
+`start` 和 `restart` 会自动激活虚拟环境、更新 pip 与 yt-dlp，然后启动 Web 应用、下载器和上传器。`stop` 不更新依赖；在 Devil 环境中，单独执行 `stop` 不会重启 Devil 管理的 Web 应用，`restart` 则保持原有的 Devil 重启行为。
 
 停止本项目通过 Python 启动的 Web 应用、下载器、上传器及其子进程：
 
