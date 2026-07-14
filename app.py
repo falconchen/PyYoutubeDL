@@ -134,6 +134,11 @@ SUBTITLE_LANGUAGE_LABELS = {
     "ko": "한국어",
 }
 
+CHINESE_SUBTITLE_VARIANTS = (
+    ("zh-Hans", "简体中文"),
+    ("zh-Hant", "繁体中文"),
+)
+
 
 def normalize_subtitle_language(language):
     """将 ffprobe 返回的语言代码转换为浏览器常用的 BCP 47 代码。"""
@@ -174,6 +179,20 @@ def _probe_embedded_subtitles(filepath, file_mtime_ns, file_size):
             "language": language,
             "base_label": base_label,
         })
+
+    # MP4 的 mov_text 通常会把 zh-Hans 和 zh-Hant 都保存成 zho。
+    # yt-dlp.conf 按简体、繁体的顺序请求字幕，因此对前两个无标题的中文轨道恢复语言变体。
+    generic_chinese_subtitles = [
+        subtitle for subtitle in subtitles
+        if subtitle["language"] == "zh" and subtitle["base_label"] == "中文"
+    ]
+    if len(generic_chinese_subtitles) >= 2:
+        for subtitle, (language, label) in zip(
+            generic_chinese_subtitles,
+            CHINESE_SUBTITLE_VARIANTS,
+        ):
+            subtitle["language"] = language
+            subtitle["base_label"] = label
 
     totals = {}
     for subtitle in subtitles:

@@ -82,8 +82,8 @@ class TestPlayerPage(unittest.TestCase):
             filename = '带字幕.mp4'
             Path(files_dir, filename).touch()
             subtitles = [
-                {'stream_index': 2, 'language': 'zh', 'label': '中文 1'},
-                {'stream_index': 3, 'language': 'zh', 'label': '中文 2'},
+                {'stream_index': 2, 'language': 'zh-Hans', 'label': '简体中文'},
+                {'stream_index': 3, 'language': 'zh-Hant', 'label': '繁体中文'},
             ]
 
             with (
@@ -95,10 +95,40 @@ class TestPlayerPage(unittest.TestCase):
         html = response.get_data(as_text=True)
         self.assertEqual(response.status_code, 200)
         self.assertIn('kind="subtitles"', html)
-        self.assertIn('srclang="zh" label="中文 1"', html)
+        self.assertIn('srclang="zh-Hans" label="简体中文"', html)
+        self.assertIn('srclang="zh-Hant" label="繁体中文"', html)
         self.assertIn('/subtitles/', html)
         self.assertIn('player.addRemoteTextTrack({', html)
         self.assertIn('player.removeRemoteTextTrack(currentTracks[index]);', html)
+
+    def test_probe_distinguishes_simplified_and_traditional_chinese_tracks(self):
+        probe_result = subprocess.CompletedProcess(
+            args=['ffprobe'],
+            returncode=0,
+            stdout='''{
+                "streams": [
+                    {"index": 2, "tags": {"language": "zho"}},
+                    {"index": 3, "tags": {"language": "zho"}}
+                ]
+            }''',
+            stderr='',
+        )
+
+        app_module._probe_embedded_subtitles.cache_clear()
+        with patch('app.subprocess.run', return_value=probe_result):
+            subtitles = app_module._probe_embedded_subtitles(
+                '/tmp/video-with-chinese-subs.mp4',
+                1,
+                1,
+            )
+
+        self.assertEqual(
+            subtitles,
+            (
+                {'stream_index': 2, 'language': 'zh-Hans', 'label': '简体中文'},
+                {'stream_index': 3, 'language': 'zh-Hant', 'label': '繁体中文'},
+            ),
+        )
 
     def test_subtitle_route_converts_valid_stream_to_webvtt(self):
         with tempfile.TemporaryDirectory() as files_dir:
