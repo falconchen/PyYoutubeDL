@@ -257,6 +257,11 @@ def api_video_info():
         cmd = [
             'yt-dlp',
             '--config-location', conf_path,
+            # 视频信息查询不继承下载配置中的 -t sleep 等限速等待设置。
+            '--sleep-requests', '0',
+            '--sleep-interval', '0',
+            '--max-sleep-interval', '0',
+            '--sleep-subtitles', '0',
             '--dump-single-json',
             '--no-playlist',
             '--no-warnings',

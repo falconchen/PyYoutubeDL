@@ -1,5 +1,8 @@
 import unittest
 import json
+import subprocess
+from unittest.mock import patch
+
 from app import app
 
 class TestVideoInfoAPI(unittest.TestCase):
@@ -27,6 +30,34 @@ class TestVideoInfoAPI(unittest.TestCase):
         self.assertEqual(response.status_code, 500)
         self.assertFalse(data['success'])
         self.assertTrue('Failed to get video info' in data['msg'])
+
+    @patch('app.subprocess.run')
+    def test_video_info_disables_configured_sleep(self, run):
+        """视频信息查询应覆盖下载配置中的所有常规sleep选项。"""
+        run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps({'title': 'test', 'formats': []}),
+            stderr='',
+        )
+
+        response = self.app.post(
+            '/api/video_info',
+            json={'url': 'https://www.youtube.com/watch?v=test'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        cmd = run.call_args.args[0]
+        for option in (
+            '--sleep-requests',
+            '--sleep-interval',
+            '--max-sleep-interval',
+            '--sleep-subtitles',
+        ):
+            index = cmd.index(option)
+            self.assertEqual(cmd[index + 1], '0')
+        self.assertLess(cmd.index('--config-location'), cmd.index('--sleep-requests'))
+        self.assertEqual(cmd[-1], 'https://www.youtube.com/watch?v=test')
 
     def test_valid_video(self):
         """测试有效的视频URL"""
