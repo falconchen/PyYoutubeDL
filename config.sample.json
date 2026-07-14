@@ -6,8 +6,8 @@
   "MAX_WORKERS": 4,
   "MAX_LOG_SIZE": 10485760,
   "BACKUP_COUNT": 5,
-  "YT_DLP_OUTPUT_TEMPLATE": "%(title.0:25)s_%(uploader.0:3)s_%(height)s.%(ext)s",
-  "YTA_DLP_OUTPUT_TEMPLATE": "%(uploader.0:3)s-%(title.0:10)s...%(title.-5:)s.%(ext)s",
+  "YT_DLP_OUTPUT_TEMPLATE": "%(title).60s【%(uploader,channel,creator,artist,extractor|未知平台).20s】-%(height)s.%(ext)s",
+  "YTA_DLP_OUTPUT_TEMPLATE": "%(title).60s【%(uploader,channel,creator,artist,extractor|未知平台).20s】.%(ext)s",
   "BARK_DEVICE_TOKEN": "your_bark_device_token",
   "BARK_ICON_URL": "https://photo.cellmean.com/i/2025/05/22/jyxhwo-0.webp",
   "VIDEO_WEBDAV_OPTIONS": {
