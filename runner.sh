@@ -54,7 +54,10 @@ echo "正在更新yt-dlp..."
 pip install --upgrade yt-dlp
 
 echo "正在停止已有进程..."
-python ./stop.py
+if ! python ./stop.py --restart-devil; then
+    echo "停止已有进程失败，已中止启动。"
+    exit 1
+fi
 
 # 检查 devil 命令是否存在
 if ! command -v devil >/dev/null 2>&1; then

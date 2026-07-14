@@ -41,6 +41,14 @@ vim config.json
 
 脚本会自动激活虚拟环境、更新依赖、停止旧进程，然后启动 Web 应用、下载器和上传器。
 
+停止本项目通过 Python 启动的 Web 应用、下载器、上传器及其子进程：
+
+```bash
+python stop.py
+```
+
+停止脚本只匹配当前项目目录中的目标脚本，先正常终止进程，5 秒后仍未退出时再强制终止。`runner.sh` 会使用 `python stop.py --restart-devil`，在 Devil 环境中显式重启由 Devil 管理的 Web 应用；直接运行 `python stop.py` 不会重启 Devil。
+
 ### 4. 设为开机自启
 
 项目提供了 systemd 服务安装脚本，动态获取当前目录路径：
