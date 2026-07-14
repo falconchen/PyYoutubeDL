@@ -8,7 +8,7 @@ from datetime import datetime
 from webdav3.client import Client
 from bark_util import bark_notify
 import threading
-from config_util import load_config
+from config_util import MOVE_STAGING_PREFIX, load_config
 from log_util import setup_logger
 import requests
 import pytz
@@ -222,6 +222,11 @@ class WebDAVUploadHandler(FileSystemEventHandler):
         Args:
             file_path: 本地文件路径
         """
+        filename = os.path.basename(file_path)
+        if filename.startswith(MOVE_STAGING_PREFIX):
+            logger.debug(f"跳过尚未完成的跨文件系统移动暂存文件: {file_path}")
+            return
+
         ext = os.path.splitext(file_path)[1].lower()
         if ext in ['.mp4', '.mkv', '.webm', '.mov']:
             category = 'Video'

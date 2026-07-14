@@ -1,18 +1,20 @@
 #!/usr/bin/env python
 import os
+import errno
 import sys
 import time
 import shutil
 import subprocess
 import json
 import logging
+import tempfile
 from logging.handlers import RotatingFileHandler
 from concurrent.futures import ThreadPoolExecutor
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from datetime import datetime
 from bark_util import bark_notify
-from config_util import load_config
+from config_util import MOVE_STAGING_PREFIX, load_config
 from log_util import setup_logger
 
 # 加载配置
@@ -31,6 +33,61 @@ logger = setup_logger(
     backup_count=config["BACKUP_COUNT"],
     timezone=config.get("TIMEZONE", "UTC")
 )
+
+
+def destination_with_counter(destination, counter):
+    """为同名文件生成 `文件名 (N).扩展名` 形式的候选路径。"""
+    if counter == 0:
+        return destination
+    stem, extension = os.path.splitext(destination)
+    return f"{stem} ({counter}){extension}"
+
+
+def link_to_unique_destination(source, destination):
+    """使用硬链接原子发布文件，目标存在时自动递增文件名。"""
+    counter = 0
+    while True:
+        candidate = destination_with_counter(destination, counter)
+        try:
+            os.link(source, candidate)
+            return candidate
+        except FileExistsError:
+            counter += 1
+
+
+def move_without_overwrite(source, destination):
+    """移动文件且绝不覆盖目标；跨文件系统时先在目标目录暂存。"""
+    try:
+        final_destination = link_to_unique_destination(source, destination)
+    except OSError as exc:
+        unsupported_link_errors = {
+            errno.EXDEV,
+            errno.EPERM,
+            getattr(errno, 'ENOTSUP', errno.EOPNOTSUPP),
+            errno.EOPNOTSUPP,
+        }
+        if exc.errno not in unsupported_link_errors:
+            raise
+
+        destination_dir = os.path.dirname(destination)
+        fd, staging_path = tempfile.mkstemp(
+            prefix=MOVE_STAGING_PREFIX,
+            dir=destination_dir,
+        )
+        os.close(fd)
+        try:
+            shutil.copy2(source, staging_path)
+            final_destination = link_to_unique_destination(
+                staging_path,
+                destination,
+            )
+        finally:
+            if os.path.exists(staging_path):
+                os.remove(staging_path)
+
+    os.remove(source)
+    return final_destination
+
 
 class DownloadHandler(FileSystemEventHandler):
     def __init__(self, executor):
@@ -172,7 +229,9 @@ class DownloadHandler(FileSystemEventHandler):
                 if process.returncode != 0:
                     raise subprocess.CalledProcessError(process.returncode, cmd)
             
-            self.move_files(task_tmp_dir)
+            if not self.move_files(task_tmp_dir):
+                logger.error(f"下载产物移动失败，临时文件已保留: {task_tmp_dir}")
+                return False
             logger.info(f"下载完成: {url}")
             return True
             
@@ -199,6 +258,7 @@ class DownloadHandler(FileSystemEventHandler):
         Args:
             tmp_dir (str): 下载任务的临时目录路径。
         """
+        move_succeeded = True
         for filename in os.listdir(tmp_dir):
             src = os.path.join(tmp_dir, filename)
             dst = os.path.join(config["FILES_DIR"], filename)
@@ -206,16 +266,21 @@ class DownloadHandler(FileSystemEventHandler):
                 logger.warning(f"源文件不存在，跳过处理: {src}")
                 continue
             try:
-                shutil.move(src, dst)
-                logger.info(f"已移动文件: {src} -> {dst}")
+                final_dst = move_without_overwrite(src, dst)
+                if final_dst != dst:
+                    logger.info(f"目标文件已存在，自动重命名为: {os.path.basename(final_dst)}")
+                logger.info(f"已移动文件: {src} -> {final_dst}")
             except Exception as e:
                 logger.error(f"移动文件失败: {src}, 错误信息: {e}")
-        if os.path.exists(tmp_dir):
+                move_succeeded = False
+        if move_succeeded and os.path.exists(tmp_dir):
             try:
                 shutil.rmtree(tmp_dir)
                 logger.info(f"已删除临时目录: {tmp_dir}")
             except Exception as e:
                 logger.error(f"删除临时目录失败: {tmp_dir}, 错误信息: {e}")
+                move_succeeded = False
+        return move_succeeded
 
 def start_monitor(folder):
     """

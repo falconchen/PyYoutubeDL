@@ -1,6 +1,8 @@
 import os
 import json
 
+MOVE_STAGING_PREFIX = '.pyyoutubedl-moving-'
+
 # 默认配置
 DEFAULT_CONFIG = {
     # 下载器配置
