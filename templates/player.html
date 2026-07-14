@@ -8,9 +8,9 @@
     <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
     <title>视频播放器 - YouTube 下载器</title>
     <link rel="stylesheet" href="{{ 'style.css' | versioned }}">
-    <link rel="stylesheet" href="{{ 'player.css' | versioned }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link href="https://unpkg.com/video.js/dist/video-js.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ 'player.css' | versioned }}">
 </head>
 
 <body class="player-page">
@@ -23,8 +23,7 @@
         <div class="player-content">
             <div class="player-section">
                 <div class="video-wrapper">
-                    <video id="video-player" class="video-js vjs-big-play-centered vjs-16-9" controls preload="auto"
-                        data-setup='{}'>
+                    <video id="video-player" class="video-js vjs-big-play-centered vjs-16-9" controls preload="auto">
                         {% if video_files %}
                         <source src="{{ url_for('serve_file', filename=video_files[0]) }}" type="video/mp4">
                         {% endif %}
@@ -73,14 +72,53 @@
 
     <script src="https://unpkg.com/video.js/dist/video.min.js"></script>
     <script>
+        var Button = videojs.getComponent('Button');
+        class DownloadButton extends Button {
+            constructor(player, options) {
+                super(player, options);
+                this.addClass('vjs-download-control');
+                this.controlText('下载视频');
+            }
+
+            handleClick(event) {
+                if (event) {
+                    event.preventDefault();
+                }
+                downloadCurrentVideo();
+            }
+        }
+        videojs.registerComponent('DownloadButton', DownloadButton);
+
         var player = videojs('video-player');
         var video_files = {{ video_files | tojson }};
         var currentIndex = 0;
+        var currentFilename = {{ (video_files[0] if video_files else '') | tojson }};
+
+        player.ready(function () {
+            var controlBar = player.getChild('controlBar');
+            controlBar.addChild('DownloadButton', {}, controlBar.children().length);
+        });
+
+        function downloadCurrentVideo() {
+            var src = player.currentSrc();
+            if (!src || !currentFilename) {
+                return;
+            }
+
+            var link = document.createElement('a');
+            link.href = src;
+            link.download = currentFilename;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        }
 
         function switchVideo(src, filename, element) {
             // 更新播放源
             player.src({ type: "video/mp4", src: src });
             player.play();
+            currentFilename = filename;
 
             // 更新标题
             document.getElementById('current-video-title').textContent = '正在播放: ' + filename;

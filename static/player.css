@@ -63,6 +63,24 @@
     color: var(--primary-color);
 }
 
+/* Video.js 控制栏最后的当前视频下载按钮 */
+.video-js .vjs-download-control {
+    cursor: pointer;
+}
+
+.video-js .vjs-download-control .vjs-icon-placeholder::before {
+    content: "\f019";
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    font-family: "Font Awesome 6 Free";
+    font-size: 1.3em;
+    font-weight: 900;
+    line-height: 1;
+}
+
 /* 自定义滚动条 */
 .scrollbar-custom::-webkit-scrollbar {
     width: 6px;
