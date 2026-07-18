@@ -188,6 +188,15 @@ https://yter.cellmean.com/player
 systemctl restart pyyoutubedl.service
 ```
 
+评论数据按“域名 + 路径”隔离。客户端传给 Waline 的 `path` 形如：
+
+```txt
+yter.cellmean.com/
+yter.cellmean.com/player
+```
+
+这样可以避免不同站点都使用 `/` 时共享同一组评论。
+
 Waline 侧需要允许当前站点域名：
 
 ```dotenv

@@ -73,6 +73,7 @@ flask get-cookie
 - 修改配置时优先更新 `config.sample.json` 或文档说明，不要把本地私有配置当作默认值。
 - 首页 `templates/index.html` 和播放页 `templates/player.html` 已接入 Waline 评论，服务地址是 `https://waline.v2ai.eu.cc`。
 - 评论区默认不显示，由 `config.json` 中的 `SHOW_WALINE_ON_INDEX` 和 `SHOW_WALINE_ON_PLAYER` 分别控制。
+- Waline 客户端 `path` 使用 `window.location.hostname + window.location.pathname`，按域名和路径隔离评论，避免多个站点的 `/` 共享评论。
 - 如果修改页面评论相关代码，确认 Waline 的 `/srv/docker/waline/.env` 中 `SECURE_DOMAINS` 包含 `yter.cellmean.com`。
 
 ## 文档要求

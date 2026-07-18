@@ -185,10 +185,12 @@
         <script type="module">
             import { init } from 'https://unpkg.com/@waline/client@v3/dist/waline.js';
 
+            const walinePath = `${window.location.hostname}${window.location.pathname}`;
+
             init({
                 el: '#waline',
                 serverURL: 'https://waline.v2ai.eu.cc',
-                path: window.location.pathname,
+                path: walinePath,
                 lang: 'zh-CN',
             });
         </script>
