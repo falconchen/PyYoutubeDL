@@ -98,9 +98,11 @@
     </div>
     {% endif %}
 
-    <div class="container comment-container">
-        <div id="waline"></div>
-    </div>
+    {% if show_waline %}
+        <div class="container comment-container">
+            <div id="waline"></div>
+        </div>
+    {% endif %}
 
     <script>
     document.addEventListener('DOMContentLoaded', function() {
@@ -212,16 +214,18 @@
         }
     });
     </script>
-    <link rel="stylesheet" href="https://unpkg.com/@waline/client@v3/dist/waline.css">
-    <script type="module">
-        import { init } from 'https://unpkg.com/@waline/client@v3/dist/waline.js';
+    {% if show_waline %}
+        <link rel="stylesheet" href="https://unpkg.com/@waline/client@v3/dist/waline.css">
+        <script type="module">
+            import { init } from 'https://unpkg.com/@waline/client@v3/dist/waline.js';
 
-        init({
-            el: '#waline',
-            serverURL: 'https://waline.v2ai.eu.cc',
-            path: window.location.pathname,
-            lang: 'zh-CN',
-        });
-    </script>
+            init({
+                el: '#waline',
+                serverURL: 'https://waline.v2ai.eu.cc',
+                path: window.location.pathname,
+                lang: 'zh-CN',
+            });
+        </script>
+    {% endif %}
 </body>
 </html>

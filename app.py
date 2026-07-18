@@ -249,7 +249,8 @@ def index():
     return render_template('index.html', 
                          url=url,
                          types=types,
-                         tasks=tasks)
+                         tasks=tasks,
+                         show_waline=config.get("SHOW_WALINE_ON_INDEX", False))
 
 @app.route('/player')
 def player():
@@ -287,6 +288,7 @@ def player():
         'player.html',
         video_files=video_files,
         subtitle_tracks=subtitle_tracks,
+        show_waline=config.get("SHOW_WALINE_ON_PLAYER", False),
     )
     
 @app.route('/files/<path:filename>')

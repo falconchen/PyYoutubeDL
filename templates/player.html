@@ -38,6 +38,11 @@
                         <i class="fas fa-info-circle"></i> 视频播完后将自动播放下一条
                     </div>
                 </div>
+                {% if show_waline %}
+                    <div class="comment-container player-comment-container">
+                        <div id="waline"></div>
+                    </div>
+                {% endif %}
             </div>
 
             <div class="playlist-section">
@@ -175,6 +180,19 @@
 
         player.on('play', scrollToActive);
     </script>
+    {% if show_waline %}
+        <link rel="stylesheet" href="https://unpkg.com/@waline/client@v3/dist/waline.css">
+        <script type="module">
+            import { init } from 'https://unpkg.com/@waline/client@v3/dist/waline.js';
+
+            init({
+                el: '#waline',
+                serverURL: 'https://waline.v2ai.eu.cc',
+                path: window.location.pathname,
+                lang: 'zh-CN',
+            });
+        </script>
+    {% endif %}
 </body>
 
 </html>

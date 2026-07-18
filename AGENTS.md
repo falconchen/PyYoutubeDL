@@ -71,8 +71,9 @@ flask get-cookie
 - `test_video_info.py` 中的部分测试可能访问 YouTube，需要网络环境支持。
 - 不要把真实 cookie、密钥、Token、服务器密码等敏感信息写入文档、日志或测试数据。
 - 修改配置时优先更新 `config.sample.json` 或文档说明，不要把本地私有配置当作默认值。
-- 首页 `templates/index.html` 已接入 Waline 评论，服务地址是 `https://waline.v2ai.eu.cc`。
-- 如果修改首页评论相关代码，确认 Waline 的 `/srv/docker/waline/.env` 中 `SECURE_DOMAINS` 包含 `yter.cellmean.com`。
+- 首页 `templates/index.html` 和播放页 `templates/player.html` 已接入 Waline 评论，服务地址是 `https://waline.v2ai.eu.cc`。
+- 评论区默认不显示，由 `config.json` 中的 `SHOW_WALINE_ON_INDEX` 和 `SHOW_WALINE_ON_PLAYER` 分别控制。
+- 如果修改页面评论相关代码，确认 Waline 的 `/srv/docker/waline/.env` 中 `SECURE_DOMAINS` 包含 `yter.cellmean.com`。
 
 ## 文档要求
 

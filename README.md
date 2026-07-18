@@ -160,18 +160,32 @@ YouTube 部分视频需要登录才能下载。支持通过 yt-dlp 浏览器 coo
 
 支持将下载完成的文件自动上传到 WebDAV 远程存储，区分视频和音频不同目标路径，支持自动重试和保留最新 N 个文件。
 
-## 首页评论
+## 页面评论
 
-首页 `templates/index.html` 已接入 Waline 评论，评论服务地址：
+首页 `templates/index.html` 和播放页 `templates/player.html` 已接入 Waline 评论，评论服务地址：
 
 ```txt
 https://waline.v2ai.eu.cc
 ```
 
-公开首页地址：
+公开页面地址：
 
 ```txt
 https://yter.cellmean.com/
+https://yter.cellmean.com/player
+```
+
+评论区默认不显示。通过 `config.json` 分别控制首页和播放页：
+
+```json
+"SHOW_WALINE_ON_INDEX": false,
+"SHOW_WALINE_ON_PLAYER": false
+```
+
+需要显示时把对应项改成 `true`，然后重启服务：
+
+```bash
+systemctl restart pyyoutubedl.service
 ```
 
 Waline 侧需要允许当前站点域名：

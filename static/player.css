@@ -63,6 +63,13 @@
     color: var(--primary-color);
 }
 
+.player-comment-container {
+    width: 100%;
+    background: white;
+    padding: 0;
+    --waline-padding: 0;
+}
+
 /* Video.js 控制栏最后的当前视频下载按钮 */
 .video-js .vjs-download-control {
     cursor: pointer;
