@@ -98,6 +98,10 @@
     </div>
     {% endif %}
 
+    <div class="container comment-container">
+        <div id="waline"></div>
+    </div>
+
     <script>
     document.addEventListener('DOMContentLoaded', function() {
         // 获取所有 type 复选框
@@ -207,6 +211,17 @@
             });
         }
     });
+    </script>
+    <link rel="stylesheet" href="https://unpkg.com/@waline/client@v3/dist/waline.css">
+    <script type="module">
+        import { init } from 'https://unpkg.com/@waline/client@v3/dist/waline.js';
+
+        init({
+            el: '#waline',
+            serverURL: 'https://waline.v2ai.eu.cc',
+            path: window.location.pathname,
+            lang: 'zh-CN',
+        });
     </script>
 </body>
 </html>

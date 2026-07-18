@@ -159,6 +159,14 @@ body {
     margin-right: 0.5em;
 }
 
+.comment-container {
+    padding: 1.5rem 2rem;
+}
+
+.comment-container #waline {
+    text-align: left;
+}
+
 /* 任务相关样式 */
 .task-container {
     background: white;

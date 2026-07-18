@@ -160,6 +160,33 @@ YouTube 部分视频需要登录才能下载。支持通过 yt-dlp 浏览器 coo
 
 支持将下载完成的文件自动上传到 WebDAV 远程存储，区分视频和音频不同目标路径，支持自动重试和保留最新 N 个文件。
 
+## 首页评论
+
+首页 `templates/index.html` 已接入 Waline 评论，评论服务地址：
+
+```txt
+https://waline.v2ai.eu.cc
+```
+
+公开首页地址：
+
+```txt
+https://yter.cellmean.com/
+```
+
+Waline 侧需要允许当前站点域名：
+
+```dotenv
+SECURE_DOMAINS=...,yter.cellmean.com
+```
+
+如果评论区返回 `403 Forbidden`，优先检查 Waline 部署目录 `/srv/docker/waline/.env` 中的 `SECURE_DOMAINS` 是否包含 `yter.cellmean.com`，修改后执行：
+
+```bash
+cd /srv/docker/waline
+docker compose up -d --force-recreate
+```
+
 ## 文件结构
 
 ```
