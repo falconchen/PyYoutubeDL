@@ -109,6 +109,58 @@ class TestPlayerPage(unittest.TestCase):
             html.index('updatePlayerUrl(filename);'),
         )
 
+    def test_player_saves_and_restores_progress_per_video(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, 'first.mp4').touch()
+            Path(files_dir, 'second.mp4').touch()
+
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch('app.get_embedded_subtitles', return_value=[]),
+            ):
+                response = self.client.get('/player')
+
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "var playbackProgressPrefix = 'pyyoutubedl:playback-progress:';",
+            html,
+        )
+        self.assertIn(
+            'localStorage.setItem(\n'
+            '                    playbackProgressKey(currentFilename),',
+            html,
+        )
+        self.assertIn(
+            "player.on('loadedmetadata', restoreCurrentVideoProgress);",
+            html,
+        )
+        self.assertIn("player.on('timeupdate', function () {", html)
+        self.assertIn(
+            "player.on('pause', saveCurrentVideoProgress);",
+            html,
+        )
+        self.assertIn(
+            "window.addEventListener('beforeunload', saveCurrentVideoProgress);",
+            html,
+        )
+        self.assertIn('clearVideoProgress(currentFilename);', html)
+        self.assertIn(
+            'switchVideo(nextSrc, nextFile, items[currentIndex], false);',
+            html,
+        )
+        switch_start = html.index(
+            'function switchVideo(src, filename, element, savePrevious)'
+        )
+        source_update = html.index(
+            'player.src({ type: "video/mp4", src: src });',
+            switch_start,
+        )
+        self.assertLess(
+            html.index('saveCurrentVideoProgress();', switch_start),
+            source_update,
+        )
+
     def test_player_filters_filenames_by_configured_keywords(self):
         with tempfile.TemporaryDirectory() as files_dir:
             Path(files_dir, '保留的视频.mp4').touch()

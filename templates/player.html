@@ -102,10 +102,16 @@
         var subtitle_tracks = {{ subtitle_tracks | tojson }};
         var currentIndex = 0;
         var currentFilename = {{ (video_files[0] if video_files else '') | tojson }};
+        var playbackProgressPrefix = 'pyyoutubedl:playback-progress:';
+        var playbackEndThreshold = 3;
+        var lastProgressSaveAt = 0;
 
         player.ready(function () {
             var controlBar = player.getChild('controlBar');
             controlBar.addChild('DownloadButton', {}, controlBar.children().length);
+            if (player.readyState() >= 1) {
+                restoreCurrentVideoProgress();
+            }
         });
 
         function downloadCurrentVideo() {
@@ -129,7 +135,83 @@
             window.history.replaceState({ filename: filename }, '', url);
         }
 
-        function switchVideo(src, filename, element) {
+        function playbackProgressKey(filename) {
+            return playbackProgressPrefix + filename;
+        }
+
+        function clearVideoProgress(filename) {
+            if (!filename) {
+                return;
+            }
+
+            try {
+                localStorage.removeItem(playbackProgressKey(filename));
+            } catch (error) {
+                console.warn('无法清除播放进度', error);
+            }
+        }
+
+        function saveCurrentVideoProgress() {
+            if (!currentFilename) {
+                return;
+            }
+
+            var currentTime = player.currentTime();
+            var duration = player.duration();
+            if (!Number.isFinite(currentTime) || currentTime <= 0) {
+                return;
+            }
+
+            try {
+                if (
+                    Number.isFinite(duration)
+                    && duration > 0
+                    && duration - currentTime <= playbackEndThreshold
+                ) {
+                    localStorage.removeItem(playbackProgressKey(currentFilename));
+                    return;
+                }
+                localStorage.setItem(
+                    playbackProgressKey(currentFilename),
+                    String(currentTime)
+                );
+            } catch (error) {
+                console.warn('无法保存播放进度', error);
+            }
+        }
+
+        function restoreCurrentVideoProgress() {
+            if (!currentFilename) {
+                return;
+            }
+
+            try {
+                var savedTime = Number(
+                    localStorage.getItem(playbackProgressKey(currentFilename))
+                );
+                var duration = player.duration();
+                if (!Number.isFinite(savedTime) || savedTime <= 0) {
+                    return;
+                }
+                if (
+                    Number.isFinite(duration)
+                    && duration > 0
+                    && savedTime < duration - playbackEndThreshold
+                ) {
+                    player.currentTime(savedTime);
+                } else {
+                    clearVideoProgress(currentFilename);
+                }
+            } catch (error) {
+                console.warn('无法恢复播放进度', error);
+            }
+        }
+
+        function switchVideo(src, filename, element, savePrevious) {
+            if (savePrevious !== false) {
+                saveCurrentVideoProgress();
+            }
+
             // 更新播放源
             player.src({ type: "video/mp4", src: src });
             updateSubtitleTracks(filename);
@@ -166,6 +248,7 @@
         }
 
         player.on('ended', function () {
+            clearVideoProgress(currentFilename);
             currentIndex++;
             if (currentIndex < video_files.length) {
                 var nextFile = video_files[currentIndex];
@@ -173,9 +256,20 @@
 
                 // 找到对应的 DOM 元素以便更新样式
                 var items = document.querySelectorAll('.playlist-item');
-                switchVideo(nextSrc, nextFile, items[currentIndex]);
+                switchVideo(nextSrc, nextFile, items[currentIndex], false);
             }
         });
+
+        player.on('loadedmetadata', restoreCurrentVideoProgress);
+        player.on('timeupdate', function () {
+            var now = Date.now();
+            if (now - lastProgressSaveAt >= 2000) {
+                lastProgressSaveAt = now;
+                saveCurrentVideoProgress();
+            }
+        });
+        player.on('pause', saveCurrentVideoProgress);
+        window.addEventListener('beforeunload', saveCurrentVideoProgress);
 
         // 辅助函数：自动滚动到当前播放项
         function scrollToActive() {
