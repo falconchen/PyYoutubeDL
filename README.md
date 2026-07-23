@@ -107,6 +107,12 @@ curl -X POST http://localhost:5001/api/task_info \
 
 对于未生成 `result.json` 的旧任务，任务 API 会尝试从 downloader 的文件移动日志中恢复最终文件名；只有日志记录和本地文件都仍然存在时才会返回播放链接。
 
+### Chrome 右键下载扩展
+
+仓库中的 `chrome-extension/` 是 Manifest V3 扩展。加载后，右键点击网页链接可在“使用yter下载”二级菜单中选择“下载视频”或“下载音频”，扩展会调用 `/api/add_task` 创建对应任务。
+
+开发者模式安装、服务地址配置和验证方法见 [`chrome-extension/README.md`](chrome-extension/README.md)。
+
 ### 同名文件处理
 
 下载产物移入 `FILES_DIR` 时不会覆盖已有文件。同名文件会自动追加编号：
