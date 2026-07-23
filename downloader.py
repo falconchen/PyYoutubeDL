@@ -194,6 +194,13 @@ class DownloadHandler(FileSystemEventHandler):
             '--config-location', conf_path,
             '--newline',           # 强制进度输出换行，以便逐行读取
             '--progress',          # 强制显示进度条（即使在管道中运行）
+            '--progress-template',
+            (
+                'download:PYDL_PROGRESS|%(progress.status)s|'
+                '%(progress._percent_str)s|%(progress._downloaded_bytes_str)s|'
+                '%(progress._total_bytes_str)s|%(progress._speed_str)s|'
+                '%(progress._eta_str)s'
+            ),
             '-o', os.path.join(task_tmp_dir, config["YT_DLP_OUTPUT_TEMPLATE"] if mode == 'video' else config["YTA_DLP_OUTPUT_TEMPLATE"]),
             url
         ]

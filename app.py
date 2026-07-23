@@ -40,6 +40,22 @@ app.logger = logger
 
 URLS_DIR = config["URLS_DIR"]
 FILES_DIR = config["FILES_DIR"]
+# 兼容历史任务中曾使用过的数字随机后缀，同时限制为安全文件名字符。
+TASK_ID_PATTERN = re.compile(r'^[va][A-Za-z0-9_-]{1,127}$')
+TASK_STATE_EXTENSIONS = (
+    ('.ok', 'completed'),
+    ('.fail', 'failed'),
+    ('.downloading', 'downloading'),
+    ('.txt', 'queued'),
+)
+PROGRESS_MARKER = 'PYDL_PROGRESS|'
+ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
+DEFAULT_PROGRESS_PATTERN = re.compile(
+    r'\[download\]\s+(?P<percent>\d+(?:\.\d+)?)%'
+    r'(?:\s+of(?:\s+~)?\s+(?P<total>.+?))?'
+    r'(?:\s+at\s+(?P<speed>.+?))?'
+    r'(?:\s+ETA\s+(?P<eta>\S+))?$'
+)
 
 # 保证文件夹存在
 os.makedirs(URLS_DIR, exist_ok=True)
@@ -117,6 +133,124 @@ def create_tasks(url, types):
         with open(filename, 'w') as f:
             f.write(url)
     return task_ids
+
+
+def parse_task_progress(log_path):
+    """从任务日志末尾提取 yt-dlp 最近一次下载进度。"""
+    if not os.path.isfile(log_path):
+        return {}
+
+    try:
+        with open(log_path, 'rb') as log_file:
+            log_file.seek(0, os.SEEK_END)
+            file_size = log_file.tell()
+            log_file.seek(max(0, file_size - 128 * 1024))
+            content = log_file.read().decode('utf-8', errors='replace')
+    except OSError as exc:
+        app.logger.warning("读取任务进度日志失败: %s (%s)", log_path, exc)
+        return {}
+
+    lines = [
+        ANSI_ESCAPE_PATTERN.sub('', line).strip()
+        for line in content.splitlines()
+    ]
+    for line in reversed(lines):
+        marker_index = line.find(PROGRESS_MARKER)
+        if marker_index >= 0:
+            fields = line[marker_index + len(PROGRESS_MARKER):].split('|')
+            if len(fields) < 6:
+                continue
+            status, percent_text, downloaded, total, speed, eta = fields[:6]
+            percent_match = re.search(r'\d+(?:\.\d+)?', percent_text)
+            progress = {
+                "phase": status.strip(),
+                "downloaded": downloaded.strip(),
+                "total": total.strip(),
+                "speed": speed.strip(),
+                "eta": eta.strip(),
+            }
+            if percent_match:
+                progress["percent"] = min(100.0, float(percent_match.group()))
+            return progress
+
+        match = DEFAULT_PROGRESS_PATTERN.search(line)
+        if match:
+            progress = {
+                "phase": "downloading",
+                "percent": min(100.0, float(match.group('percent'))),
+            }
+            for key in ('total', 'speed', 'eta'):
+                value = match.group(key)
+                if value:
+                    progress[key] = value.strip()
+            return progress
+    return {}
+
+
+def get_task_info(task):
+    """读取单个任务的生命周期状态与最近下载进度。"""
+    if not isinstance(task, str) or not TASK_ID_PATTERN.fullmatch(task):
+        return {"task": task, "exists": False, "msg": "Invalid task id"}
+
+    task_path = None
+    state = None
+    for extension, candidate_state in TASK_STATE_EXTENSIONS:
+        candidate_path = os.path.join(URLS_DIR, f"{task}{extension}")
+        if os.path.isfile(candidate_path):
+            task_path = candidate_path
+            state = candidate_state
+            break
+
+    if not task_path:
+        return {
+            "task": task,
+            "exists": False,
+            "state": "missing",
+            "msg": "Task file not found",
+        }
+
+    try:
+        with open(task_path, 'r') as task_file:
+            url = task_file.read().strip()
+    except OSError as exc:
+        return {
+            "task": task,
+            "exists": False,
+            "state": "missing",
+            "msg": f"Read error: {exc}",
+        }
+
+    timestamp = task[1:15]
+    try:
+        task_time = time.strptime(timestamp, '%Y%m%d%H%M%S')
+        time_fmt = time.strftime('%Y-%m-%d %H:%M:%S', task_time)
+    except ValueError:
+        time_fmt = timestamp
+
+    progress = parse_task_progress(
+        os.path.join(config["LOG_DIR"], f"{task}.log")
+    )
+    if state == 'completed':
+        progress["percent"] = 100.0
+        progress["phase"] = "finished"
+    elif state == 'queued':
+        progress = {"percent": 0.0, "phase": "queued"}
+    elif not progress:
+        progress = {
+            "percent": 0.0,
+            "phase": "starting" if state == 'downloading' else state,
+        }
+
+    return {
+        "task": task,
+        "exists": True,
+        "type": 'video' if task[0] == 'v' else 'audio',
+        "timestamp": task[1:],
+        "time": time_fmt,
+        "url": url,
+        "state": state,
+        "progress": progress,
+    }
 
 
 SUBTITLE_LANGUAGE_ALIASES = {
@@ -363,38 +497,7 @@ def api_task_info():
         return jsonify({"success": False, "msg": "Missing required parameter: tasks"}), 400
     if not isinstance(tasks, list):
         tasks = [tasks]
-    result = []
-    for task in tasks:
-        # 直接用task作为文件名（不带后缀）
-        try:
-            if not task or len(task) < 2:
-                result.append({"task": task, "exists": False, "msg": "Invalid task id"})
-                continue
-            filename = os.path.join(URLS_DIR, f"{task}.txt")
-            if not os.path.exists(filename):
-                result.append({"task": task, "exists": False, "msg": "Task file not found"})
-                continue
-            with open(filename, 'r') as f:
-                url = f.read().strip()
-            # 解析类型和时间
-            t = 'video' if task[0] == 'v' else 'audio'
-            ts = task[1:]
-            time_str = ts[:14]  # 20240601123456
-            try:
-                task_time = time.strptime(time_str, '%Y%m%d%H%M%S')
-                time_fmt = time.strftime('%Y-%m-%d %H:%M:%S', task_time)
-            except Exception:
-                time_fmt = time_str
-            result.append({
-                "task": task,
-                "exists": True,
-                "type": t,
-                "timestamp": ts,
-                "time": time_fmt,
-                "url": url
-            })
-        except Exception as e:
-            result.append({"task": task, "exists": False, "msg": f"Parse error: {e}"})
+    result = [get_task_info(task) for task in tasks]
     return jsonify({"success": True, "tasks": result})
 
 @app.route('/favicon.ico')
