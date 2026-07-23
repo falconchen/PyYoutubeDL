@@ -89,6 +89,33 @@ def move_without_overwrite(source, destination):
     return final_destination
 
 
+def write_task_result(task_id, filenames):
+    """原子写入任务最终产物清单，供 Web 页面生成精确播放链接。"""
+    result_path = os.path.join(config["URLS_DIR"], f"{task_id}.result.json")
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            encoding='utf-8',
+            prefix=f'.{task_id}.',
+            suffix='.tmp',
+            dir=config["URLS_DIR"],
+            delete=False,
+        ) as result_file:
+            temporary_path = result_file.name
+            json.dump({"files": filenames}, result_file, ensure_ascii=False)
+            result_file.flush()
+            os.fsync(result_file.fileno())
+        os.replace(temporary_path, result_path)
+    except OSError as exc:
+        logger.warning("写入任务产物清单失败: %s (%s)", task_id, exc)
+        if temporary_path and os.path.exists(temporary_path):
+            try:
+                os.remove(temporary_path)
+            except OSError:
+                pass
+
+
 class DownloadHandler(FileSystemEventHandler):
     def __init__(self, executor):
         super().__init__()
@@ -199,7 +226,8 @@ class DownloadHandler(FileSystemEventHandler):
                 'download:PYDL_PROGRESS|%(progress.status)s|'
                 '%(progress._percent_str)s|%(progress._downloaded_bytes_str)s|'
                 '%(progress._total_bytes_str)s|%(progress._speed_str)s|'
-                '%(progress._eta_str)s'
+                '%(progress._eta_str)s|%(info.ext)s|%(info.format_id)s|'
+                '%(info.vcodec)s|%(info.acodec)s'
             ),
             '-o', os.path.join(task_tmp_dir, config["YT_DLP_OUTPUT_TEMPLATE"] if mode == 'video' else config["YTA_DLP_OUTPUT_TEMPLATE"]),
             url
@@ -236,7 +264,7 @@ class DownloadHandler(FileSystemEventHandler):
                 if process.returncode != 0:
                     raise subprocess.CalledProcessError(process.returncode, cmd)
             
-            if not self.move_files(task_tmp_dir):
+            if not self.move_files(task_tmp_dir, task_id=base_name):
                 logger.error(f"下载产物移动失败，临时文件已保留: {task_tmp_dir}")
                 return False
             logger.info(f"下载完成: {url}")
@@ -258,14 +286,16 @@ class DownloadHandler(FileSystemEventHandler):
                         content=f"{url} 下载失败，错误信息: {e}")
             return False
 
-    def move_files(self, tmp_dir):
+    def move_files(self, tmp_dir, task_id=None):
         """
         将下载完成的文件从临时目录移动到正式的文件输出目录。
 
         Args:
             tmp_dir (str): 下载任务的临时目录路径。
+            task_id (str | None): 任务 ID；提供时记录最终产物文件名。
         """
         move_succeeded = True
+        moved_filenames = []
         for filename in os.listdir(tmp_dir):
             src = os.path.join(tmp_dir, filename)
             dst = os.path.join(config["FILES_DIR"], filename)
@@ -277,6 +307,7 @@ class DownloadHandler(FileSystemEventHandler):
                 if final_dst != dst:
                     logger.info(f"目标文件已存在，自动重命名为: {os.path.basename(final_dst)}")
                 logger.info(f"已移动文件: {src} -> {final_dst}")
+                moved_filenames.append(os.path.basename(final_dst))
             except Exception as e:
                 logger.error(f"移动文件失败: {src}, 错误信息: {e}")
                 move_succeeded = False
@@ -287,6 +318,8 @@ class DownloadHandler(FileSystemEventHandler):
             except Exception as e:
                 logger.error(f"删除临时目录失败: {tmp_dir}, 错误信息: {e}")
                 move_succeeded = False
+        if move_succeeded and task_id:
+            write_task_result(task_id, moved_filenames)
         return move_succeeded
 
 def start_monitor(folder):

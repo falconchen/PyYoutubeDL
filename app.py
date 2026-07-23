@@ -1,6 +1,7 @@
 #!venv/bin/python
 from flask import Flask, request, render_template, redirect, url_for, send_from_directory, jsonify, abort, Response
 import os
+import glob
 import time
 import json
 import re
@@ -56,6 +57,9 @@ DEFAULT_PROGRESS_PATTERN = re.compile(
     r'(?:\s+at\s+(?P<speed>.+?))?'
     r'(?:\s+ETA\s+(?P<eta>\S+))?$'
 )
+SUBTITLE_EXTENSIONS = {'ass', 'lrc', 'srt', 'ssa', 'ttml', 'vtt'}
+AUDIO_EXTENSIONS = {'aac', 'flac', 'm4a', 'mp3', 'ogg', 'opus', 'wav'}
+VIDEO_EXTENSIONS = {'avi', 'flv', 'mkv', 'mov', 'mp4', 'webm'}
 
 # 保证文件夹存在
 os.makedirs(URLS_DIR, exist_ok=True)
@@ -135,6 +139,51 @@ def create_tasks(url, types):
     return task_ids
 
 
+def classify_download_stage(extension, vcodec, acodec):
+    """根据 yt-dlp 当前产物信息识别正在下载的媒体阶段。"""
+    extension = (extension or '').strip().lower()
+    vcodec = (vcodec or '').strip().lower()
+    acodec = (acodec or '').strip().lower()
+    empty_codecs = {'', 'na', 'none', 'null', 'unknown'}
+    has_video = vcodec not in empty_codecs
+    has_audio = acodec not in empty_codecs
+
+    if extension in SUBTITLE_EXTENSIONS:
+        return 'download_subtitles'
+    if has_video and not has_audio:
+        return 'download_video'
+    if has_audio and not has_video:
+        return 'download_audio'
+    if has_video and has_audio:
+        return 'download_media'
+    if extension in AUDIO_EXTENSIONS:
+        return 'download_audio'
+    if extension in VIDEO_EXTENSIONS:
+        return 'download_video'
+    return 'downloading'
+
+
+def detect_processing_stage(line):
+    """从 yt-dlp 后处理日志识别合并、嵌入字幕等阶段。"""
+    if '[EmbedSubtitle]' in line:
+        return 'embed_subtitles'
+    if '[Merger]' in line or 'Merging formats into' in line:
+        return 'merge_media'
+    if '[ExtractAudio]' in line:
+        return 'extract_audio'
+    if '[Metadata]' in line:
+        return 'write_metadata'
+    if any(marker in line for marker in (
+        '[VideoConvertor]',
+        '[VideoRemuxer]',
+        '[Fixup',
+        '[ThumbnailsConvertor]',
+        '[MoveFiles]',
+    )):
+        return 'postprocessing'
+    return None
+
+
 def parse_task_progress(log_path):
     """从任务日志末尾提取 yt-dlp 最近一次下载进度。"""
     if not os.path.isfile(log_path):
@@ -154,7 +203,11 @@ def parse_task_progress(log_path):
         ANSI_ESCAPE_PATTERN.sub('', line).strip()
         for line in content.splitlines()
     ]
+    processing_stage = None
     for line in reversed(lines):
+        if processing_stage is None:
+            processing_stage = detect_processing_stage(line)
+
         marker_index = line.find(PROGRESS_MARKER)
         if marker_index >= 0:
             fields = line[marker_index + len(PROGRESS_MARKER):].split('|')
@@ -168,7 +221,15 @@ def parse_task_progress(log_path):
                 "total": total.strip(),
                 "speed": speed.strip(),
                 "eta": eta.strip(),
+                "stage": processing_stage or 'downloading',
             }
+            if len(fields) >= 10 and processing_stage is None:
+                extension, _format_id, vcodec, acodec = fields[6:10]
+                progress["stage"] = classify_download_stage(
+                    extension,
+                    vcodec,
+                    acodec,
+                )
             if percent_match:
                 progress["percent"] = min(100.0, float(percent_match.group()))
             return progress
@@ -178,13 +239,61 @@ def parse_task_progress(log_path):
             progress = {
                 "phase": "downloading",
                 "percent": min(100.0, float(match.group('percent'))),
+                "stage": processing_stage or "downloading",
             }
             for key in ('total', 'speed', 'eta'):
                 value = match.group(key)
                 if value:
                     progress[key] = value.strip()
             return progress
+    if processing_stage:
+        return {
+            "phase": "processing",
+            "percent": 100.0,
+            "stage": processing_stage,
+        }
     return {}
+
+
+def recover_task_files_from_logs(task):
+    """从 downloader 移动日志恢复旧任务的最终产物文件名。"""
+    log_pattern = os.path.join(config["LOG_DIR"], 'downloader.log*')
+    log_paths = sorted(
+        glob.glob(log_pattern),
+        key=lambda path: os.path.getmtime(path),
+        reverse=True,
+    )
+    recovered_files = []
+    files_root = os.path.realpath(FILES_DIR)
+
+    for log_path in log_paths:
+        try:
+            with open(log_path, 'rb') as log_file:
+                log_file.seek(0, os.SEEK_END)
+                file_size = log_file.tell()
+                log_file.seek(max(0, file_size - 2 * 1024 * 1024))
+                content = log_file.read().decode('utf-8', errors='replace')
+        except OSError:
+            continue
+
+        for line in reversed(content.splitlines()):
+            if task not in line or '已移动文件:' not in line or ' -> ' not in line:
+                continue
+            destination = line.rsplit(' -> ', 1)[1].strip()
+            destination_realpath = os.path.realpath(destination)
+            try:
+                inside_files_dir = (
+                    os.path.commonpath([files_root, destination_realpath])
+                    == files_root
+                )
+            except ValueError:
+                inside_files_dir = False
+            if not inside_files_dir or not os.path.isfile(destination_realpath):
+                continue
+            filename = os.path.basename(destination_realpath)
+            if filename not in recovered_files:
+                recovered_files.append(filename)
+    return recovered_files
 
 
 def get_task_info(task):
@@ -233,15 +342,23 @@ def get_task_info(task):
     if state == 'completed':
         progress["percent"] = 100.0
         progress["phase"] = "finished"
+        progress["stage"] = "completed"
     elif state == 'queued':
-        progress = {"percent": 0.0, "phase": "queued"}
+        progress = {
+            "percent": 0.0,
+            "phase": "queued",
+            "stage": "queued",
+        }
+    elif state == 'failed':
+        progress["stage"] = "failed"
     elif not progress:
         progress = {
             "percent": 0.0,
             "phase": "starting" if state == 'downloading' else state,
+            "stage": "starting" if state == 'downloading' else state,
         }
 
-    return {
+    task_info = {
         "task": task,
         "exists": True,
         "type": 'video' if task[0] == 'v' else 'audio',
@@ -251,6 +368,41 @@ def get_task_info(task):
         "state": state,
         "progress": progress,
     }
+    if state == 'completed':
+        result_path = os.path.join(URLS_DIR, f"{task}.result.json")
+        try:
+            with open(result_path, 'r') as result_file:
+                result_data = json.load(result_file)
+        except (OSError, json.JSONDecodeError):
+            result_data = {}
+
+        result_files = result_data.get("files", [])
+        if not result_files:
+            result_files = recover_task_files_from_logs(task)
+
+        available_files = []
+        for filename in result_files:
+            if not isinstance(filename, str):
+                continue
+            filepath = safe_join(FILES_DIR, filename)
+            if filepath and os.path.isfile(filepath):
+                available_files.append(filename)
+
+        task_info["files"] = available_files
+        video_filename = next(
+            (
+                filename for filename in available_files
+                if filename.lower().endswith('.mp4')
+            ),
+            None,
+        )
+        if video_filename:
+            task_info["player_url"] = url_for(
+                'player',
+                file=video_filename,
+            )
+
+    return task_info
 
 
 SUBTITLE_LANGUAGE_ALIASES = {
@@ -406,6 +558,11 @@ def player():
     
     # 根据文件的最后修改时间进行降序排序（从晚到早）
     video_files.sort(key=lambda f: os.path.getmtime(os.path.join(FILES_DIR, f)), reverse=True)
+
+    requested_file = request.args.get('file', '')
+    if requested_file in video_files:
+        video_files.remove(requested_file)
+        video_files.insert(0, requested_file)
 
     subtitle_tracks = {}
     for filename in video_files:

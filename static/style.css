@@ -281,9 +281,18 @@ body {
     gap: 0.75rem;
 }
 
+.progress-stage {
+    flex-shrink: 0;
+    min-width: 4.8rem;
+    color: #1a73e8;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
 .progress-track {
     height: 9px;
     flex: 1;
+    min-width: 50px;
     overflow: hidden;
     border-radius: 999px;
     background: #e3e6e8;
@@ -309,6 +318,30 @@ body {
     min-height: 1.2em;
     color: #5f6368;
     font-size: 0.8rem;
+}
+
+.task-player-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-shrink: 0;
+    padding: 0.3rem 0.65rem;
+    border-radius: 999px;
+    background: #188038;
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-decoration: none;
+    line-height: 1;
+    transition: background-color 0.2s ease;
+}
+
+.task-player-link:hover {
+    background: #137333;
+}
+
+.task-player-link[hidden] {
+    display: none;
 }
 
 /* 视频信息样式 */

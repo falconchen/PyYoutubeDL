@@ -1,4 +1,5 @@
 import errno
+import json
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -148,6 +149,42 @@ class TestDownloaderMove(unittest.TestCase):
             self.assertEqual(
                 {Path(result).read_text(encoding='utf-8') for result in results},
                 {'new-a', 'new-b'},
+            )
+
+    def test_move_records_final_renamed_filenames_for_task(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            tmp_dir = root_path / 'tmp' / 'v20260723120000AbC'
+            files_dir = root_path / 'files'
+            urls_dir = root_path / 'urls'
+            tmp_dir.mkdir(parents=True)
+            files_dir.mkdir()
+            urls_dir.mkdir()
+            (tmp_dir / 'video.mp4').write_text('new video', encoding='utf-8')
+            (tmp_dir / 'video.zh-Hans.srt').write_text('subtitle', encoding='utf-8')
+            (files_dir / 'video.mp4').write_text('old video', encoding='utf-8')
+
+            with patch.dict(
+                downloader.config,
+                {
+                    'FILES_DIR': str(files_dir),
+                    'URLS_DIR': str(urls_dir),
+                },
+            ):
+                result = self.handler.move_files(
+                    str(tmp_dir),
+                    task_id='v20260723120000AbC',
+                )
+
+            result_data = json.loads(
+                (urls_dir / 'v20260723120000AbC.result.json').read_text(
+                    encoding='utf-8',
+                )
+            )
+            self.assertTrue(result)
+            self.assertEqual(
+                set(result_data['files']),
+                {'video (1).mp4', 'video.zh-Hans.srt'},
             )
 
 

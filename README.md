@@ -42,7 +42,7 @@ vim config.json
 ./runner.sh          # 默认执行 restart
 ```
 
-`start` 和 `restart` 会自动激活虚拟环境、更新 pip 与 yt-dlp，然后启动 Web 应用、下载器和上传器。`stop` 不更新依赖；在 Devil 环境中，单独执行 `stop` 不会重启 Devil 管理的 Web 应用，`restart` 则保持原有的 Devil 重启行为。
+`start` 和 `restart` 会自动激活虚拟环境、更新 pip 与 yt-dlp，然后显式使用该虚拟环境的 Python 启动 Web 应用、下载器和上传器，不依赖各脚本的 shebang。`stop` 不更新依赖；在 Devil 环境中，单独执行 `stop` 不会重启 Devil 管理的 Web 应用，`restart` 则保持原有的 Devil 重启行为。
 
 停止本项目通过 Python 启动的 Web 应用、下载器、上传器及其子进程：
 
@@ -75,9 +75,19 @@ journalctl -u pyyoutubedl -f    # 实时日志
 
 启动后访问 `http://<host>:5001`，通过网页提交 YouTube/小红书/Bilibili 等链接，选择视频或音频模式即可下载。
 
-提交任务后，页面会每 2 秒查询一次任务状态，显示排队、下载、完成或失败状态，并在下载阶段显示百分比、已下载大小、总大小、速度和预计剩余时间。页面中的二进制容量单位会简化显示为 `G`、`M`、`K`。页面关闭或刷新不会影响后台下载；带有 `tasks` 查询参数的任务结果页可继续查看这些任务。
+提交任务后，页面会每 2 秒查询一次任务状态，显示排队、下载、完成或失败状态，并在下载阶段显示百分比、已下载大小、总大小、速度和预计剩余时间。进度条会标明当前处于下载字幕、下载视频、下载音频、合并音视频、嵌入字幕或后处理等阶段，避免多个阶段分别达到 100% 时产生误解。页面中的二进制容量单位会简化显示为 `G`、`M`、`K`。视频下载完成后会出现“播放视频”链接，直接打开该任务对应的视频。页面关闭或刷新不会影响后台下载；带有 `tasks` 查询参数的任务结果页可继续查看这些任务。
 
 播放器会使用 `ffprobe` 识别 MP4 内嵌字幕，并在浏览器请求字幕时通过 `ffmpeg` 转换为 WebVTT，Video.js 控制栏会显示可用的字幕选项。该功能不修改原视频，但运行环境必须能够直接执行 `ffprobe` 和 `ffmpeg`；无法识别或转换字幕时，视频仍可正常播放，只是不显示字幕选项。
+
+播放器支持通过 `file` 查询参数选择指定视频，例如：
+
+```text
+/player?file=视频文件名.mp4
+```
+
+该参数只会匹配当前播放器列表中实际存在的 MP4 文件，不匹配时仍按原有顺序播放列表中的第一条。
+
+在播放列表中手动切换视频，或当前视频结束后自动播放下一条时，播放器会同步更新地址栏中的 `file` 参数，便于复制当前视频的播放链接。
 
 ### API
 
@@ -93,7 +103,9 @@ curl -X POST http://localhost:5001/api/task_info \
   -d '{"tasks": ["v20250601120000abc"]}'
 ```
 
-`/api/task_info` 会返回任务的 `state`（`queued`、`downloading`、`completed`、`failed` 或 `missing`）和 `progress`。下载中任务的 `progress` 包含可用的 `percent`、`downloaded`、`total`、`speed`、`eta` 等字段。
+`/api/task_info` 会返回任务的 `state`（`queued`、`downloading`、`completed`、`failed` 或 `missing`）和 `progress`。下载中任务的 `progress` 包含可用的 `percent`、`downloaded`、`total`、`speed`、`eta` 等字段。视频任务完成并且产物仍在本地时，还会返回 `player_url`。
+
+对于未生成 `result.json` 的旧任务，任务 API 会尝试从 downloader 的文件移动日志中恢复最终文件名；只有日志记录和本地文件都仍然存在时才会返回播放链接。
 
 ### 同名文件处理
 

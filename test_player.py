@@ -39,6 +39,76 @@ class TestPlayerPage(unittest.TestCase):
         self.assertIn('font-size: 1.3em;', css)
         self.assertIn('line-height: 1;', css)
 
+    def test_file_parameter_selects_requested_video(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            first = Path(files_dir, 'first.mp4')
+            requested = Path(files_dir, 'requested video.mp4')
+            first.touch()
+            requested.touch()
+            first.touch()
+
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch('app.get_embedded_subtitles', return_value=[]),
+            ):
+                response = self.client.get(
+                    '/player',
+                    query_string={'file': requested.name},
+                )
+
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'var currentFilename = "requested video.mp4";',
+            html,
+        )
+        self.assertIn(
+            '正在播放: requested video.mp4',
+            html,
+        )
+
+    def test_file_parameter_ignores_unknown_and_non_mp4_paths(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            filename = 'available.mp4'
+            Path(files_dir, filename).touch()
+
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch('app.get_embedded_subtitles', return_value=[]),
+            ):
+                response = self.client.get(
+                    '/player',
+                    query_string={'file': '../config.json'},
+                )
+
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('var currentFilename = "available.mp4";', html)
+
+    def test_switch_video_updates_file_parameter_in_url(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, 'first.mp4').touch()
+            Path(files_dir, 'second video.mp4').touch()
+
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch('app.get_embedded_subtitles', return_value=[]),
+            ):
+                response = self.client.get('/player')
+
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("url.searchParams.set('file', filename);", html)
+        self.assertIn(
+            "window.history.replaceState({ filename: filename }, '', url);",
+            html,
+        )
+        self.assertIn('updatePlayerUrl(filename);', html)
+        self.assertLess(
+            html.index('currentFilename = filename;'),
+            html.index('updatePlayerUrl(filename);'),
+        )
+
     def test_player_filters_filenames_by_configured_keywords(self):
         with tempfile.TemporaryDirectory() as files_dir:
             Path(files_dir, '保留的视频.mp4').touch()

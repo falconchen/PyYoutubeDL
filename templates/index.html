@@ -95,10 +95,15 @@
                         <span class="task-status queued">排队中</span>
                     </div>
                     <div class="progress-row">
+                        <span class="progress-stage">排队中</span>
                         <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                             <div class="progress-fill"></div>
                         </div>
                         <span class="progress-percent">0%</span>
+                        <a class="task-player-link" href="" hidden>
+                            <i class="fas fa-play"></i>
+                            <span>播放</span>
+                        </a>
                     </div>
                     <div class="progress-details" aria-live="polite">等待下载器处理</div>
                 </li>
@@ -232,6 +237,23 @@
                 failed: '失败',
                 missing: '未找到'
             };
+            const stageLabels = {
+                queued: '排队中',
+                starting: '准备下载',
+                downloading: '下载文件',
+                download_subtitles: '下载字幕',
+                download_video: '下载视频',
+                download_audio: '下载音频',
+                download_media: '下载音视频',
+                merge_media: '合并音视频',
+                embed_subtitles: '嵌入字幕',
+                extract_audio: '转换音频',
+                write_metadata: '写入信息',
+                postprocessing: '处理文件',
+                completed: '下载完成',
+                failed: '下载失败',
+                missing: '未找到'
+            };
 
             function formatByteUnits(value) {
                 return String(value || '')
@@ -251,13 +273,17 @@
                 const track = item.querySelector('.progress-track');
                 const fill = item.querySelector('.progress-fill');
                 const percentText = item.querySelector('.progress-percent');
+                const stageText = item.querySelector('.progress-stage');
                 const details = item.querySelector('.progress-details');
+                const playerLink = item.querySelector('.task-player-link');
 
                 status.className = `task-status ${state}`;
                 status.textContent = stateLabels[state] || state;
                 track.setAttribute('aria-valuenow', percent.toFixed(1));
                 fill.style.width = `${percent}%`;
                 percentText.textContent = `${percent.toFixed(percent % 1 === 0 ? 0 : 1)}%`;
+                const stage = progress.stage || state;
+                stageText.textContent = stageLabels[stage] || stageLabels[state] || stage;
 
                 const detailParts = [];
                 if (state === 'queued') detailParts.push('等待下载器处理');
@@ -277,6 +303,14 @@
                 if (state === 'failed') detailParts.push('下载失败，请查看日志');
                 if (state === 'missing') detailParts.push(task.msg || '任务不存在');
                 details.textContent = detailParts.join(' · ') || '正在获取进度';
+
+                if (task.player_url) {
+                    playerLink.href = task.player_url;
+                    playerLink.hidden = false;
+                } else {
+                    playerLink.removeAttribute('href');
+                    playerLink.hidden = true;
+                }
             }
 
             let pollingStopped = false;

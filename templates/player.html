@@ -123,12 +123,19 @@
             link.remove();
         }
 
+        function updatePlayerUrl(filename) {
+            var url = new URL(window.location.href);
+            url.searchParams.set('file', filename);
+            window.history.replaceState({ filename: filename }, '', url);
+        }
+
         function switchVideo(src, filename, element) {
             // 更新播放源
             player.src({ type: "video/mp4", src: src });
             updateSubtitleTracks(filename);
             player.play();
             currentFilename = filename;
+            updatePlayerUrl(filename);
 
             // 更新标题
             document.getElementById('current-video-title').textContent = '正在播放: ' + filename;

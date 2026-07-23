@@ -6,6 +6,7 @@ start_service() {
     local service_name="$1"
     local script_name="$2"
     local startup_log
+    local python_bin
     local pid
     local exit_code
     local reason
@@ -15,8 +16,14 @@ start_service() {
         return 1
     }
 
+    python_bin=$(command -v python) || {
+        echo "正在启动${service_name}...（启动失败，原因: 找不到Python解释器）"
+        rm -f "$startup_log"
+        return 1
+    }
+
     printf "正在启动%s..." "$service_name"
-    nohup "$SCRIPT_DIR/$script_name" >"$startup_log" 2>&1 &
+    nohup "$python_bin" "$SCRIPT_DIR/$script_name" >"$startup_log" 2>&1 &
     pid=$!
 
     # 捕获启动阶段立即退出的情况，同时避免长期阻塞启动脚本。
