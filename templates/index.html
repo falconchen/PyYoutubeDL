@@ -262,6 +262,12 @@
                     .replace(/KiB\b/gi, 'K');
             }
 
+            function hasProgressValue(value) {
+                const normalized = String(value || '').trim().toUpperCase();
+                return Boolean(normalized)
+                    && !['NA', 'N/A', 'NONE', 'NULL', 'UNKNOWN'].includes(normalized);
+            }
+
             function renderTask(task) {
                 const item = taskItems.find(element => element.dataset.task === task.task);
                 if (!item) return;
@@ -288,17 +294,17 @@
                 const detailParts = [];
                 if (state === 'queued') detailParts.push('等待下载器处理');
                 if (state === 'downloading' && progress.phase === 'starting') detailParts.push('正在准备下载');
-                if (progress.downloaded && progress.total) {
+                if (hasProgressValue(progress.downloaded) && hasProgressValue(progress.total)) {
                     detailParts.push(
                         `${formatByteUnits(progress.downloaded)} / ${formatByteUnits(progress.total)}`
                     );
-                } else if (progress.total) {
+                } else if (hasProgressValue(progress.total)) {
                     detailParts.push(formatByteUnits(progress.total));
                 }
-                if (progress.speed && progress.speed !== 'NA') {
+                if (hasProgressValue(progress.speed)) {
                     detailParts.push(formatByteUnits(progress.speed));
                 }
-                if (progress.eta && progress.eta !== 'NA') detailParts.push(`剩余 ${progress.eta}`);
+                if (hasProgressValue(progress.eta)) detailParts.push(`剩余 ${progress.eta}`);
                 if (state === 'completed') detailParts.push('下载完成');
                 if (state === 'failed') detailParts.push('下载失败，请查看日志');
                 if (state === 'missing') detailParts.push(task.msg || '任务不存在');

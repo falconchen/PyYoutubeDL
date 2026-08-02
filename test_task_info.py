@@ -107,6 +107,30 @@ class TestTaskInfoAPI(unittest.TestCase):
 
         self.assertEqual(progress['percent'], 100)
         self.assertEqual(progress['stage'], 'merge_media')
+        self.assertEqual(progress['downloaded'], '')
+        self.assertEqual(progress['total'], '35M')
+        self.assertEqual(progress['speed'], '1M/s')
+        self.assertEqual(progress['eta'], '')
+
+    def test_completed_task_does_not_return_na_downloaded_size(self):
+        task_id = 'v20260723120000NaX'
+        self.write_task(task_id, '.ok')
+        (self.logs_dir / f'{task_id}.log').write_text(
+            (
+                'PYDL_PROGRESS|finished|100.0%|NA|5.44MiB|'
+                '645.56KiB/s|NA|mp4|18|avc1|mp4a\n'
+            ),
+            encoding='utf-8',
+        )
+
+        response = self.client.post('/api/task_info', json={'tasks': task_id})
+        progress = response.get_json()['tasks'][0]['progress']
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(progress['downloaded'], '')
+        self.assertEqual(progress['total'], '5.44MiB')
+        self.assertEqual(progress['speed'], '645.56KiB/s')
+        self.assertEqual(progress['eta'], '')
 
     def test_completed_task_is_always_100_percent(self):
         task_id = 'v20260723120000QwE'

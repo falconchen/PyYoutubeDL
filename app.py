@@ -184,6 +184,14 @@ def detect_processing_stage(line):
     return None
 
 
+def normalize_progress_value(value):
+    """将 yt-dlp 的不可用占位值统一转换为空字符串。"""
+    normalized = (value or '').strip()
+    if normalized.upper() in {'NA', 'N/A', 'NONE', 'NULL', 'UNKNOWN'}:
+        return ''
+    return normalized
+
+
 def parse_task_progress(log_path):
     """从任务日志末尾提取 yt-dlp 最近一次下载进度。"""
     if not os.path.isfile(log_path):
@@ -217,10 +225,10 @@ def parse_task_progress(log_path):
             percent_match = re.search(r'\d+(?:\.\d+)?', percent_text)
             progress = {
                 "phase": status.strip(),
-                "downloaded": downloaded.strip(),
-                "total": total.strip(),
-                "speed": speed.strip(),
-                "eta": eta.strip(),
+                "downloaded": normalize_progress_value(downloaded),
+                "total": normalize_progress_value(total),
+                "speed": normalize_progress_value(speed),
+                "eta": normalize_progress_value(eta),
                 "stage": processing_stage or 'downloading',
             }
             if len(fields) >= 10 and processing_stage is None:
