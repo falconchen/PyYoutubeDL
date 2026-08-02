@@ -68,6 +68,32 @@ class TestTaskInfoAPI(unittest.TestCase):
         self.assertEqual(task['progress']['speed'], '1.50MiB/s')
         self.assertEqual(task['progress']['eta'], '00:04')
 
+    def test_verbose_command_line_is_not_parsed_as_progress(self):
+        log_path = self.logs_dir / 'verbose.log'
+        debug_line = (
+            "[debug] Command-line config: ['--progress-template', "
+            "'download:PYDL_PROGRESS|%(progress.status)s|"
+            "%(progress._percent_str)s|%(progress._downloaded_bytes_str)s|"
+            "%(progress._total_bytes_str)s|%(progress._speed_str)s|"
+            "%(progress._eta_str)s|%(info.ext)s']\n"
+        )
+        log_path.write_text(debug_line, encoding='utf-8')
+
+        self.assertEqual(app.parse_task_progress(str(log_path)), {})
+
+        log_path.write_text(
+            debug_line
+            + 'PYDL_PROGRESS|downloading|12.5%|1.00MiB|8.00MiB|'
+            '2.00MiB/s|00:03|mp4|135|avc1|none\n',
+            encoding='utf-8',
+        )
+
+        progress = app.parse_task_progress(str(log_path))
+
+        self.assertEqual(progress['percent'], 12.5)
+        self.assertEqual(progress['downloaded'], '1.00MiB')
+        self.assertEqual(progress['stage'], 'download_video')
+
     def test_structured_progress_distinguishes_video_and_subtitles(self):
         cases = (
             (

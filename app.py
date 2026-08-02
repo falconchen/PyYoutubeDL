@@ -216,9 +216,8 @@ def parse_task_progress(log_path):
         if processing_stage is None:
             processing_stage = detect_processing_stage(line)
 
-        marker_index = line.find(PROGRESS_MARKER)
-        if marker_index >= 0:
-            fields = line[marker_index + len(PROGRESS_MARKER):].split('|')
+        if line.startswith(PROGRESS_MARKER):
+            fields = line[len(PROGRESS_MARKER):].split('|')
             if len(fields) < 6:
                 continue
             status, percent_text, downloaded, total, speed, eta = fields[:6]
