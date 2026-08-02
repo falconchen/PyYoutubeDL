@@ -1,9 +1,11 @@
 {
   "manifest_version": 3,
   "name": "使用 yter 下载",
-  "version": "1.0.0",
-  "description": "通过右键菜单把页面链接发送到 yter，下载视频或音频。",
+  "version": "1.1.0",
+  "description": "通过右键菜单把当前页面或页面链接发送到 yter，下载视频或音频。",
+  "minimum_chrome_version": "120",
   "permissions": [
+    "alarms",
     "contextMenus",
     "notifications",
     "storage"

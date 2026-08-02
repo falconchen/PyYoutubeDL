@@ -109,7 +109,9 @@ curl -X POST http://localhost:5001/api/task_info \
 
 ### Chrome 右键下载扩展
 
-仓库中的 `chrome-extension/` 是 Manifest V3 扩展。加载后，右键点击网页链接可在“使用yter下载”二级菜单中选择“下载视频”或“下载音频”，扩展会调用 `/api/add_task` 创建对应任务。
+仓库中的 `chrome-extension/` 是 Manifest V3 扩展。加载后，右键点击网页空白处或网页链接，可在“使用yter下载”二级菜单中选择“下载视频”或“下载音频”。空白处使用当前页面 URL，链接处优先使用链接 URL，扩展会调用 `/api/add_task` 创建对应任务。
+
+任务提交后，扩展每 30 秒调用 `/api/task_info` 查询状态，并在下载完成或失败时发送 Chrome 通知。
 
 开发者模式安装、服务地址配置和验证方法见 [`chrome-extension/README.md`](chrome-extension/README.md)。
 
