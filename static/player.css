@@ -9,16 +9,17 @@
 .player-main-container {
     max-width: 1200px !important;
     margin: 2rem auto;
-    padding: 2rem;
+    padding: clamp(1rem, 3vw, 2rem);
     display: flex;
     flex-direction: column;
 }
 
 .player-content {
     display: grid;
-    grid-template-columns: 1fr 350px;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 350px);
     gap: 2rem;
     margin-top: 1rem;
+    min-width: 0;
 }
 
 /* 播放器区域 */
@@ -26,14 +27,22 @@
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+    min-width: 0;
 }
 
 .video-wrapper {
+    width: 100%;
+    min-width: 0;
     background: #000;
     border-radius: 12px;
     overflow: hidden;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
     aspect-ratio: 16 / 9;
+}
+
+.video-wrapper .video-js {
+    width: 100%;
+    height: 100%;
 }
 
 .video-info-panel {
@@ -48,7 +57,7 @@
     color: #333;
     margin: 0 0 0.5rem 0;
     line-height: 1.4;
-    word-break: break-all;
+    overflow-wrap: anywhere;
 }
 
 .player-controls-hint {
@@ -115,6 +124,8 @@
     display: flex;
     flex-direction: column;
     max-height: 700px;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .playlist-header {
@@ -147,11 +158,23 @@
     transition: all 0.2s ease;
     border: 1px solid transparent;
     margin-bottom: 0.5rem;
+    width: 100%;
+    min-height: 56px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
 }
 
 .playlist-item:hover {
     background: #f8f9fa;
     border-color: #eee;
+}
+
+.playlist-item:focus-visible,
+.btn-secondary:focus-visible {
+    outline: 3px solid rgba(255, 0, 0, 0.28);
+    outline-offset: 2px;
 }
 
 .playlist-item.active {
@@ -248,14 +271,37 @@
     }
 
     .playlist-section {
-        max-height: 400px;
-        /* 小屏幕减小列表高度 */
+        max-height: min(400px, 50vh);
     }
 }
 
 @media (max-width: 768px) {
-    .header h1 {
+    .player-main-container {
+        width: 100%;
+        margin: 0;
+        border-radius: 0;
+        box-shadow: none;
+    }
+
+    .player-main-container .header {
+        margin-bottom: 1rem;
+    }
+
+    .player-main-container .header h1 {
         font-size: 1.5rem;
+    }
+
+    .player-main-container .subtitle {
+        font-size: 0.95rem;
+    }
+
+    .player-content {
+        gap: 1rem;
+        margin-top: 0;
+    }
+
+    .player-section {
+        gap: 1rem;
     }
 
     .video-info-panel {
@@ -264,6 +310,14 @@
 
     .playlist-header {
         padding: 1rem;
+    }
+
+    .playlist-section {
+        max-height: min(360px, 45vh);
+    }
+
+    .footer-actions {
+        margin-top: 1rem;
     }
 }
 
@@ -274,19 +328,28 @@
 
     .player-main-container {
         margin: 0;
-        padding: 0.75rem;
+        padding: 1rem;
         border-radius: 0;
     }
 
     .video-wrapper {
-        border-radius: 8px;
+        width: calc(100% + 2rem);
+        margin-inline: -1rem;
+        border-radius: 0;
+        box-shadow: none;
     }
 
     .video-info-panel h2 {
         font-size: 1rem;
     }
 
+    .player-controls-hint {
+        align-items: flex-start;
+        font-size: 0.85rem;
+    }
+
     .playlist-item {
+        gap: 0.75rem;
         padding: 0.75rem;
     }
 
@@ -295,6 +358,12 @@
     }
 
     .footer-actions {
-        margin-top: 1.5rem;
+        margin-top: 1rem;
+    }
+
+    .btn-secondary {
+        width: 100%;
+        min-height: 44px;
+        justify-content: center;
     }
 }

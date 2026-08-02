@@ -39,6 +39,33 @@ class TestPlayerPage(unittest.TestCase):
         self.assertIn('font-size: 1.3em;', css)
         self.assertIn('line-height: 1;', css)
 
+    def test_player_layout_prevents_mobile_horizontal_overflow(self):
+        css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
+
+        self.assertIn(
+            'grid-template-columns: minmax(0, 1fr) minmax(280px, 350px);',
+            css,
+        )
+        self.assertIn('.video-wrapper .video-js {', css)
+        self.assertIn('width: calc(100% + 2rem);', css)
+        self.assertGreaterEqual(css.count('min-width: 0;'), 4)
+
+    def test_playlist_items_are_keyboard_accessible_buttons(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, 'first.mp4').touch()
+
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch('app.get_embedded_subtitles', return_value=[]),
+            ):
+                response = self.client.get('/player')
+
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('type="button" class="playlist-item active"', html)
+        self.assertIn('aria-current="true"', html)
+        self.assertIn("element.setAttribute('aria-current', 'true');", html)
+
     def test_file_parameter_selects_requested_video(self):
         with tempfile.TemporaryDirectory() as files_dir:
             first = Path(files_dir, 'first.mp4')
