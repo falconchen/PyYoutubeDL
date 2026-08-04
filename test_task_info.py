@@ -266,6 +266,31 @@ class TestTaskInfoAPI(unittest.TestCase):
             '/player?file=%E8%A7%86%E9%A2%91+file.mp4',
         )
 
+    def test_completed_audio_task_returns_audio_player_url(self):
+        task_id = 'a20260804120000AuD'
+        filename = '音频 file.mp3'
+        self.write_task(task_id, '.ok')
+        files_dir = Path(self.temp_dir.name) / 'files'
+        files_dir.mkdir()
+        (files_dir / filename).touch()
+        (self.urls_dir / f'{task_id}.result.json').write_text(
+            json.dumps({'files': [filename]}),
+            encoding='utf-8',
+        )
+
+        with patch.object(app, 'FILES_DIR', str(files_dir)):
+            response = self.client.post(
+                '/api/task_info',
+                json={'tasks': task_id},
+            )
+        task = response.get_json()['tasks'][0]
+
+        self.assertEqual(task['files'], [filename])
+        self.assertEqual(
+            task['player_url'],
+            '/audio-player?file=%E9%9F%B3%E9%A2%91+file.mp3',
+        )
+
     def test_completed_legacy_task_recovers_player_url_from_move_log(self):
         task_id = 'v20260723161431ohK'
         filename = '恢复的视频 (1).mp4'

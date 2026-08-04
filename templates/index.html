@@ -34,9 +34,14 @@
                 <i class="fas fa-download"></i> 开始下载
             </button>
         </form>
-        <a href="{{ url_for('player') }}" class="player-link">
-            <i class="fas fa-play-circle"></i> 前往播放页
-        </a>
+        <div class="player-links">
+            <a href="{{ url_for('player') }}" class="player-link">
+                <i class="fas fa-play-circle"></i> 视频播放器
+            </a>
+            <a href="{{ url_for('audio_player') }}" class="player-link">
+                <i class="fas fa-headphones"></i> 音频播放器
+            </a>
+        </div>
     </div>
 
     {% if tasks %}

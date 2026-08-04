@@ -9,6 +9,7 @@
   "YT_DLP_OUTPUT_TEMPLATE": "%(title).60s【%(uploader,channel,creator,artist,extractor|未知平台).20s】-%(height)s.%(ext)s",
   "YTA_DLP_OUTPUT_TEMPLATE": "%(title).60s【%(uploader,channel,creator,artist,extractor|未知平台).20s】.%(ext)s",
   "PLAYER_FILENAME_EXCLUDE_KEYWORDS": [],
+  "AUDIO_PLAYER_FALLBACK_COVER_URL": "/static/images/audio-cover-default.svg",
   "SHOW_WALINE_ON_INDEX": false,
   "SHOW_WALINE_ON_PLAYER": false,
   "BARK_DEVICE_TOKEN": "your_bark_device_token",

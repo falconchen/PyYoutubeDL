@@ -45,6 +45,36 @@
     height: 100%;
 }
 
+.audio-wrapper {
+    background-color: #111827;
+    background-image: url("images/audio-cover-default.svg");
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+}
+
+.audio-player-page .vjs-poster img {
+    object-fit: cover;
+}
+
+.audio-player-page .video-js .vjs-tech {
+    background: transparent;
+}
+
+.now-playing-label {
+    margin-bottom: 0.35rem;
+    color: var(--primary-color);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+}
+
+.audio-artist {
+    margin-bottom: 0.75rem;
+    color: #666;
+    font-size: 0.95rem;
+}
+
 .video-info-panel {
     background: white;
     padding: 1.5rem;
@@ -77,6 +107,10 @@
     background: white;
     padding: 0;
     --waline-padding: 0;
+}
+
+.audio-comment-container {
+    margin-top: 2rem;
 }
 
 /* Video.js 控制栏最后的当前视频下载按钮 */
@@ -217,6 +251,16 @@
     text-overflow: ellipsis;
 }
 
+.item-subtitle {
+    display: block;
+    margin-top: 0.15rem;
+    overflow: hidden;
+    color: #777;
+    font-size: 0.8rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .playlist-item.active .item-name {
     color: var(--primary-color);
     font-weight: 600;
@@ -240,6 +284,11 @@
     margin-top: 2rem;
     display: flex;
     justify-content: center;
+}
+
+.player-footer-actions {
+    flex-wrap: wrap;
+    gap: 0.75rem;
 }
 
 .btn-secondary {
@@ -317,6 +366,10 @@
     }
 
     .footer-actions {
+        margin-top: 1rem;
+    }
+
+    .audio-comment-container {
         margin-top: 1rem;
     }
 }

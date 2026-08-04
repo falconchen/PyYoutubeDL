@@ -75,7 +75,7 @@ journalctl -u pyyoutubedl -f    # 实时日志
 
 启动后访问 `http://<host>:5001`，通过网页提交 YouTube/小红书/Bilibili 等链接，选择视频或音频模式即可下载。
 
-提交任务后，页面会每 2 秒查询一次任务状态，显示排队、下载、完成或失败状态，并在下载阶段显示百分比、已下载大小、总大小、速度和预计剩余时间。进度条会标明当前处于下载字幕、下载视频、下载音频、合并音视频、嵌入字幕或后处理等阶段，避免多个阶段分别达到 100% 时产生误解。任务完成后显示最终主媒体文件大小、从进入下载状态到全部处理及移动完成的总耗时，以及“最终文件大小 ÷ 总耗时”得到的平均处理速率；字幕等辅助文件不计入最终大小。页面中的二进制容量单位会简化显示为 `G`、`M`、`K`。视频下载完成后会出现“播放视频”链接，直接打开该任务对应的视频。页面关闭或刷新不会影响后台下载；带有 `tasks` 查询参数的任务结果页可继续查看这些任务。
+提交任务后，页面会每 2 秒查询一次任务状态，显示排队、下载、完成或失败状态，并在下载阶段显示百分比、已下载大小、总大小、速度和预计剩余时间。进度条会标明当前处于下载字幕、下载视频、下载音频、合并音视频、嵌入字幕或后处理等阶段，避免多个阶段分别达到 100% 时产生误解。任务完成后显示最终主媒体文件大小、从进入下载状态到全部处理及移动完成的总耗时，以及“最终文件大小 ÷ 总耗时”得到的平均处理速率；字幕等辅助文件不计入最终大小。页面中的二进制容量单位会简化显示为 `G`、`M`、`K`。视频或音频下载完成后会出现“播放”链接，直接打开对应播放器。页面关闭或刷新不会影响后台下载；带有 `tasks` 查询参数的任务结果页可继续查看这些任务。
 
 播放器会使用 `ffprobe` 识别 MP4 内嵌字幕，并在浏览器请求字幕时通过 `ffmpeg` 转换为 WebVTT，Video.js 控制栏会显示可用的字幕选项。该功能不修改原视频，但运行环境必须能够直接执行 `ffprobe` 和 `ffmpeg`；无法识别或转换字幕时，视频仍可正常播放，只是不显示字幕选项。
 
@@ -88,6 +88,14 @@ journalctl -u pyyoutubedl -f    # 实时日志
 该参数只会匹配当前播放器列表中实际存在的 MP4 文件，不匹配时仍按原有顺序播放列表中的第一条。
 
 在播放列表中手动切换视频，或当前视频结束后自动播放下一条时，播放器会同步更新地址栏中的 `file` 参数，便于复制当前视频的播放链接。
+
+音频播放器使用 Video.js `audioPosterMode`，保留 16:9 封面并隐藏视频专用画面。页面会从音频 metadata 的 `purl` 或 `comment` 读取 YouTube 视频 ID，依次尝试 `maxresdefault.jpg`、`hqdefault.jpg`，失败时使用 `AUDIO_PLAYER_FALLBACK_COVER_URL`。封面由浏览器直接访问 `i.ytimg.com`，服务器不会额外保存图片文件。
+
+音频播放器也支持 `file` 查询参数、自动播放下一首、播放进度恢复和当前音频下载：
+
+```text
+/audio-player?file=音频文件名.mp3
+```
 
 ### API
 
@@ -103,7 +111,7 @@ curl -X POST http://localhost:5001/api/task_info \
   -d '{"tasks": ["v20250601120000abc"]}'
 ```
 
-`/api/task_info` 会返回任务的 `state`（`queued`、`downloading`、`completed`、`failed` 或 `missing`）和 `progress`。下载中任务的 `progress` 包含可用的 `percent`、`downloaded`、`total`、`speed`、`eta` 等字段；新任务完成后包含 `final_size_bytes`、`elapsed_seconds`、`average_speed_bytes_per_second`。视频任务完成并且产物仍在本地时，还会返回 `player_url`。
+`/api/task_info` 会返回任务的 `state`（`queued`、`downloading`、`completed`、`failed` 或 `missing`）和 `progress`。下载中任务的 `progress` 包含可用的 `percent`、`downloaded`、`total`、`speed`、`eta` 等字段；新任务完成后包含 `final_size_bytes`、`elapsed_seconds`、`average_speed_bytes_per_second`。视频或音频任务完成并且主媒体产物仍在本地时，还会返回对应的 `player_url`。
 
 对于没有完成摘要的旧任务，任务 API 只从仍存在的主媒体文件读取最终大小，不使用最后一个下载阶段的耗时和速率；无法可靠恢复的总耗时及平均速率会省略。未生成 `result.json` 的旧任务还会尝试从 downloader 的文件移动日志中恢复最终文件名；只有日志记录和本地文件都仍然存在时才会返回播放链接。
 
@@ -141,6 +149,7 @@ video (2).mp4
 | `YT_DLP_OUTPUT_TEMPLATE` | string | 视频文件名模板 |
 | `YTA_DLP_OUTPUT_TEMPLATE` | string | 音频文件名模板 |
 | `PLAYER_FILENAME_EXCLUDE_KEYWORDS` | array | 播放器列表排除的文件名关键词，任一非空关键词命中即隐藏，默认 `[]` |
+| `AUDIO_PLAYER_FALLBACK_COVER_URL` | string | YouTube 音频封面不可用时的图片 URL，默认 `/static/images/audio-cover-default.svg` |
 | `DELETE_AFTER_UPLOAD` | bool | WebDAV 上传后是否删除本地文件 |
 | `FILES_EXPIRE_DAYS` | int | 启动时清理超过 N 天的旧文件，0 表示不清理 |
 | `VIDEO_WEBDAV_OPTIONS` | object | 视频 WebDAV 远程存储配置 |
@@ -157,7 +166,7 @@ video (2).mp4
 "PLAYER_FILENAME_EXCLUDE_KEYWORDS": ["预告", "preview", "sample"]
 ```
 
-匹配区分大小写，文件名包含任一非空关键词时不会出现在 `/player` 页面；原文件不会被删除，也不影响下载和 WebDAV 上传。修改后需要重启 Web 应用以重新加载配置。
+匹配区分大小写，文件名包含任一非空关键词时不会出现在 `/player` 或 `/audio-player` 页面；原文件不会被删除，也不影响下载和 WebDAV 上传。修改后需要重启 Web 应用以重新加载配置。
 
 ## Cookies 配置
 
@@ -186,13 +195,13 @@ YouTube 部分视频需要登录才能下载。支持通过 yt-dlp 浏览器 coo
 
 ## 播放进度
 
-播放页会按视频文件名把当前播放时间保存在浏览器 `localStorage` 中。切换到其他视频、暂停、离开页面时会保存进度，再次播放同一视频时自动回到上次位置。
+视频和音频播放页会按文件名把当前播放时间分别保存在浏览器 `localStorage` 中。切换媒体、暂停或离开页面时会保存进度，再次播放同一文件时自动回到上次位置。
 
 视频正常播放结束或距离结尾不足 3 秒时会清除该视频的记录，下次从头播放。进度仅保存在当前浏览器和当前站点下，不会同步到其他浏览器或设备；清除站点数据也会删除记录。
 
 ## 页面评论
 
-首页 `templates/index.html` 和播放页 `templates/player.html` 已接入 Waline 评论，评论服务地址：
+首页、视频播放页和音频播放页已接入 Waline 评论，评论服务地址：
 
 ```txt
 https://waline.v2ai.eu.cc
@@ -203,6 +212,7 @@ https://waline.v2ai.eu.cc
 ```txt
 https://yter.cellmean.com/
 https://yter.cellmean.com/player
+https://yter.cellmean.com/audio-player
 ```
 
 评论区默认不显示。通过 `config.json` 分别控制首页和播放页：
@@ -223,6 +233,7 @@ systemctl restart pyyoutubedl.service
 ```txt
 yter.cellmean.com/
 yter.cellmean.com/player
+yter.cellmean.com/audio-player
 ```
 
 这样可以避免不同站点都使用 `/` 时共享同一组评论。

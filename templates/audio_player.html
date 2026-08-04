@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="{{ url_for('static', filename='images/favicon.png') }}">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
+    <title>音频播放器 - YouTube 下载器</title>
+    <link rel="stylesheet" href="{{ 'style.css' | versioned }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://unpkg.com/video.js/dist/video-js.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ 'player.css' | versioned }}">
+</head>
+
+<body class="player-page audio-player-page">
+    <div class="container player-main-container">
+        <div class="header">
+            <h1><i class="fas fa-headphones"></i> 音频播放器</h1>
+            <p class="subtitle">聆听已下载的音频内容</p>
+        </div>
+
+        <div class="player-content">
+            <div class="player-section">
+                <div class="video-wrapper audio-wrapper">
+                    <audio id="audio-player" class="video-js vjs-big-play-centered" controls preload="metadata">
+                        {% if audio_items %}
+                        <source src="{{ audio_items[0].url }}" type="{{ audio_items[0].mime_type }}">
+                        {% endif %}
+                    </audio>
+                </div>
+                <div class="video-info-panel audio-info-panel">
+                    <p class="now-playing-label">正在播放</p>
+                    <h2 id="current-audio-title">{{ audio_items[0].title if audio_items else '暂无音频' }}</h2>
+                    <p id="current-audio-artist" class="audio-artist" {% if not audio_items or not audio_items[0].artist %}hidden{% endif %}>
+                        {{ audio_items[0].artist if audio_items else '' }}
+                    </p>
+                    <div class="player-controls-hint">
+                        <i class="fas fa-info-circle"></i> 音频播完后将自动播放下一首
+                    </div>
+                </div>
+            </div>
+
+            <div class="playlist-section">
+                <div class="playlist-header">
+                    <h3><i class="fas fa-list"></i> 音频列表 ({{ audio_items|length }})</h3>
+                </div>
+                <div class="playlist-items scrollbar-custom" id="audio-list">
+                    {% for audio in audio_items %}
+                    <button type="button" class="playlist-item {% if loop.first %}active{% endif %}"
+                        data-filename="{{ audio.filename }}" {% if loop.first %}aria-current="true"{% endif %}
+                        onclick="switchAudio(this)">
+                        <div class="item-icon">
+                            <i class="fas fa-play"></i>
+                        </div>
+                        <div class="item-details">
+                            <span class="item-name" title="{{ audio.title }}">{{ audio.title }}</span>
+                            {% if audio.artist %}
+                            <span class="item-subtitle">{{ audio.artist }}</span>
+                            {% endif %}
+                        </div>
+                    </button>
+                    {% endfor %}
+                    {% if not audio_items %}
+                    <div class="no-videos">
+                        <i class="fas fa-headphones"></i>
+                        <p>暂无下载音频</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        {% if show_waline %}
+            <div class="comment-container player-comment-container audio-comment-container">
+                <div id="waline"></div>
+            </div>
+        {% endif %}
+
+        <div class="footer-actions player-footer-actions">
+            <a href="{{ url_for('index') }}" class="btn-secondary">
+                <i class="fas fa-arrow-left"></i> 返回下载页
+            </a>
+            <a href="{{ url_for('player') }}" class="btn-secondary">
+                <i class="fas fa-video"></i> 视频播放器
+            </a>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/video.js/dist/video.min.js"></script>
+    <script>
+        var Button = videojs.getComponent('Button');
+        class DownloadButton extends Button {
+            constructor(player, options) {
+                super(player, options);
+                this.addClass('vjs-download-control');
+                this.controlText('下载音频');
+            }
+
+            handleClick(event) {
+                if (event) {
+                    event.preventDefault();
+                }
+                downloadCurrentAudio();
+            }
+        }
+        videojs.registerComponent('DownloadButton', DownloadButton);
+
+        var audioItems = {{ audio_items | tojson }};
+        var fallbackCoverUrl = {{ fallback_cover_url | tojson }};
+        var player = videojs('audio-player', {
+            audioPosterMode: true,
+            controlBar: {
+                pictureInPictureToggle: false,
+                fullscreenToggle: false
+            },
+            poster: fallbackCoverUrl
+        });
+        var currentIndex = 0;
+        var currentFilename = {{ (audio_items[0].filename if audio_items else '') | tojson }};
+        var playbackProgressPrefix = 'pyyoutubedl:audio-playback-progress:';
+        var playbackEndThreshold = 3;
+        var lastProgressSaveAt = 0;
+        var posterRequestSerial = 0;
+
+        player.ready(function () {
+            var controlBar = player.getChild('controlBar');
+            controlBar.addChild('DownloadButton', {}, controlBar.children().length);
+            if (audioItems.length > 0) {
+                updatePoster(audioItems[0]);
+            }
+            if (player.readyState() >= 1) {
+                restoreCurrentAudioProgress();
+            }
+        });
+
+        function findAudioItem(filename) {
+            return audioItems.find(function (item) {
+                return item.filename === filename;
+            });
+        }
+
+        function updatePoster(audioItem) {
+            var requestSerial = ++posterRequestSerial;
+            var candidates = (audioItem && audioItem.cover_candidates || []).slice();
+            player.poster(fallbackCoverUrl);
+
+            function tryCandidate(index) {
+                if (requestSerial !== posterRequestSerial || index >= candidates.length) {
+                    return;
+                }
+                var image = new Image();
+                image.referrerPolicy = 'no-referrer';
+                image.onload = function () {
+                    if (requestSerial === posterRequestSerial) {
+                        player.poster(candidates[index]);
+                    }
+                };
+                image.onerror = function () {
+                    tryCandidate(index + 1);
+                };
+                image.src = candidates[index];
+            }
+
+            tryCandidate(0);
+        }
+
+        function downloadCurrentAudio() {
+            var src = player.currentSrc();
+            if (!src || !currentFilename) {
+                return;
+            }
+
+            var link = document.createElement('a');
+            link.href = src;
+            link.download = currentFilename;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        }
+
+        function updatePlayerUrl(filename) {
+            var url = new URL(window.location.href);
+            url.searchParams.set('file', filename);
+            window.history.replaceState({ filename: filename }, '', url);
+        }
+
+        function playbackProgressKey(filename) {
+            return playbackProgressPrefix + filename;
+        }
+
+        function clearAudioProgress(filename) {
+            if (!filename) {
+                return;
+            }
+            try {
+                localStorage.removeItem(playbackProgressKey(filename));
+            } catch (error) {
+                console.warn('无法清除音频播放进度', error);
+            }
+        }
+
+        function saveCurrentAudioProgress() {
+            if (!currentFilename) {
+                return;
+            }
+            var currentTime = player.currentTime();
+            var duration = player.duration();
+            if (!Number.isFinite(currentTime) || currentTime <= 0) {
+                return;
+            }
+            try {
+                if (
+                    Number.isFinite(duration)
+                    && duration > 0
+                    && duration - currentTime <= playbackEndThreshold
+                ) {
+                    localStorage.removeItem(playbackProgressKey(currentFilename));
+                    return;
+                }
+                localStorage.setItem(
+                    playbackProgressKey(currentFilename),
+                    String(currentTime)
+                );
+            } catch (error) {
+                console.warn('无法保存音频播放进度', error);
+            }
+        }
+
+        function restoreCurrentAudioProgress() {
+            if (!currentFilename) {
+                return;
+            }
+            try {
+                var savedTime = Number(
+                    localStorage.getItem(playbackProgressKey(currentFilename))
+                );
+                var duration = player.duration();
+                if (!Number.isFinite(savedTime) || savedTime <= 0) {
+                    return;
+                }
+                if (
+                    Number.isFinite(duration)
+                    && duration > 0
+                    && savedTime < duration - playbackEndThreshold
+                ) {
+                    player.currentTime(savedTime);
+                } else {
+                    clearAudioProgress(currentFilename);
+                }
+            } catch (error) {
+                console.warn('无法恢复音频播放进度', error);
+            }
+        }
+
+        function updateCurrentAudioInfo(audioItem) {
+            document.getElementById('current-audio-title').textContent = audioItem.title;
+            var artist = document.getElementById('current-audio-artist');
+            artist.textContent = audioItem.artist || '';
+            artist.hidden = !audioItem.artist;
+        }
+
+        function updateActiveItem(filename) {
+            document.querySelectorAll('.playlist-item').forEach(function (item) {
+                var isActive = item.dataset.filename === filename;
+                item.classList.toggle('active', isActive);
+                if (isActive) {
+                    item.setAttribute('aria-current', 'true');
+                } else {
+                    item.removeAttribute('aria-current');
+                }
+            });
+        }
+
+        function switchAudio(element, savePrevious) {
+            var filename = element.dataset.filename;
+            var audioItem = findAudioItem(filename);
+            if (!audioItem) {
+                return;
+            }
+            if (savePrevious !== false) {
+                saveCurrentAudioProgress();
+            }
+
+            currentFilename = filename;
+            currentIndex = audioItems.indexOf(audioItem);
+            player.src({ type: audioItem.mime_type, src: audioItem.url });
+            updatePoster(audioItem);
+            updateCurrentAudioInfo(audioItem);
+            updateActiveItem(filename);
+            updatePlayerUrl(filename);
+            player.play();
+        }
+
+        player.on('ended', function () {
+            clearAudioProgress(currentFilename);
+            var nextIndex = currentIndex + 1;
+            if (nextIndex < audioItems.length) {
+                var playlistItems = document.querySelectorAll('.playlist-item');
+                var nextElement = playlistItems[nextIndex];
+                if (nextElement) {
+                    switchAudio(nextElement, false);
+                }
+            }
+        });
+
+        player.on('loadedmetadata', restoreCurrentAudioProgress);
+        player.on('timeupdate', function () {
+            var now = Date.now();
+            if (now - lastProgressSaveAt >= 2000) {
+                lastProgressSaveAt = now;
+                saveCurrentAudioProgress();
+            }
+        });
+        player.on('pause', saveCurrentAudioProgress);
+        window.addEventListener('beforeunload', saveCurrentAudioProgress);
+
+        player.on('play', function () {
+            var activeItem = document.querySelector('.playlist-item.active');
+            if (activeItem) {
+                activeItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        });
+    </script>
+    {% if show_waline %}
+        <link rel="stylesheet" href="https://unpkg.com/@waline/client@v3/dist/waline.css">
+        <script type="module">
+            import { init } from 'https://unpkg.com/@waline/client@v3/dist/waline.js';
+
+            const walinePath = `${window.location.hostname}${window.location.pathname}`;
+
+            init({
+                el: '#waline',
+                serverURL: 'https://waline.v2ai.eu.cc',
+                path: walinePath,
+                lang: 'zh-CN',
+            });
+        </script>
+    {% endif %}
+</body>
+
+</html>

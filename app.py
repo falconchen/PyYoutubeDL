@@ -7,7 +7,7 @@ import json
 import re
 import subprocess
 from functools import lru_cache
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote, urlparse
 import hashlib
 from werkzeug.utils import safe_join
 from config_util import load_config
@@ -60,6 +60,16 @@ DEFAULT_PROGRESS_PATTERN = re.compile(
 SUBTITLE_EXTENSIONS = {'ass', 'lrc', 'srt', 'ssa', 'ttml', 'vtt'}
 AUDIO_EXTENSIONS = {'aac', 'flac', 'm4a', 'mp3', 'ogg', 'opus', 'wav'}
 VIDEO_EXTENSIONS = {'avi', 'flv', 'mkv', 'mov', 'mp4', 'webm'}
+AUDIO_MIME_TYPES = {
+    'aac': 'audio/aac',
+    'flac': 'audio/flac',
+    'm4a': 'audio/mp4',
+    'mp3': 'audio/mpeg',
+    'ogg': 'audio/ogg',
+    'opus': 'audio/ogg',
+    'wav': 'audio/wav',
+}
+YOUTUBE_VIDEO_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]{11}$')
 
 # 保证文件夹存在
 os.makedirs(URLS_DIR, exist_ok=True)
@@ -461,17 +471,19 @@ def get_task_info(task):
         if average_speed is not None:
             progress["average_speed_bytes_per_second"] = average_speed
 
-        video_filename = next(
+        playable_extensions = AUDIO_EXTENSIONS if task_type == 'audio' else {'mp4'}
+        player_filename = next(
             (
                 filename for filename in available_files
-                if filename.lower().endswith('.mp4')
+                if os.path.splitext(filename)[1].lower().lstrip('.')
+                in playable_extensions
             ),
             None,
         )
-        if video_filename:
+        if player_filename:
             task_info["player_url"] = url_for(
-                'player',
-                file=video_filename,
+                'audio_player' if task_type == 'audio' else 'player',
+                file=player_filename,
             )
 
     return task_info
@@ -579,6 +591,161 @@ def get_embedded_subtitles(filename):
         stat.st_size,
     )]
 
+
+def extract_youtube_video_id(source_url):
+    """从常见 YouTube 地址中提取 11 位视频 ID。"""
+    if not isinstance(source_url, str) or not source_url.strip():
+        return None
+
+    try:
+        parsed = urlparse(source_url.strip())
+    except ValueError:
+        return None
+
+    hostname = (parsed.hostname or '').lower()
+    if hostname.startswith('www.'):
+        hostname = hostname[4:]
+    if hostname.startswith('m.'):
+        hostname = hostname[2:]
+
+    candidate = None
+    if hostname == 'youtu.be':
+        candidate = parsed.path.strip('/').split('/', 1)[0]
+    elif hostname in {'youtube.com', 'youtube-nocookie.com'}:
+        path_parts = [part for part in parsed.path.split('/') if part]
+        if parsed.path.rstrip('/') == '/watch':
+            candidate = parse_qs(parsed.query).get('v', [None])[0]
+        elif len(path_parts) >= 2 and path_parts[0] in {
+            'embed', 'live', 'shorts',
+        }:
+            candidate = path_parts[1]
+
+    if candidate and YOUTUBE_VIDEO_ID_PATTERN.fullmatch(candidate):
+        return candidate
+    return None
+
+
+def extract_youtube_video_id_from_text(text):
+    """从可能包含多个链接的 metadata 文本中找到首个 YouTube 视频 ID。"""
+    if not isinstance(text, str):
+        return None
+    urls = re.findall(
+        r'https?://[^\s\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]+',
+        text,
+    )
+    for source_url in urls:
+        video_id = extract_youtube_video_id(
+            source_url.rstrip('.,;:)]\'"。，；：）、）'),
+        )
+        if video_id:
+            return video_id
+    return None
+
+
+def build_audio_cover_candidates(video_id, fallback_url):
+    """生成按清晰度和可靠性排序的音频封面候选地址。"""
+    candidates = []
+    if video_id and YOUTUBE_VIDEO_ID_PATTERN.fullmatch(video_id):
+        base_url = f"https://i.ytimg.com/vi/{video_id}"
+        candidates.extend([
+            f"{base_url}/maxresdefault.jpg",
+            f"{base_url}/hqdefault.jpg",
+        ])
+    if isinstance(fallback_url, str) and fallback_url.strip():
+        candidates.append(fallback_url.strip())
+    return list(dict.fromkeys(candidates))
+
+
+@lru_cache(maxsize=256)
+def _probe_audio_metadata(filepath, file_mtime_ns, file_size):
+    """读取音频 metadata；文件属性参数用于在文件变化时自动失效缓存。"""
+    del file_mtime_ns, file_size
+    try:
+        result = subprocess.run(
+            [
+                'ffprobe', '-v', 'error',
+                '-show_entries', 'format_tags=title,artist,purl,comment',
+                '-of', 'json', filepath,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        payload = json.loads(result.stdout)
+        raw_tags = payload.get('format', {}).get('tags', {})
+    except (FileNotFoundError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+        app.logger.warning("读取音频 metadata 失败，使用文件名和默认封面: %s (%s)", filepath, exc)
+        return '', '', None
+
+    if not isinstance(raw_tags, dict):
+        raw_tags = {}
+
+    tags = {
+        str(key).lower(): value
+        for key, value in raw_tags.items()
+        if isinstance(value, str)
+    }
+    video_id = None
+    for tag_name in ('purl', 'comment'):
+        video_id = extract_youtube_video_id_from_text(tags.get(tag_name, ''))
+        if video_id:
+            break
+    return tags.get('title', ''), tags.get('artist', ''), video_id
+
+
+def get_audio_metadata(filename, fallback_cover_url):
+    """返回音频页面所需的标题、作者、MIME 和封面候选地址。"""
+    filepath = safe_join(FILES_DIR, filename)
+    extension = os.path.splitext(filename)[1].lower().lstrip('.')
+    fallback_title = os.path.splitext(filename)[0]
+    if (
+        not filepath
+        or extension not in AUDIO_EXTENSIONS
+        or not os.path.isfile(filepath)
+    ):
+        return {
+            'title': fallback_title,
+            'artist': '',
+            'mime_type': AUDIO_MIME_TYPES.get(extension, 'audio/mpeg'),
+            'cover_candidates': build_audio_cover_candidates(
+                None,
+                fallback_cover_url,
+            ),
+        }
+
+    try:
+        stat = os.stat(filepath)
+        title, artist, video_id = _probe_audio_metadata(
+            filepath,
+            stat.st_mtime_ns,
+            stat.st_size,
+        )
+    except OSError as exc:
+        app.logger.warning("读取音频文件属性失败，使用默认信息: %s (%s)", filepath, exc)
+        title, artist, video_id = '', '', None
+
+    return {
+        'title': title or fallback_title,
+        'artist': artist,
+        'mime_type': AUDIO_MIME_TYPES.get(extension, 'audio/mpeg'),
+        'cover_candidates': build_audio_cover_candidates(
+            video_id,
+            fallback_cover_url,
+        ),
+    }
+
+
+def get_player_exclude_keywords():
+    exclude_keywords = config.get("PLAYER_FILENAME_EXCLUDE_KEYWORDS", [])
+    if not isinstance(exclude_keywords, list):
+        app.logger.warning("PLAYER_FILENAME_EXCLUDE_KEYWORDS 必须是字符串数组，已忽略无效配置")
+        return []
+    return [
+        keyword for keyword in exclude_keywords
+        if isinstance(keyword, str) and keyword
+    ]
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -612,14 +779,7 @@ def index():
 
 @app.route('/player')
 def player():
-    exclude_keywords = config.get("PLAYER_FILENAME_EXCLUDE_KEYWORDS", [])
-    if not isinstance(exclude_keywords, list):
-        app.logger.warning("PLAYER_FILENAME_EXCLUDE_KEYWORDS 必须是字符串数组，已忽略无效配置")
-        exclude_keywords = []
-    exclude_keywords = [
-        keyword for keyword in exclude_keywords
-        if isinstance(keyword, str) and keyword
-    ]
+    exclude_keywords = get_player_exclude_keywords()
 
     # 获取 files 目录下的所有 mp4 文件
     video_files = [
@@ -651,6 +811,51 @@ def player():
         'player.html',
         video_files=video_files,
         subtitle_tracks=subtitle_tracks,
+        show_waline=config.get("SHOW_WALINE_ON_PLAYER", False),
+    )
+
+
+@app.route('/audio-player')
+def audio_player():
+    exclude_keywords = get_player_exclude_keywords()
+    audio_files = [
+        filename for filename in os.listdir(FILES_DIR)
+        if os.path.splitext(filename)[1].lower().lstrip('.') in AUDIO_EXTENSIONS
+        and not any(keyword in filename for keyword in exclude_keywords)
+    ]
+    audio_files.sort(
+        key=lambda filename: os.path.getmtime(os.path.join(FILES_DIR, filename)),
+        reverse=True,
+    )
+
+    requested_file = request.args.get('file', '')
+    if requested_file in audio_files:
+        audio_files.remove(requested_file)
+        audio_files.insert(0, requested_file)
+
+    fallback_cover_url = config.get(
+        'AUDIO_PLAYER_FALLBACK_COVER_URL',
+        url_for('static', filename='images/audio-cover-default.svg'),
+    )
+    if not isinstance(fallback_cover_url, str) or not fallback_cover_url.strip():
+        fallback_cover_url = url_for(
+            'static',
+            filename='images/audio-cover-default.svg',
+        )
+
+    audio_items = []
+    for filename in audio_files:
+        metadata = get_audio_metadata(filename, fallback_cover_url)
+        metadata.update({
+            'filename': filename,
+            'url': url_for('serve_file', filename=filename),
+        })
+        audio_items.append(metadata)
+
+    return render_template(
+        'audio_player.html',
+        audio_items=audio_items,
+        fallback_cover_url=fallback_cover_url,
         show_waline=config.get("SHOW_WALINE_ON_PLAYER", False),
     )
     
