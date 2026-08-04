@@ -150,6 +150,7 @@ video (2).mp4
 | `YTA_DLP_OUTPUT_TEMPLATE` | string | 音频文件名主体模板；下载时自动添加 `MMDDHHmm-` 前缀 |
 | `PLAYER_FILENAME_EXCLUDE_KEYWORDS` | array | 播放器列表排除的文件名关键词，任一非空关键词命中即隐藏，默认 `[]` |
 | `AUDIO_PLAYER_FALLBACK_COVER_URL` | string | YouTube 音频封面不可用时的图片 URL，默认 `/static/images/audio-cover-default.svg` |
+| `ENABLE_WEBDAV_UPLOAD` | bool | 是否将下载完成的文件上传到 WebDAV，默认 `true`；关闭时文件保留在本地 |
 | `DELETE_AFTER_UPLOAD` | bool | WebDAV 上传后是否删除本地文件 |
 | `FILES_EXPIRE_DAYS` | int | 启动时清理超过 N 天的旧文件，0 表示不清理 |
 | `VIDEO_WEBDAV_OPTIONS` | object | 视频 WebDAV 远程存储配置 |
@@ -159,6 +160,8 @@ video (2).mp4
 | `FLASK_HOST` | string | Flask 监听地址，默认 `0.0.0.0` |
 | `FLASK_DEBUG` | bool | Flask 调试模式 |
 | `SCHEDULED_PLAYLISTS` | array | 定时下载的播放列表配置 |
+
+将 `ENABLE_WEBDAV_UPLOAD` 设为 `false` 后，`runner.sh` 和 `start.py` 会输出“WebDAV上传已关闭，已跳过启动上传器。”，不再启动上传器进程。此时不会连接 WebDAV、上传或删除下载文件，也不会执行本地过期文件和 WebDAV 远端日期目录清理；下载文件会保留在 `FILES_DIR`。直接运行 `webdav_uploader.py` 时，进程会保持空闲并执行相同的禁用行为。
 
 下载文件名使用 `TIMEZONE` 指定时区的任务开始时间作为前缀，格式为“月份、日期、小时、分钟”，各字段不足两位时前补 `0`。例如 8 月 4 日 01:01 开始下载时，文件名为 `08040101-当前命名模板.mp4`。字幕等由 yt-dlp 生成的关联文件使用相同前缀。
 

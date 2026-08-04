@@ -24,6 +24,7 @@ DEFAULT_CONFIG = {
     "BARK_DEVICE_TOKEN": "",        # Bark 通知推送 Token
     
     # WebDAV上传器配置
+    "ENABLE_WEBDAV_UPLOAD": True,  # 是否将下载完成的文件上传到 WebDAV
     "WEBDAV_OPTIONS": {},           # WebDAV 连接选项 (hostname, login, password 等)
     "UPLOAD_MAX_RETRIES": 3,        # 上传失败最大重试次数
     "UPLOAD_RETRY_DELAY": 60,       # 上传失败重试间隔（秒）
@@ -48,6 +49,11 @@ def build_dated_output_template(output_template, timezone_name):
     timezone = pytz.timezone(timezone_name)
     prefix = datetime.now(timezone).strftime('%m%d%H%M')
     return f"{prefix}-{output_template}"
+
+
+def is_webdav_upload_enabled(runtime_config):
+    """返回是否启用 WebDAV 上传；未配置时默认启用。"""
+    return bool(runtime_config.get("ENABLE_WEBDAV_UPLOAD", True))
 
 
 def load_config(default_config=None, config_keys=None):

@@ -48,20 +48,31 @@ def get_domain_from_path():
             return parts[idx + 1]
     return None
 
+
+def get_service_scripts(runtime_config):
+    """返回当前配置需要启动的后台服务。"""
+    from config_util import is_webdav_upload_enabled
+
+    scripts = [('downloader.py', '下载器')]
+    if is_webdav_upload_enabled(runtime_config):
+        scripts.append(('webdav_uploader.py', '上传器'))
+    return scripts
+
 def start_processes():
     """启动下载器、上传器和Web应用进程"""
     # 确保在虚拟环境中运行
     restart_in_venv()
+    from config_util import is_webdav_upload_enabled, load_config
 
     # 获取脚本所在目录
     base_dir = os.path.dirname(os.path.abspath(__file__))
     
     # 设置进程列表
     processes = []
-    scripts = [
-        ('downloader.py', '下载器'),
-        ('webdav_uploader.py', '上传器')
-    ]
+    runtime_config = load_config()
+    scripts = get_service_scripts(runtime_config)
+    if not is_webdav_upload_enabled(runtime_config):
+        print("WebDAV上传已关闭，已跳过启动上传器。")
 
     try:
         # 启动所有进程
@@ -145,4 +156,4 @@ def start_processes():
                 print(f"强制终止{name}")
 
 if __name__ == '__main__':
-    start_processes() 
+    start_processes()

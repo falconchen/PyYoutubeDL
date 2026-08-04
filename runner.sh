@@ -80,8 +80,18 @@ stop_services() {
     fi
 }
 
+webdav_upload_status() {
+    python -c '
+import sys
+from config_util import is_webdav_upload_enabled, load_config
+
+sys.exit(0 if is_webdav_upload_enabled(load_config()) else 10)
+'
+}
+
 start_services() {
     local services_failed=0
+    local webdav_status
 
     if ! command -v devil >/dev/null 2>&1; then
         echo "未检测到devil命令，使用python方式启动Web应用..."
@@ -91,53 +101,71 @@ start_services() {
     fi
 
     start_service "下载器" "downloader.py" || services_failed=1
-    start_service "上传器" "webdav_uploader.py" || services_failed=1
+    if webdav_upload_status; then
+        start_service "上传器" "webdav_uploader.py" || services_failed=1
+    else
+        webdav_status=$?
+        if [ "$webdav_status" -eq 10 ]; then
+            echo "WebDAV上传已关闭，已跳过启动上传器。"
+        else
+            echo "无法读取WebDAV上传配置，已跳过启动上传器。"
+            services_failed=1
+        fi
+    fi
 
     if [ "$services_failed" -ne 0 ]; then
         echo "部分服务启动失败，请根据上述原因检查配置或日志。"
         return 1
     fi
 
-    echo "所有服务已启动完成！"
+    echo "所有已启用的服务启动完成！"
 }
 
-if [ "$#" -gt 1 ]; then
-    show_usage
-    exit 2
-fi
+main() {
+    local action
 
-action="${1:-restart}"
-case "$action" in
-    start|stop|restart)
-        ;;
-    -h|--help)
+    if [ "$#" -gt 1 ]; then
         show_usage
-        exit 0
-        ;;
-    *)
-        echo "无效操作: $action"
-        show_usage
-        exit 2
-        ;;
-esac
+        return 2
+    fi
 
-# 检查并激活虚拟环境
-if [ -d "$SCRIPT_DIR/venv" ]; then
-    # shellcheck disable=SC1091
-    source "$SCRIPT_DIR/venv/bin/activate"
-    echo "已激活虚拟环境"
+    action="${1:-restart}"
+    case "$action" in
+        start|stop|restart)
+            ;;
+        -h|--help)
+            show_usage
+            return 0
+            ;;
+        *)
+            echo "无效操作: $action"
+            show_usage
+            return 2
+            ;;
+    esac
+
+    # 检查并激活虚拟环境
+    if [ -d "$SCRIPT_DIR/venv" ]; then
+        # shellcheck disable=SC1091
+        source "$SCRIPT_DIR/venv/bin/activate"
+        echo "已激活虚拟环境"
+    fi
+
+    cd "$SCRIPT_DIR" || return 1
+
+    case "$action" in
+        start)
+            update_dependencies && start_services
+            ;;
+        stop)
+            stop_services
+            ;;
+        restart)
+            update_dependencies && stop_services true && start_services
+            ;;
+    esac
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main "$@"
 fi
-
-cd "$SCRIPT_DIR" || exit 1
-
-case "$action" in
-    start)
-        update_dependencies && start_services
-        ;;
-    stop)
-        stop_services
-        ;;
-    restart)
-        update_dependencies && stop_services true && start_services
-        ;;
-esac
