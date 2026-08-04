@@ -153,10 +153,83 @@ class TestTaskInfoAPI(unittest.TestCase):
         progress = response.get_json()['tasks'][0]['progress']
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(progress['downloaded'], '')
-        self.assertEqual(progress['total'], '5.44MiB')
-        self.assertEqual(progress['speed'], '645.56KiB/s')
-        self.assertEqual(progress['eta'], '')
+        self.assertNotIn('downloaded', progress)
+        self.assertNotIn('total', progress)
+        self.assertNotIn('speed', progress)
+        self.assertNotIn('eta', progress)
+
+    def test_completed_task_returns_persisted_final_summary(self):
+        task_id = 'v20260804120000Sum'
+        filename = 'final.mp4'
+        self.write_task(task_id, '.ok')
+        files_dir = Path(self.temp_dir.name) / 'files'
+        files_dir.mkdir()
+        (files_dir / filename).write_bytes(b'v' * 10)
+        (self.urls_dir / f'{task_id}.result.json').write_text(
+            json.dumps({
+                'files': [filename, 'final.zh-Hans.srt'],
+                'summary': {
+                    'primary_file': filename,
+                    'final_size_bytes': 101384507,
+                    'elapsed_seconds': 132.4,
+                    'average_speed_bytes_per_second': 765744.0,
+                },
+            }),
+            encoding='utf-8',
+        )
+
+        with patch.object(app, 'FILES_DIR', str(files_dir)):
+            response = self.client.post(
+                '/api/task_info',
+                json={'tasks': task_id},
+            )
+        progress = response.get_json()['tasks'][0]['progress']
+
+        self.assertEqual(progress['final_size_bytes'], 101384507)
+        self.assertEqual(progress['elapsed_seconds'], 132.4)
+        self.assertEqual(
+            progress['average_speed_bytes_per_second'],
+            765744.0,
+        )
+        self.assertNotIn('downloaded', progress)
+        self.assertNotIn('total', progress)
+        self.assertNotIn('speed', progress)
+        self.assertNotIn('eta', progress)
+
+    def test_legacy_completed_task_returns_only_final_file_size(self):
+        task_id = 'a20260804120000Old'
+        filename = 'final.mp3'
+        self.write_task(task_id, '.ok')
+        files_dir = Path(self.temp_dir.name) / 'files'
+        files_dir.mkdir()
+        (files_dir / filename).write_bytes(b'a' * 2048)
+        (files_dir / 'final.zh-Hans.srt').write_bytes(b's' * 8192)
+        (self.urls_dir / f'{task_id}.result.json').write_text(
+            json.dumps({'files': [filename, 'final.zh-Hans.srt']}),
+            encoding='utf-8',
+        )
+
+        with patch.object(app, 'FILES_DIR', str(files_dir)):
+            response = self.client.post(
+                '/api/task_info',
+                json={'tasks': task_id},
+            )
+        progress = response.get_json()['tasks'][0]['progress']
+
+        self.assertEqual(progress['final_size_bytes'], 2048)
+        self.assertNotIn('elapsed_seconds', progress)
+        self.assertNotIn('average_speed_bytes_per_second', progress)
+
+    def test_completed_template_uses_final_summary_fields(self):
+        template = Path(app.app.template_folder, 'index.html').read_text(
+            encoding='utf-8',
+        )
+
+        self.assertIn("if (state === 'completed')", template)
+        self.assertIn('progress.final_size_bytes', template)
+        self.assertIn('progress.elapsed_seconds', template)
+        self.assertIn('progress.average_speed_bytes_per_second', template)
+        self.assertIn('detailParts.push(`${finalSize} in ${elapsed}`);', template)
 
     def test_completed_task_is_always_100_percent(self):
         task_id = 'v20260723120000QwE'

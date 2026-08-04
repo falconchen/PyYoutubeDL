@@ -268,6 +268,30 @@
                     && !['NA', 'N/A', 'NONE', 'NULL', 'UNKNOWN'].includes(normalized);
             }
 
+            function formatByteCount(value) {
+                let size = Number(value);
+                if (!Number.isFinite(size) || size < 0) return '';
+                const units = ['B', 'K', 'M', 'G', 'T'];
+                let unitIndex = 0;
+                while (size >= 1024 && unitIndex < units.length - 1) {
+                    size /= 1024;
+                    unitIndex++;
+                }
+                return `${size.toFixed(unitIndex === 0 ? 0 : 2)}${units[unitIndex]}`;
+            }
+
+            function formatElapsedTime(value) {
+                const parsed = Number(value);
+                if (!Number.isFinite(parsed) || parsed < 0) return '';
+                const totalSeconds = Math.round(parsed);
+                const hours = Math.floor(totalSeconds / 3600);
+                const minutes = Math.floor((totalSeconds % 3600) / 60);
+                const seconds = totalSeconds % 60;
+                return [hours, minutes, seconds]
+                    .map(part => String(part).padStart(2, '0'))
+                    .join(':');
+            }
+
             function renderTask(task) {
                 const item = taskItems.find(element => element.dataset.task === task.task);
                 if (!item) return;
@@ -292,20 +316,34 @@
                 stageText.textContent = stageLabels[stage] || stageLabels[state] || stage;
 
                 const detailParts = [];
-                if (state === 'queued') detailParts.push('等待下载器处理');
-                if (state === 'downloading' && progress.phase === 'starting') detailParts.push('正在准备下载');
-                if (hasProgressValue(progress.downloaded) && hasProgressValue(progress.total)) {
-                    detailParts.push(
-                        `${formatByteUnits(progress.downloaded)} / ${formatByteUnits(progress.total)}`
+                if (state === 'completed') {
+                    const finalSize = formatByteCount(progress.final_size_bytes);
+                    const elapsed = formatElapsedTime(progress.elapsed_seconds);
+                    const averageSpeed = formatByteCount(
+                        progress.average_speed_bytes_per_second
                     );
-                } else if (hasProgressValue(progress.total)) {
-                    detailParts.push(formatByteUnits(progress.total));
+                    if (finalSize && elapsed) {
+                        detailParts.push(`${finalSize} in ${elapsed}`);
+                    } else if (finalSize) {
+                        detailParts.push(finalSize);
+                    }
+                    if (averageSpeed) detailParts.push(`${averageSpeed}/s`);
+                    detailParts.push('下载完成');
+                } else {
+                    if (state === 'queued') detailParts.push('等待下载器处理');
+                    if (state === 'downloading' && progress.phase === 'starting') detailParts.push('正在准备下载');
+                    if (hasProgressValue(progress.downloaded) && hasProgressValue(progress.total)) {
+                        detailParts.push(
+                            `${formatByteUnits(progress.downloaded)} / ${formatByteUnits(progress.total)}`
+                        );
+                    } else if (hasProgressValue(progress.total)) {
+                        detailParts.push(formatByteUnits(progress.total));
+                    }
+                    if (hasProgressValue(progress.speed)) {
+                        detailParts.push(formatByteUnits(progress.speed));
+                    }
+                    if (hasProgressValue(progress.eta)) detailParts.push(`剩余 ${progress.eta}`);
                 }
-                if (hasProgressValue(progress.speed)) {
-                    detailParts.push(formatByteUnits(progress.speed));
-                }
-                if (hasProgressValue(progress.eta)) detailParts.push(`剩余 ${progress.eta}`);
-                if (state === 'completed') detailParts.push('下载完成');
                 if (state === 'failed') detailParts.push('下载失败，请查看日志');
                 if (state === 'missing') detailParts.push(task.msg || '任务不存在');
                 details.textContent = detailParts.join(' · ') || '正在获取进度';

@@ -187,6 +187,105 @@ class TestDownloaderMove(unittest.TestCase):
                 {'video (1).mp4', 'video.zh-Hans.srt'},
             )
 
+    def test_video_summary_uses_largest_final_video_and_full_elapsed_time(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            tmp_dir = root_path / 'tmp' / 'v20260804120000Vid'
+            files_dir = root_path / 'files'
+            urls_dir = root_path / 'urls'
+            tmp_dir.mkdir(parents=True)
+            files_dir.mkdir()
+            urls_dir.mkdir()
+            (tmp_dir / 'small.mp4').write_bytes(b'v' * 8)
+            (tmp_dir / 'final.mkv').write_bytes(b'v' * 24)
+            (tmp_dir / 'final.zh-Hans.srt').write_bytes(b's' * 100)
+
+            with (
+                patch.dict(
+                    downloader.config,
+                    {
+                        'FILES_DIR': str(files_dir),
+                        'URLS_DIR': str(urls_dir),
+                    },
+                ),
+                patch('downloader.time.monotonic', return_value=132.4),
+            ):
+                result = self.handler.move_files(
+                    str(tmp_dir),
+                    task_id='v20260804120000Vid',
+                    mode='video',
+                    started_at=0,
+                )
+
+            result_data = json.loads(
+                (urls_dir / 'v20260804120000Vid.result.json').read_text(
+                    encoding='utf-8',
+                )
+            )
+            summary = result_data['summary']
+            self.assertTrue(result)
+            self.assertEqual(summary['primary_file'], 'final.mkv')
+            self.assertEqual(summary['final_size_bytes'], 24)
+            self.assertEqual(summary['elapsed_seconds'], 132.4)
+            self.assertAlmostEqual(
+                summary['average_speed_bytes_per_second'],
+                24 / 132.4,
+            )
+
+    def test_audio_summary_uses_audio_file_and_ignores_subtitle(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            audio = root_path / 'final.mp3'
+            subtitle = root_path / 'final.zh-Hans.srt'
+            audio.write_bytes(b'a' * 20)
+            subtitle.write_bytes(b's' * 200)
+
+            summary = downloader.build_task_summary(
+                [str(audio), str(subtitle)],
+                'audio',
+                10,
+            )
+
+            self.assertEqual(summary['primary_file'], 'final.mp3')
+            self.assertEqual(summary['final_size_bytes'], 20)
+            self.assertEqual(summary['average_speed_bytes_per_second'], 2)
+
+    def test_single_video_output_still_generates_summary(self):
+        with tempfile.TemporaryDirectory() as root:
+            video = Path(root) / 'only-video.mp4'
+            video.write_bytes(b'v' * 50)
+
+            summary = downloader.build_task_summary(
+                [str(video)],
+                'video',
+                5,
+            )
+
+            self.assertEqual(summary['primary_file'], 'only-video.mp4')
+            self.assertEqual(summary['final_size_bytes'], 50)
+            self.assertEqual(summary['elapsed_seconds'], 5)
+            self.assertEqual(summary['average_speed_bytes_per_second'], 10)
+
+    def test_process_timer_starts_after_entering_downloading_state(self):
+        with tempfile.TemporaryDirectory() as root:
+            task_path = Path(root) / 'v20260804120000Tim.txt'
+            task_path.write_text('https://example.com/video', encoding='utf-8')
+
+            with (
+                patch('downloader.time.sleep'),
+                patch('downloader.time.monotonic', return_value=123.5),
+                patch.object(self.handler, 'download', return_value=True) as download,
+            ):
+                self.handler.process_file(str(task_path))
+
+            download.assert_called_once_with(
+                'https://example.com/video',
+                'v20260804120000Tim',
+                'video',
+                started_at=123.5,
+            )
+            self.assertTrue((Path(root) / 'v20260804120000Tim.ok').exists())
+
 
 if __name__ == '__main__':
     unittest.main()

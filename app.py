@@ -192,6 +192,34 @@ def normalize_progress_value(value):
     return normalized
 
 
+def valid_nonnegative_number(value):
+    """返回有效的非负数；布尔值和非法数据返回 None。"""
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number < 0 or not (number < float('inf')):
+        return None
+    return number
+
+
+def select_primary_result_file(filenames, task_type):
+    """从本地可用产物中选择最大的主媒体文件。"""
+    extensions = AUDIO_EXTENSIONS if task_type == 'audio' else VIDEO_EXTENSIONS
+    candidates = []
+    for filename in filenames:
+        extension = os.path.splitext(filename)[1].lower().lstrip('.')
+        filepath = safe_join(FILES_DIR, filename)
+        if extension not in extensions or not filepath or not os.path.isfile(filepath):
+            continue
+        candidates.append((os.path.getsize(filepath), filename))
+    if not candidates:
+        return None
+    return max(candidates)[1]
+
+
 def parse_task_progress(log_path):
     """从任务日志末尾提取 yt-dlp 最近一次下载进度。"""
     if not os.path.isfile(log_path):
@@ -343,14 +371,18 @@ def get_task_info(task):
     except ValueError:
         time_fmt = timestamp
 
-    progress = parse_task_progress(
-        os.path.join(config["LOG_DIR"], f"{task}.log")
-    )
+    task_type = 'video' if task[0] == 'v' else 'audio'
     if state == 'completed':
-        progress["percent"] = 100.0
-        progress["phase"] = "finished"
-        progress["stage"] = "completed"
-    elif state == 'queued':
+        progress = {
+            "percent": 100.0,
+            "phase": "finished",
+            "stage": "completed",
+        }
+    else:
+        progress = parse_task_progress(
+            os.path.join(config["LOG_DIR"], f"{task}.log")
+        )
+    if state == 'queued':
         progress = {
             "percent": 0.0,
             "phase": "queued",
@@ -368,7 +400,7 @@ def get_task_info(task):
     task_info = {
         "task": task,
         "exists": True,
-        "type": 'video' if task[0] == 'v' else 'audio',
+        "type": task_type,
         "timestamp": task[1:],
         "time": time_fmt,
         "url": url,
@@ -396,6 +428,39 @@ def get_task_info(task):
                 available_files.append(filename)
 
         task_info["files"] = available_files
+        summary = result_data.get("summary", {})
+        if not isinstance(summary, dict):
+            summary = {}
+
+        final_size_bytes = valid_nonnegative_number(
+            summary.get("final_size_bytes")
+        )
+        elapsed_seconds = valid_nonnegative_number(
+            summary.get("elapsed_seconds")
+        )
+        average_speed = valid_nonnegative_number(
+            summary.get("average_speed_bytes_per_second")
+        )
+
+        primary_filename = summary.get("primary_file")
+        if not isinstance(primary_filename, str):
+            primary_filename = None
+        if final_size_bytes is None:
+            primary_filename = select_primary_result_file(
+                available_files,
+                task_type,
+            )
+            if primary_filename:
+                primary_path = safe_join(FILES_DIR, primary_filename)
+                final_size_bytes = os.path.getsize(primary_path)
+
+        if final_size_bytes is not None:
+            progress["final_size_bytes"] = final_size_bytes
+        if elapsed_seconds is not None:
+            progress["elapsed_seconds"] = elapsed_seconds
+        if average_speed is not None:
+            progress["average_speed_bytes_per_second"] = average_speed
+
         video_filename = next(
             (
                 filename for filename in available_files

@@ -34,6 +34,9 @@ logger = setup_logger(
     timezone=config.get("TIMEZONE", "UTC")
 )
 
+VIDEO_OUTPUT_EXTENSIONS = {'.avi', '.flv', '.mkv', '.mov', '.mp4', '.webm'}
+AUDIO_OUTPUT_EXTENSIONS = {'.aac', '.flac', '.m4a', '.mp3', '.ogg', '.opus', '.wav'}
+
 
 def destination_with_counter(destination, counter):
     """为同名文件生成 `文件名 (N).扩展名` 形式的候选路径。"""
@@ -89,7 +92,53 @@ def move_without_overwrite(source, destination):
     return final_destination
 
 
-def write_task_result(task_id, filenames):
+def select_primary_media_file(filepaths, mode, file_sizes=None):
+    """从最终产物中选择最大的主媒体文件，字幕等辅助文件不参与。"""
+    extensions = (
+        AUDIO_OUTPUT_EXTENSIONS if mode == 'audio'
+        else VIDEO_OUTPUT_EXTENSIONS
+    )
+    candidates = []
+    for filepath in filepaths:
+        extension = os.path.splitext(filepath)[1].lower()
+        if extension not in extensions:
+            continue
+        if file_sizes is not None and filepath in file_sizes:
+            size = file_sizes[filepath]
+        elif os.path.isfile(filepath):
+            size = os.path.getsize(filepath)
+        else:
+            continue
+        candidates.append((size, os.path.basename(filepath), filepath))
+    if not candidates:
+        return None
+    return max(candidates)[2]
+
+
+def build_task_summary(filepaths, mode, elapsed_seconds, file_sizes=None):
+    """根据最终主媒体和完整处理耗时生成任务完成摘要。"""
+    primary_file = select_primary_media_file(filepaths, mode, file_sizes)
+    if primary_file is None:
+        return None
+
+    final_size_bytes = (
+        file_sizes[primary_file]
+        if file_sizes is not None and primary_file in file_sizes
+        else os.path.getsize(primary_file)
+    )
+    elapsed_seconds = max(0.0, float(elapsed_seconds))
+    average_speed = (
+        final_size_bytes / elapsed_seconds if elapsed_seconds > 0 else 0.0
+    )
+    return {
+        "primary_file": os.path.basename(primary_file),
+        "final_size_bytes": final_size_bytes,
+        "elapsed_seconds": elapsed_seconds,
+        "average_speed_bytes_per_second": average_speed,
+    }
+
+
+def write_task_result(task_id, filenames, summary=None):
     """原子写入任务最终产物清单，供 Web 页面生成精确播放链接。"""
     result_path = os.path.join(config["URLS_DIR"], f"{task_id}.result.json")
     temporary_path = None
@@ -103,7 +152,10 @@ def write_task_result(task_id, filenames):
             delete=False,
         ) as result_file:
             temporary_path = result_file.name
-            json.dump({"files": filenames}, result_file, ensure_ascii=False)
+            result_data = {"files": filenames}
+            if summary:
+                result_data["summary"] = summary
+            json.dump(result_data, result_file, ensure_ascii=False)
             result_file.flush()
             os.fsync(result_file.fileno())
         os.replace(temporary_path, result_path)
@@ -166,13 +218,19 @@ class DownloadHandler(FileSystemEventHandler):
             downloading_path = filepath.rsplit('.', 1)[0] + '.downloading'
             try:
                 os.rename(filepath, downloading_path)
+                started_at = time.monotonic()
                 logger.info(f"任务开始，文件重命名为: {downloading_path}")
             except Exception as e:
                 logger.error(f"重命名为.downloading失败: {e}")
                 return
             # 根据首字母判断模式
             mode = 'audio' if base_name[0] == 'a' else 'video'
-            result = self.download(url, base_name, mode)
+            result = self.download(
+                url,
+                base_name,
+                mode,
+                started_at=started_at,
+            )
             new_extension = '.ok' if result else '.fail'
             new_filepath = downloading_path.rsplit('.', 1)[0] + new_extension
             os.rename(downloading_path, new_filepath)
@@ -186,7 +244,7 @@ class DownloadHandler(FileSystemEventHandler):
                         title="下载失败",
                         content=f"{url} 下载失败，错误信息: {e}")
 
-    def download(self, url, base_name, mode):
+    def download(self, url, base_name, mode, started_at=None):
         """
         使用 yt-dlp 调用外部命令行执行视频/音频下载。
 
@@ -194,6 +252,7 @@ class DownloadHandler(FileSystemEventHandler):
             url (str): 视频/音频的 URL。
             base_name (str): 任务基础名称（用于日志和临时目录）。
             mode (str): 'video' 或 'audio' 模式。
+            started_at (float | None): 任务进入 downloading 状态时的单调时钟。
 
         Returns:
             bool: 下载成功返回 True，失败返回 False。
@@ -264,7 +323,12 @@ class DownloadHandler(FileSystemEventHandler):
                 if process.returncode != 0:
                     raise subprocess.CalledProcessError(process.returncode, cmd)
             
-            if not self.move_files(task_tmp_dir, task_id=base_name):
+            if not self.move_files(
+                task_tmp_dir,
+                task_id=base_name,
+                mode=mode,
+                started_at=started_at,
+            ):
                 logger.error(f"下载产物移动失败，临时文件已保留: {task_tmp_dir}")
                 return False
             logger.info(f"下载完成: {url}")
@@ -286,16 +350,20 @@ class DownloadHandler(FileSystemEventHandler):
                         content=f"{url} 下载失败，错误信息: {e}")
             return False
 
-    def move_files(self, tmp_dir, task_id=None):
+    def move_files(self, tmp_dir, task_id=None, mode=None, started_at=None):
         """
         将下载完成的文件从临时目录移动到正式的文件输出目录。
 
         Args:
             tmp_dir (str): 下载任务的临时目录路径。
             task_id (str | None): 任务 ID；提供时记录最终产物文件名。
+            mode (str | None): video 或 audio，用于选择最终主媒体。
+            started_at (float | None): 完整处理计时起点。
         """
         move_succeeded = True
         moved_filenames = []
+        moved_filepaths = []
+        moved_file_sizes = {}
         for filename in os.listdir(tmp_dir):
             src = os.path.join(tmp_dir, filename)
             dst = os.path.join(config["FILES_DIR"], filename)
@@ -303,11 +371,14 @@ class DownloadHandler(FileSystemEventHandler):
                 logger.warning(f"源文件不存在，跳过处理: {src}")
                 continue
             try:
+                source_size = os.path.getsize(src)
                 final_dst = move_without_overwrite(src, dst)
                 if final_dst != dst:
                     logger.info(f"目标文件已存在，自动重命名为: {os.path.basename(final_dst)}")
                 logger.info(f"已移动文件: {src} -> {final_dst}")
                 moved_filenames.append(os.path.basename(final_dst))
+                moved_filepaths.append(final_dst)
+                moved_file_sizes[final_dst] = source_size
             except Exception as e:
                 logger.error(f"移动文件失败: {src}, 错误信息: {e}")
                 move_succeeded = False
@@ -319,7 +390,15 @@ class DownloadHandler(FileSystemEventHandler):
                 logger.error(f"删除临时目录失败: {tmp_dir}, 错误信息: {e}")
                 move_succeeded = False
         if move_succeeded and task_id:
-            write_task_result(task_id, moved_filenames)
+            summary = None
+            if mode in {'video', 'audio'} and started_at is not None:
+                summary = build_task_summary(
+                    moved_filepaths,
+                    mode,
+                    time.monotonic() - started_at,
+                    moved_file_sizes,
+                )
+            write_task_result(task_id, moved_filenames, summary=summary)
         return move_succeeded
 
 def start_monitor(folder):
