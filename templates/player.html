@@ -101,15 +101,21 @@
         var player = videojs('video-player');
         var video_files = {{ video_files | tojson }};
         var subtitle_tracks = {{ subtitle_tracks | tojson }};
+        var browser_subtitle_languages = {{ browser_subtitle_languages | tojson }};
         var currentIndex = 0;
         var currentFilename = {{ (video_files[0] if video_files else '') | tojson }};
         var playbackProgressPrefix = 'pyyoutubedl:playback-progress:';
+        var subtitlePreferenceKey = 'pyyoutubedl:subtitle-preference';
         var playbackEndThreshold = 3;
         var lastProgressSaveAt = 0;
+        var applyingSubtitlePreference = false;
+        var subtitlePreferenceApplySerial = 0;
 
         player.ready(function () {
             var controlBar = player.getChild('controlBar');
             controlBar.addChild('DownloadButton', {}, controlBar.children().length);
+            player.textTracks().addEventListener('change', saveSubtitlePreference);
+            applySubtitlePreference();
             if (player.readyState() >= 1) {
                 restoreCurrentVideoProgress();
             }
@@ -208,6 +214,175 @@
             }
         }
 
+        function normalizeSubtitleLanguage(language) {
+            return String(language || '')
+                .trim()
+                .replace(/_/g, '-')
+                .toLowerCase();
+        }
+
+        function subtitleLanguageVariant(language) {
+            var normalized = normalizeSubtitleLanguage(language);
+            if (/^zh-(hans|cn|sg)(-|$)/.test(normalized)) {
+                return 'zh-Hans';
+            }
+            if (/^zh-(hant|tw|hk|mo)(-|$)/.test(normalized)) {
+                return 'zh-Hant';
+            }
+            return '';
+        }
+
+        function getSubtitleTracks() {
+            var textTracks = player.textTracks();
+            var tracks = [];
+            for (var index = 0; index < textTracks.length; index++) {
+                if (
+                    textTracks[index].kind === 'subtitles'
+                    || textTracks[index].kind === 'captions'
+                ) {
+                    tracks.push(textTracks[index]);
+                }
+            }
+            return tracks;
+        }
+
+        function getDefaultSubtitleLanguages() {
+            var navigatorLanguages = navigator.languages && navigator.languages.length
+                ? navigator.languages
+                : [navigator.language];
+            var languages = browser_subtitle_languages.concat(navigatorLanguages || []);
+            var normalizedLanguages = [];
+
+            languages.forEach(function (language) {
+                var normalized = normalizeSubtitleLanguage(language);
+                if (normalized && normalizedLanguages.indexOf(normalized) === -1) {
+                    normalizedLanguages.push(normalized);
+                }
+            });
+
+            var acceptsSimplifiedChinese = normalizedLanguages.some(function (language) {
+                return subtitleLanguageVariant(language) === 'zh-Hans';
+            });
+            if (acceptsSimplifiedChinese) {
+                normalizedLanguages = normalizedLanguages.filter(function (language) {
+                    return subtitleLanguageVariant(language) !== 'zh-Hans';
+                });
+                normalizedLanguages.unshift('zh-hans');
+            }
+
+            return normalizedLanguages;
+        }
+
+        function subtitleLanguageMatchScore(trackLanguage, preferredLanguage) {
+            var track = normalizeSubtitleLanguage(trackLanguage);
+            var preferred = normalizeSubtitleLanguage(preferredLanguage);
+            if (!track || !preferred) {
+                return 0;
+            }
+            if (track === preferred) {
+                return 3;
+            }
+
+            var trackVariant = subtitleLanguageVariant(track);
+            var preferredVariant = subtitleLanguageVariant(preferred);
+            if (trackVariant && trackVariant === preferredVariant) {
+                return 2;
+            }
+            if (trackVariant && preferredVariant) {
+                return 0;
+            }
+            if (track.split('-')[0] === preferred.split('-')[0]) {
+                return 1;
+            }
+            return 0;
+        }
+
+        function findPreferredSubtitleTrack(tracks, preferredLanguages) {
+            for (var languageIndex = 0; languageIndex < preferredLanguages.length; languageIndex++) {
+                for (var score = 3; score >= 1; score--) {
+                    for (var trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
+                        if (
+                            subtitleLanguageMatchScore(
+                                tracks[trackIndex].language,
+                                preferredLanguages[languageIndex]
+                            ) === score
+                        ) {
+                            return tracks[trackIndex];
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        function readSubtitlePreference() {
+            try {
+                var saved = JSON.parse(localStorage.getItem(subtitlePreferenceKey));
+                if (saved && saved.mode === 'off') {
+                    return saved;
+                }
+                if (saved && saved.mode === 'language' && saved.language) {
+                    return saved;
+                }
+            } catch (error) {
+                console.warn('无法读取字幕偏好', error);
+            }
+            return null;
+        }
+
+        function writeSubtitlePreference(preference) {
+            try {
+                localStorage.setItem(subtitlePreferenceKey, JSON.stringify(preference));
+            } catch (error) {
+                console.warn('无法保存字幕偏好', error);
+            }
+        }
+
+        function applySubtitlePreference() {
+            var tracks = getSubtitleTracks();
+            if (!tracks.length) {
+                return;
+            }
+
+            var savedPreference = readSubtitlePreference();
+            var preferredTrack = null;
+            if (!savedPreference || savedPreference.mode !== 'off') {
+                var preferredLanguages = savedPreference
+                    ? [savedPreference.language]
+                    : getDefaultSubtitleLanguages();
+                preferredTrack = findPreferredSubtitleTrack(tracks, preferredLanguages);
+            }
+
+            applyingSubtitlePreference = true;
+            var applySerial = ++subtitlePreferenceApplySerial;
+            tracks.forEach(function (track) {
+                track.mode = track === preferredTrack ? 'showing' : 'disabled';
+            });
+            window.setTimeout(function () {
+                if (applySerial === subtitlePreferenceApplySerial) {
+                    applyingSubtitlePreference = false;
+                }
+            }, 0);
+        }
+
+        function saveSubtitlePreference() {
+            if (applyingSubtitlePreference) {
+                return;
+            }
+
+            var showingTrack = getSubtitleTracks().find(function (track) {
+                return track.mode === 'showing';
+            });
+            if (showingTrack) {
+                writeSubtitlePreference({
+                    mode: 'language',
+                    language: showingTrack.language
+                });
+            } else {
+                writeSubtitlePreference({ mode: 'off' });
+            }
+        }
+
         function switchVideo(src, filename, element, savePrevious) {
             if (savePrevious !== false) {
                 saveCurrentVideoProgress();
@@ -250,6 +425,7 @@
                     label: track.label
                 }, false);
             });
+            applySubtitlePreference();
         }
 
         player.on('ended', function () {
@@ -265,7 +441,10 @@
             }
         });
 
-        player.on('loadedmetadata', restoreCurrentVideoProgress);
+        player.on('loadedmetadata', function () {
+            restoreCurrentVideoProgress();
+            applySubtitlePreference();
+        });
         player.on('timeupdate', function () {
             var now = Date.now();
             if (now - lastProgressSaveAt >= 2000) {

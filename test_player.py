@@ -158,9 +158,13 @@ class TestPlayerPage(unittest.TestCase):
             '                    playbackProgressKey(currentFilename),',
             html,
         )
+        self.assertIn("player.on('loadedmetadata', function () {", html)
+        loaded_metadata_start = html.index(
+            "player.on('loadedmetadata', function () {"
+        )
         self.assertIn(
-            "player.on('loadedmetadata', restoreCurrentVideoProgress);",
-            html,
+            'restoreCurrentVideoProgress();',
+            html[loaded_metadata_start:],
         )
         self.assertIn("player.on('timeupdate', function () {", html)
         self.assertIn(
@@ -249,6 +253,65 @@ class TestPlayerPage(unittest.TestCase):
         self.assertIn('/subtitles/', html)
         self.assertIn('player.addRemoteTextTrack({', html)
         self.assertIn('player.removeRemoteTextTrack(currentTracks[index]);', html)
+
+    def test_player_uses_accept_language_for_default_subtitle(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            filename = '带字幕.mp4'
+            Path(files_dir, filename).touch()
+            subtitles = [
+                {'stream_index': 2, 'language': 'zh-Hans', 'label': '简体中文'},
+                {'stream_index': 3, 'language': 'en', 'label': 'English'},
+            ]
+
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch('app.get_embedded_subtitles', return_value=subtitles),
+            ):
+                response = self.client.get(
+                    '/player',
+                    headers={
+                        'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,fr;q=0',
+                    },
+                )
+
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'var browser_subtitle_languages = ["en-US", "en", "zh-CN"]',
+            html,
+        )
+        self.assertIn("normalizedLanguages.unshift('zh-hans');", html)
+        self.assertIn('subtitleLanguageVariant(language)', html)
+
+    def test_player_persists_manual_subtitle_language_and_off_state(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, '带字幕.mp4').touch()
+
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch(
+                    'app.get_embedded_subtitles',
+                    return_value=[
+                        {'stream_index': 2, 'language': 'en', 'label': 'English'},
+                    ],
+                ),
+            ):
+                response = self.client.get('/player')
+
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "var subtitlePreferenceKey = 'pyyoutubedl:subtitle-preference';",
+            html,
+        )
+        self.assertIn(
+            "player.textTracks().addEventListener('change', saveSubtitlePreference);",
+            html,
+        )
+        self.assertIn("mode: 'language'", html)
+        self.assertIn("writeSubtitlePreference({ mode: 'off' });", html)
+        self.assertIn("savedPreference.mode !== 'off'", html)
+        self.assertIn('applySubtitlePreference();', html)
 
     def test_probe_distinguishes_simplified_and_traditional_chinese_tracks(self):
         probe_result = subprocess.CompletedProcess(

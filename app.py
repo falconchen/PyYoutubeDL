@@ -811,6 +811,11 @@ def player():
         'player.html',
         video_files=video_files,
         subtitle_tracks=subtitle_tracks,
+        browser_subtitle_languages=[
+            language
+            for language, quality in request.accept_languages
+            if quality > 0
+        ],
         show_waline=config.get("SHOW_WALINE_ON_PLAYER", False),
     )
 
