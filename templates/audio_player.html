@@ -28,6 +28,8 @@
                         <source src="{{ audio_items[0].url }}" type="{{ audio_items[0].mime_type }}">
                         {% endif %}
                     </audio>
+                    <div id="audio-cover-gradient" class="audio-cover-gradient" aria-hidden="true"></div>
+                    <canvas id="audio-visualizer" class="audio-visualizer" aria-hidden="true"></canvas>
                 </div>
                 <div class="video-info-panel audio-info-panel">
                     <p class="now-playing-label">正在播放</p>
@@ -122,10 +124,25 @@
         var playbackEndThreshold = 3;
         var lastProgressSaveAt = 0;
         var posterRequestSerial = 0;
+        var coverGradient = document.getElementById('audio-cover-gradient');
+        var visualizerCanvas = document.getElementById('audio-visualizer');
+        var visualizerContext = visualizerCanvas.getContext('2d');
+        var visualizerAudioContext = null;
+        var visualizerSourceNode = null;
+        var visualizerAnalyser = null;
+        var visualizerFrequencyData = null;
+        var visualizerAnimationFrame = null;
+        var visualizerResizeObserver = null;
+        var visualizerUnavailable = false;
+        var visualizerPixelRatio = 1;
+        var reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 
         player.ready(function () {
             var controlBar = player.getChild('controlBar');
             controlBar.addChild('DownloadButton', {}, controlBar.children().length);
+            player.el().appendChild(coverGradient);
+            player.el().appendChild(visualizerCanvas);
+            setupAudioVisualizer();
             if (audioItems.length > 0) {
                 updatePoster(audioItems[0]);
             }
@@ -133,6 +150,234 @@
                 restoreCurrentAudioProgress();
             }
         });
+
+        function setupAudioVisualizer() {
+            resizeVisualizerCanvas();
+            if (window.ResizeObserver) {
+                visualizerResizeObserver = new ResizeObserver(resizeVisualizerCanvas);
+                visualizerResizeObserver.observe(player.el());
+            } else {
+                window.addEventListener('resize', resizeVisualizerCanvas);
+            }
+
+            var primeVisualizer = function () {
+                initializeAudioVisualizer();
+            };
+            player.el().addEventListener('pointerdown', primeVisualizer, { passive: true });
+            player.el().addEventListener('keydown', primeVisualizer);
+
+            if (reducedMotionQuery.addEventListener) {
+                reducedMotionQuery.addEventListener('change', handleReducedMotionChange);
+            } else {
+                reducedMotionQuery.addListener(handleReducedMotionChange);
+            }
+        }
+
+        function getPlayerMediaElement() {
+            var tech = player.tech(true);
+            if (tech && typeof tech.el === 'function') {
+                return tech.el();
+            }
+            return player.el().querySelector('audio, video');
+        }
+
+        function initializeAudioVisualizer() {
+            if (
+                visualizerUnavailable
+                || reducedMotionQuery.matches
+                || !visualizerContext
+            ) {
+                return Promise.resolve(false);
+            }
+
+            var AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContextClass) {
+                visualizerUnavailable = true;
+                return Promise.resolve(false);
+            }
+
+            try {
+                if (!visualizerAudioContext) {
+                    visualizerAudioContext = new AudioContextClass();
+                    visualizerAnalyser = visualizerAudioContext.createAnalyser();
+                    visualizerAnalyser.fftSize = 256;
+                    visualizerAnalyser.smoothingTimeConstant = 0.82;
+                    visualizerFrequencyData = new Uint8Array(
+                        visualizerAnalyser.frequencyBinCount
+                    );
+
+                    var mediaElement = getPlayerMediaElement();
+                    if (!mediaElement) {
+                        throw new Error('找不到音频媒体元素');
+                    }
+                    visualizerSourceNode = visualizerAudioContext.createMediaElementSource(
+                        mediaElement
+                    );
+                    visualizerSourceNode.connect(visualizerAnalyser);
+                    visualizerAnalyser.connect(visualizerAudioContext.destination);
+                }
+            } catch (error) {
+                visualizerUnavailable = true;
+                console.warn('无法初始化音频频谱，已保留普通播放器', error);
+                return Promise.resolve(false);
+            }
+
+            if (visualizerAudioContext.state === 'suspended') {
+                return visualizerAudioContext.resume().then(function () {
+                    return true;
+                }).catch(function () {
+                    return false;
+                });
+            }
+            return Promise.resolve(true);
+        }
+
+        function startAudioVisualizer() {
+            if (
+                reducedMotionQuery.matches
+                || document.hidden
+                || player.paused()
+            ) {
+                return;
+            }
+
+            initializeAudioVisualizer().then(function (ready) {
+                if (
+                    ready
+                    && !reducedMotionQuery.matches
+                    && !document.hidden
+                    && !player.paused()
+                    && visualizerAnimationFrame === null
+                ) {
+                    drawAudioVisualizer();
+                }
+            });
+        }
+
+        function stopAudioVisualizer() {
+            if (visualizerAnimationFrame !== null) {
+                window.cancelAnimationFrame(visualizerAnimationFrame);
+                visualizerAnimationFrame = null;
+            }
+            clearAudioVisualizer();
+        }
+
+        function clearAudioVisualizer() {
+            if (!visualizerContext) {
+                return;
+            }
+            var width = visualizerCanvas.width / visualizerPixelRatio;
+            var height = visualizerCanvas.height / visualizerPixelRatio;
+            visualizerContext.clearRect(0, 0, width, height);
+        }
+
+        function resizeVisualizerCanvas() {
+            if (!visualizerContext) {
+                return;
+            }
+            var bounds = player.el().getBoundingClientRect();
+            if (!bounds.width || !bounds.height) {
+                return;
+            }
+
+            visualizerPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+            visualizerCanvas.width = Math.round(bounds.width * visualizerPixelRatio);
+            visualizerCanvas.height = Math.round(bounds.height * visualizerPixelRatio);
+            visualizerContext.setTransform(
+                visualizerPixelRatio,
+                0,
+                0,
+                visualizerPixelRatio,
+                0,
+                0
+            );
+        }
+
+        function drawRoundedBar(context, x, y, width, height, radius) {
+            var safeRadius = Math.min(radius, width / 2, height / 2);
+            context.beginPath();
+            context.moveTo(x + safeRadius, y);
+            context.lineTo(x + width - safeRadius, y);
+            context.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+            context.lineTo(x + width, y + height);
+            context.lineTo(x, y + height);
+            context.lineTo(x, y + safeRadius);
+            context.quadraticCurveTo(x, y, x + safeRadius, y);
+            context.closePath();
+            context.fill();
+        }
+
+        function drawAudioVisualizer() {
+            if (
+                !visualizerAnalyser
+                || reducedMotionQuery.matches
+                || document.hidden
+                || player.paused()
+            ) {
+                stopAudioVisualizer();
+                return;
+            }
+
+            var width = visualizerCanvas.width / visualizerPixelRatio;
+            var height = visualizerCanvas.height / visualizerPixelRatio;
+            visualizerContext.clearRect(0, 0, width, height);
+            visualizerAnalyser.getByteFrequencyData(visualizerFrequencyData);
+
+            var horizontalPadding = Math.max(14, width * 0.035);
+            var controlBarClearance = Math.max(48, height * 0.14);
+            var baseline = height - controlBarClearance;
+            var maximumBarHeight = height * 0.3;
+            var barCount = Math.max(24, Math.min(64, Math.floor(width / 14)));
+            var barGap = width < 480 ? 2 : 3;
+            var availableWidth = width - horizontalPadding * 2;
+            var barWidth = Math.max(2, (availableWidth - barGap * (barCount - 1)) / barCount);
+            var usedFrequencyBins = Math.floor(visualizerFrequencyData.length * 0.72);
+
+            var barGradient = visualizerContext.createLinearGradient(0, baseline - maximumBarHeight, 0, baseline);
+            barGradient.addColorStop(0, 'rgba(255, 196, 92, 0.92)');
+            barGradient.addColorStop(0.48, 'rgba(255, 78, 47, 0.9)');
+            barGradient.addColorStop(1, 'rgba(220, 20, 60, 0.82)');
+            visualizerContext.fillStyle = barGradient;
+            visualizerContext.shadowColor = 'rgba(255, 48, 48, 0.32)';
+            visualizerContext.shadowBlur = 8;
+
+            for (var barIndex = 0; barIndex < barCount; barIndex++) {
+                var startRatio = barIndex / barCount;
+                var endRatio = (barIndex + 1) / barCount;
+                var startBin = Math.floor(Math.pow(startRatio, 1.7) * usedFrequencyBins);
+                var endBin = Math.max(
+                    startBin + 1,
+                    Math.floor(Math.pow(endRatio, 1.7) * usedFrequencyBins)
+                );
+                var total = 0;
+                for (var binIndex = startBin; binIndex < endBin; binIndex++) {
+                    total += visualizerFrequencyData[binIndex];
+                }
+                var average = total / (endBin - startBin);
+                var normalized = average / 255;
+                var barHeight = Math.max(2, Math.pow(normalized, 1.25) * maximumBarHeight);
+                var x = horizontalPadding + barIndex * (barWidth + barGap);
+                drawRoundedBar(
+                    visualizerContext,
+                    x,
+                    baseline - barHeight,
+                    barWidth,
+                    barHeight,
+                    Math.min(3, barWidth / 2)
+                );
+            }
+
+            visualizerContext.shadowBlur = 0;
+            visualizerAnimationFrame = window.requestAnimationFrame(drawAudioVisualizer);
+        }
+
+        function handleReducedMotionChange(event) {
+            if (event.matches) {
+                stopAudioVisualizer();
+            } else if (!player.paused() && !document.hidden) {
+                startAudioVisualizer();
+            }
+        }
 
         function findAudioItem(filename) {
             return audioItems.find(function (item) {
@@ -294,6 +539,7 @@
         }
 
         player.on('ended', function () {
+            stopAudioVisualizer();
             clearAudioProgress(currentFilename);
             var nextIndex = currentIndex + 1;
             if (nextIndex < audioItems.length) {
@@ -306,6 +552,8 @@
         });
 
         player.on('loadedmetadata', restoreCurrentAudioProgress);
+        player.on('play', startAudioVisualizer);
+        player.on('pause', stopAudioVisualizer);
         player.on('timeupdate', function () {
             var now = Date.now();
             if (now - lastProgressSaveAt >= 2000) {
@@ -314,6 +562,13 @@
             }
         });
         player.on('pause', saveCurrentAudioProgress);
+        document.addEventListener('visibilitychange', function () {
+            if (document.hidden) {
+                stopAudioVisualizer();
+            } else if (!player.paused()) {
+                startAudioVisualizer();
+            }
+        });
         window.addEventListener('beforeunload', saveCurrentAudioProgress);
 
         player.on('play', function () {

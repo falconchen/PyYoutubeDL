@@ -165,6 +165,29 @@ class TestAudioPlayerPage(unittest.TestCase):
         self.assertIn('tryCandidate(index + 1);', template)
         self.assertIn("player.poster(fallbackCoverUrl);", template)
 
+    def test_audio_player_renders_real_audio_spectrum_visualizer(self):
+        template = Path('templates/audio_player.html').read_text(encoding='utf-8')
+        css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
+
+        self.assertIn('id="audio-visualizer"', template)
+        self.assertIn('id="audio-cover-gradient"', template)
+        self.assertIn('player.el().appendChild(coverGradient);', template)
+        self.assertIn("aria-hidden=\"true\"", template)
+        self.assertIn('window.AudioContext || window.webkitAudioContext', template)
+        self.assertIn('createMediaElementSource(', template)
+        self.assertEqual(template.count('createMediaElementSource('), 1)
+        self.assertIn('visualizerAnalyser.getByteFrequencyData(', template)
+        self.assertIn('window.requestAnimationFrame(drawAudioVisualizer)', template)
+        self.assertIn('window.cancelAnimationFrame(visualizerAnimationFrame)', template)
+        self.assertIn("player.on('play', startAudioVisualizer);", template)
+        self.assertIn("player.on('pause', stopAudioVisualizer);", template)
+        self.assertIn("document.addEventListener('visibilitychange'", template)
+        self.assertIn("window.matchMedia('(prefers-reduced-motion: reduce)')", template)
+        self.assertIn('pointer-events: none;', css)
+        self.assertIn('.audio-cover-gradient {', css)
+        self.assertIn('rgba(10, 15, 28, 0.78) 100%', css)
+        self.assertIn('@media (prefers-reduced-motion: reduce)', css)
+
     def test_audio_player_reuses_playback_download_and_auto_next_behaviors(self):
         template = Path(app.template_folder, 'audio_player.html').read_text(
             encoding='utf-8',

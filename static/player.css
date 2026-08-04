@@ -46,11 +46,43 @@
 }
 
 .audio-wrapper {
+    position: relative;
     background-color: #111827;
     background-image: url("images/audio-cover-default.svg");
     background-position: center;
     background-repeat: no-repeat;
     background-size: cover;
+}
+
+.audio-cover-gradient,
+.audio-visualizer {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.audio-cover-gradient {
+    z-index: 1;
+    background: linear-gradient(
+        180deg,
+        rgba(10, 15, 28, 0) 0%,
+        rgba(10, 15, 28, 0.04) 30%,
+        rgba(10, 15, 28, 0.28) 58%,
+        rgba(10, 15, 28, 0.62) 82%,
+        rgba(10, 15, 28, 0.78) 100%
+    );
+}
+
+.audio-visualizer {
+    z-index: 2;
+}
+
+.audio-player-page .video-js .vjs-big-play-button,
+.audio-player-page .video-js .vjs-control-bar {
+    z-index: 3;
 }
 
 .audio-player-page .vjs-poster img {
@@ -59,6 +91,12 @@
 
 .audio-player-page .video-js .vjs-tech {
     background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .audio-visualizer {
+        display: none;
+    }
 }
 
 .now-playing-label {
