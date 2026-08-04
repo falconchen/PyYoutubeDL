@@ -12,7 +12,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from datetime import datetime
 from bark_util import bark_notify
-from config_util import load_config
+from config_util import build_dated_output_template, load_config
 from log_util import setup_logger
 import yt_dlp
 
@@ -102,6 +102,15 @@ class DownloadHandler(FileSystemEventHandler):
         task_tmp_dir = os.path.join(config["TMP_DIR"], f"{base_name}")
         log_basename = os.path.basename(task_tmp_dir)
         log_path = os.path.join(config["LOG_DIR"], f"{log_basename}.log")
+        base_output_template = (
+            config["YT_DLP_OUTPUT_TEMPLATE"]
+            if mode == 'video'
+            else config["YTA_DLP_OUTPUT_TEMPLATE"]
+        )
+        output_template = build_dated_output_template(
+            base_output_template,
+            config.get("TIMEZONE", "UTC"),
+        )
 
         # 构造 logger
         file_logger = logging.getLogger(f"yt-dlp-{base_name}")
@@ -120,7 +129,7 @@ class DownloadHandler(FileSystemEventHandler):
             def error(self, msg): file_logger.error(msg)
 
         ydl_opts = {
-            'outtmpl': os.path.join(task_tmp_dir, config["YT_DLP_OUTPUT_TEMPLATE"]),
+            'outtmpl': os.path.join(task_tmp_dir, output_template),
             'logger': YTDlpLogger(),
             'config_locations': [conf_path],
             'verbose': True,  # 增加详细日志

@@ -14,7 +14,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from datetime import datetime
 from bark_util import bark_notify
-from config_util import MOVE_STAGING_PREFIX, load_config
+from config_util import MOVE_STAGING_PREFIX, build_dated_output_template, load_config
 from log_util import setup_logger
 
 # 加载配置
@@ -273,6 +273,15 @@ class DownloadHandler(FileSystemEventHandler):
         task_tmp_dir = os.path.join(config["TMP_DIR"], f"{base_name}")
         log_basename = os.path.basename(task_tmp_dir)
         log_path = os.path.join(config["LOG_DIR"], f"{log_basename}.log")
+        base_output_template = (
+            config["YT_DLP_OUTPUT_TEMPLATE"]
+            if mode == 'video'
+            else config["YTA_DLP_OUTPUT_TEMPLATE"]
+        )
+        output_template = build_dated_output_template(
+            base_output_template,
+            config.get("TIMEZONE", "UTC"),
+        )
         
         # 核心修改：添加 --newline 和 --progress 确保进度条被捕获
         cmd = [
@@ -288,7 +297,7 @@ class DownloadHandler(FileSystemEventHandler):
                 '%(progress._eta_str)s|%(info.ext)s|%(info.format_id)s|'
                 '%(info.vcodec)s|%(info.acodec)s'
             ),
-            '-o', os.path.join(task_tmp_dir, config["YT_DLP_OUTPUT_TEMPLATE"] if mode == 'video' else config["YTA_DLP_OUTPUT_TEMPLATE"]),
+            '-o', os.path.join(task_tmp_dir, output_template),
             url
         ]
 

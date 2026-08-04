@@ -1,5 +1,8 @@
 import os
 import json
+from datetime import datetime
+
+import pytz
 
 MOVE_STAGING_PREFIX = '.pyyoutubedl-moving-'
 
@@ -38,6 +41,14 @@ PATH_CONFIG_KEYS = [
     "URLS_DIR",  "TMP_DIR", 
     "FILES_DIR", "LOG_DIR"
 ]
+
+
+def build_dated_output_template(output_template, timezone_name):
+    """在 yt-dlp 原命名模板前添加下载开始时间（MMDDHHmm-）。"""
+    timezone = pytz.timezone(timezone_name)
+    prefix = datetime.now(timezone).strftime('%m%d%H%M')
+    return f"{prefix}-{output_template}"
+
 
 def load_config(default_config=None, config_keys=None):
     """

@@ -146,8 +146,8 @@ video (2).mp4
 | `MAX_WORKERS` | int | 下载线程池大小，默认 4 |
 | `MAX_LOG_SIZE` | int | 单个日志文件最大字节数，默认 10MB |
 | `BACKUP_COUNT` | int | 日志文件保留数量，默认 5 |
-| `YT_DLP_OUTPUT_TEMPLATE` | string | 视频文件名模板 |
-| `YTA_DLP_OUTPUT_TEMPLATE` | string | 音频文件名模板 |
+| `YT_DLP_OUTPUT_TEMPLATE` | string | 视频文件名主体模板；下载时自动添加 `MMDDHHmm-` 前缀 |
+| `YTA_DLP_OUTPUT_TEMPLATE` | string | 音频文件名主体模板；下载时自动添加 `MMDDHHmm-` 前缀 |
 | `PLAYER_FILENAME_EXCLUDE_KEYWORDS` | array | 播放器列表排除的文件名关键词，任一非空关键词命中即隐藏，默认 `[]` |
 | `AUDIO_PLAYER_FALLBACK_COVER_URL` | string | YouTube 音频封面不可用时的图片 URL，默认 `/static/images/audio-cover-default.svg` |
 | `DELETE_AFTER_UPLOAD` | bool | WebDAV 上传后是否删除本地文件 |
@@ -159,6 +159,8 @@ video (2).mp4
 | `FLASK_HOST` | string | Flask 监听地址，默认 `0.0.0.0` |
 | `FLASK_DEBUG` | bool | Flask 调试模式 |
 | `SCHEDULED_PLAYLISTS` | array | 定时下载的播放列表配置 |
+
+下载文件名使用 `TIMEZONE` 指定时区的任务开始时间作为前缀，格式为“月份、日期、小时、分钟”，各字段不足两位时前补 `0`。例如 8 月 4 日 01:01 开始下载时，文件名为 `08040101-当前命名模板.mp4`。字幕等由 yt-dlp 生成的关联文件使用相同前缀。
 
 播放器列表可按文件名关键词隐藏视频，例如：
 
