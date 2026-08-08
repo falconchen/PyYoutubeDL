@@ -162,6 +162,19 @@ UPLOAD_RETRY_DELAY = config.get("UPLOAD_RETRY_DELAY", 60)
 retry_count = {}
 retry_lock = threading.Lock()
 
+
+def find_upload_exclude_keyword(filename, keywords):
+    """返回文件名命中的第一个非空上传排除关键词。"""
+    if not isinstance(keywords, (list, tuple)):
+        return None
+
+    for keyword in keywords:
+        if isinstance(keyword, str) and keyword and keyword in filename:
+            return keyword
+
+    return None
+
+
 class WebDAVUploadHandler(FileSystemEventHandler):
     def __init__(self):
         super().__init__()
@@ -242,6 +255,19 @@ class WebDAVUploadHandler(FileSystemEventHandler):
         filename = os.path.basename(file_path)
         if filename.startswith(MOVE_STAGING_PREFIX):
             logger.debug(f"跳过尚未完成的跨文件系统移动暂存文件: {file_path}")
+            return
+
+        excluded_keyword = find_upload_exclude_keyword(
+            filename,
+            config.get("WEBDAV_UPLOAD_EXCLUDE_KEYWORDS", []),
+        )
+        if excluded_keyword is not None:
+            with retry_lock:
+                retry_count.pop(file_path, None)
+            logger.info(
+                f"WebDAV上传已跳过，文件名命中排除关键词 "
+                f"'{excluded_keyword}'，保留本地文件: {file_path}"
+            )
             return
 
         ext = os.path.splitext(file_path)[1].lower()

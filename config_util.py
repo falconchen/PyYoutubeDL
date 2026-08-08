@@ -25,6 +25,7 @@ DEFAULT_CONFIG = {
     
     # WebDAV上传器配置
     "ENABLE_WEBDAV_UPLOAD": True,  # 是否将下载完成的文件上传到 WebDAV
+    "WEBDAV_UPLOAD_EXCLUDE_KEYWORDS": [], # WebDAV 上传排除的文件名关键词
     "WEBDAV_OPTIONS": {},           # WebDAV 连接选项 (hostname, login, password 等)
     "UPLOAD_MAX_RETRIES": 3,        # 上传失败最大重试次数
     "UPLOAD_RETRY_DELAY": 60,       # 上传失败重试间隔（秒）
