@@ -1,7 +1,9 @@
 const DEFAULT_SERVER_URL = 'https://yter.cellmean.com';
 const form = document.querySelector('#settings-form');
 const serverUrlInput = document.querySelector('#server-url');
+const logTokenInput = document.querySelector('#log-token');
 const status = document.querySelector('#status');
+const openOptionsButton = document.querySelector('#open-options');
 
 function normalizeServerUrl(value) {
   const parsed = new URL(value.trim());
@@ -24,8 +26,12 @@ function setStatus(message, type) {
 }
 
 async function restoreSettings() {
-  const stored = await chrome.storage.sync.get({ serverUrl: DEFAULT_SERVER_URL });
-  serverUrlInput.value = stored.serverUrl;
+  const [synced, local] = await Promise.all([
+    chrome.storage.sync.get({ serverUrl: DEFAULT_SERVER_URL }),
+    chrome.storage.local.get({ logToken: '' }),
+  ]);
+  serverUrlInput.value = synced.serverUrl;
+  logTokenInput.value = local.logToken;
 }
 
 form.addEventListener('submit', async (event) => {
@@ -49,9 +55,12 @@ form.addEventListener('submit', async (event) => {
       return;
     }
 
-    await chrome.storage.sync.set({ serverUrl });
+    await Promise.all([
+      chrome.storage.sync.set({ serverUrl }),
+      chrome.storage.local.set({ logToken: logTokenInput.value.trim() }),
+    ]);
     serverUrlInput.value = serverUrl;
-    setStatus('设置已保存，可以通过链接右键菜单提交下载。', 'success');
+    setStatus('设置已保存，可以通过右键菜单提交下载。', 'success');
   } catch (error) {
     setStatus(`保存失败：${error.message}`, 'error');
   }
@@ -60,3 +69,9 @@ form.addEventListener('submit', async (event) => {
 restoreSettings().catch((error) => {
   setStatus(`读取设置失败：${error.message}`, 'error');
 });
+
+if (openOptionsButton) {
+  openOptionsButton.addEventListener('click', () => {
+    chrome.runtime.openOptionsPage();
+  });
+}

@@ -44,6 +44,10 @@ label {
   font-weight: 600;
 }
 
+.secondary-label {
+  margin-top: 18px;
+}
+
 input {
   box-sizing: border-box;
   width: 100%;

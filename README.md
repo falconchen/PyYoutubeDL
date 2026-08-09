@@ -121,6 +121,10 @@ curl -X POST http://localhost:5001/api/add_task \
 curl -X POST http://localhost:5001/api/task_info \
   -H "Content-Type: application/json" \
   -d '{"tasks": ["v20250601120000abc"]}'
+
+# 首次读取 downloader.log 末尾；后续请求传回响应中的 cursor 和 file_id
+curl "http://localhost:5001/api/downloader_log" \
+  -H "X-Yter-Log-Token: <EXTENSION_LOG_TOKEN>"
 ```
 
 `/api/task_info` 会返回任务的 `state`（`queued`、`downloading`、`completed`、`failed` 或 `missing`）和 `progress`。下载中任务的 `progress` 包含可用的 `percent`、`downloaded`、`total`、`speed`、`eta` 等字段；新任务完成后包含 `final_size_bytes`、`elapsed_seconds`、`average_speed_bytes_per_second`。视频或音频任务完成并且主媒体产物仍在本地时，还会返回对应的 `player_url`。
@@ -132,6 +136,10 @@ curl -X POST http://localhost:5001/api/task_info \
 仓库中的 `chrome-extension/` 是 Manifest V3 扩展。加载后，右键点击网页空白处或网页链接，可在“使用yter下载”二级菜单中选择“下载视频”或“下载音频”。空白处使用当前页面 URL，链接处优先使用链接 URL，扩展会调用 `/api/add_task` 创建对应任务。
 
 任务提交后，扩展每 30 秒调用 `/api/task_info` 查询状态，并在下载完成或失败时发送 Chrome 通知。
+
+左键点击浏览器工具栏中的扩展图标会直接显示服务地址设置和保存按钮，不再跳转后才配置。
+
+弹窗中的“实时日志”会打开独立日志页，每秒增量读取当前服务器的 `downloader.log`，效果类似 `tail -f`。该接口必须配置 `EXTENSION_LOG_TOKEN`，令牌通过请求头传递，并仅保存在扩展本机存储中。
 
 开发者模式安装、服务地址配置和验证方法见 [`chrome-extension/README.md`](chrome-extension/README.md)。
 
@@ -169,6 +177,7 @@ video (2).mp4
 | `VIDEO_WEBDAV_OPTIONS` | object | 视频 WebDAV 远程存储配置 |
 | `AUDIO_WEBDAV_OPTIONS` | object | 音频 WebDAV 远程存储配置 |
 | `BARK_DEVICE_TOKEN` | string | Bark 推送通知 Token |
+| `EXTENSION_LOG_TOKEN` | string | Chrome 扩展读取 `downloader.log` 的访问令牌；为空时禁用日志接口 |
 | `TIMEZONE` | string | 时区，如 `Asia/Shanghai` |
 | `FLASK_HOST` | string | Flask 监听地址，默认 `0.0.0.0` |
 | `FLASK_DEBUG` | bool | Flask 调试模式 |

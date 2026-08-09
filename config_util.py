@@ -22,6 +22,7 @@ DEFAULT_CONFIG = {
     "SHOW_WALINE_ON_INDEX": False,  # 是否在首页显示 Waline 评论
     "SHOW_WALINE_ON_PLAYER": False, # 是否在播放页显示 Waline 评论
     "BARK_DEVICE_TOKEN": "",        # Bark 通知推送 Token
+    "EXTENSION_LOG_TOKEN": "",      # Chrome 扩展读取 downloader.log 的访问令牌；为空时禁用接口
     
     # WebDAV上传器配置
     "ENABLE_WEBDAV_UPLOAD": True,  # 是否将下载完成的文件上传到 WebDAV

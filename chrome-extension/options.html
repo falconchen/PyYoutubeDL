@@ -27,6 +27,15 @@
         required
       >
       <p class="help">只支持 http 或 https。自定义地址需要在保存时授予该站点访问权限。</p>
+      <label class="secondary-label" for="log-token">日志访问令牌</label>
+      <input
+        id="log-token"
+        name="log-token"
+        type="password"
+        autocomplete="off"
+        placeholder="与服务器 EXTENSION_LOG_TOKEN 一致"
+      >
+      <p class="help">仅保存在本机，用于访问扩展实时日志页；不影响提交下载任务。</p>
       <button type="submit">保存设置</button>
       <p id="status" role="status" aria-live="polite"></p>
     </form>

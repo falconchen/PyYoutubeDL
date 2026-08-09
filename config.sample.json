@@ -14,6 +14,7 @@
   "SHOW_WALINE_ON_PLAYER": false,
   "BARK_DEVICE_TOKEN": "your_bark_device_token",
   "BARK_ICON_URL": "https://photo.cellmean.com/i/2025/05/22/jyxhwo-0.webp",
+  "EXTENSION_LOG_TOKEN": "replace_with_a_long_random_token",
   "VIDEO_WEBDAV_OPTIONS": {
     "webdav_hostname": "https://your.webdav.host",
     "webdav_login": "your_login",

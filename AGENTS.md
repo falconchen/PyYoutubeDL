@@ -75,6 +75,7 @@ flask get-cookie
 - 评论区默认不显示，由 `config.json` 中的 `SHOW_WALINE_ON_INDEX` 和 `SHOW_WALINE_ON_PLAYER` 分别控制。
 - Waline 客户端 `path` 使用 `window.location.hostname + window.location.pathname`，按域名和路径隔离评论，避免多个站点的 `/` 共享评论。
 - 如果修改页面评论相关代码，确认 Waline 的 `/srv/docker/waline/.env` 中 `SECURE_DOMAINS` 包含 `yter.cellmean.com`。
+- Chrome 扩展实时日志通过 `/api/downloader_log` 增量读取 `LOG_DIR/downloader.log`；必须使用 `EXTENSION_LOG_TOKEN` 和 `X-Yter-Log-Token` 请求头，禁止在 URL、文档或测试中写入真实令牌。
 
 ## 文档要求
 

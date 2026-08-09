@@ -208,3 +208,45 @@ test('stops tracking after three missing responses', async () => {
     `yter-missing-${task}`,
   );
 });
+
+test('toolbar action opens the inline settings popup', () => {
+  const extensionRoot = path.join(__dirname, '..');
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(extensionRoot, 'manifest.json'), 'utf8'),
+  );
+  const popup = fs.readFileSync(
+    path.join(extensionRoot, 'popup.html'),
+    'utf8',
+  );
+
+  assert.equal(manifest.version, '1.3.0');
+  assert.equal(manifest.action.default_popup, 'popup.html');
+  assert.match(popup, /id="settings-form"/);
+  assert.match(popup, /id="server-url"/);
+  assert.match(popup, /id="status"/);
+  assert.match(popup, /src="options\.js"/);
+});
+
+test('extension includes a token-protected live log page', () => {
+  const extensionRoot = path.join(__dirname, '..');
+  const popup = fs.readFileSync(
+    path.join(extensionRoot, 'popup.html'),
+    'utf8',
+  );
+  const logPage = fs.readFileSync(
+    path.join(extensionRoot, 'logs.html'),
+    'utf8',
+  );
+  const logScript = fs.readFileSync(
+    path.join(extensionRoot, 'logs.js'),
+    'utf8',
+  );
+
+  assert.match(popup, /href="logs\.html"/);
+  assert.match(popup, /id="log-token"/);
+  assert.match(logPage, /id="log-output"/);
+  assert.match(logPage, /id="pause-button"/);
+  assert.match(logScript, /\/api\/downloader_log/);
+  assert.match(logScript, /X-Yter-Log-Token/);
+  assert.match(logScript, /row\.textContent = line/);
+});

@@ -9,6 +9,7 @@ import subprocess
 from functools import lru_cache
 from urllib.parse import parse_qs, unquote, urlparse
 import hashlib
+import hmac
 from werkzeug.utils import safe_join
 from config_util import load_config
 import random
@@ -49,6 +50,8 @@ TASK_STATE_EXTENSIONS = (
     ('.downloading', 'downloading'),
     ('.txt', 'queued'),
 )
+DOWNLOADER_LOG_INITIAL_BYTES = 64 * 1024
+DOWNLOADER_LOG_MAX_BYTES = 128 * 1024
 PROGRESS_MARKER = 'PYDL_PROGRESS|'
 ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
 DEFAULT_PROGRESS_PATTERN = re.compile(
@@ -953,6 +956,107 @@ def api_task_info():
         tasks = [tasks]
     result = [get_task_info(task) for task in tasks]
     return jsonify({"success": True, "tasks": result})
+
+
+def read_downloader_log_chunk(filepath, cursor=None, expected_file_id=None):
+    """按字节游标读取 downloader.log，兼容日志截断与轮转。"""
+    file_stat = os.stat(filepath)
+    file_size = file_stat.st_size
+    file_identity = f"{file_stat.st_dev}:{file_stat.st_ino}"
+    file_id = hashlib.sha256(file_identity.encode('ascii')).hexdigest()[:16]
+    reset = cursor is not None and (
+        cursor > file_size
+        or (expected_file_id and expected_file_id != file_id)
+    )
+
+    if cursor is None or reset:
+        start = max(0, file_size - DOWNLOADER_LOG_INITIAL_BYTES)
+    else:
+        start = cursor
+
+    with open(filepath, 'rb') as log_file:
+        log_file.seek(start)
+        if start > 0 and (cursor is None or reset):
+            log_file.readline()
+
+        data = log_file.read(DOWNLOADER_LOG_MAX_BYTES)
+        if data and not data.endswith(b'\n') and log_file.tell() < file_size:
+            data += log_file.readline(DOWNLOADER_LOG_MAX_BYTES)
+        next_cursor = log_file.tell()
+
+    return {
+        "text": data.decode('utf-8', errors='replace'),
+        "cursor": next_cursor,
+        "reset": reset,
+        "has_more": next_cursor < file_size,
+        "file_id": file_id,
+    }
+
+
+@app.route('/api/downloader_log', methods=['GET'])
+def api_downloader_log():
+    def log_response(payload, status=200):
+        response = jsonify(payload)
+        response.status_code = status
+        response.headers['Cache-Control'] = 'no-store, private'
+        return response
+
+    configured_token = str(config.get("EXTENSION_LOG_TOKEN", "")).strip()
+    if not configured_token:
+        return log_response({
+            "success": False,
+            "msg": "Downloader log API is disabled",
+        }, 503)
+
+    request_token = request.headers.get('X-Yter-Log-Token', '')
+    if not hmac.compare_digest(request_token, configured_token):
+        return log_response({
+            "success": False,
+            "msg": "Invalid log access token",
+        }, 401)
+
+    cursor_value = request.args.get('cursor')
+    expected_file_id = request.args.get('file_id')
+    cursor = None
+    if cursor_value not in (None, ''):
+        try:
+            cursor = int(cursor_value)
+        except ValueError:
+            return log_response({
+                "success": False,
+                "msg": "Invalid cursor",
+            }, 400)
+        if cursor < 0:
+            return log_response({
+                "success": False,
+                "msg": "Invalid cursor",
+            }, 400)
+
+    log_path = os.path.join(config["LOG_DIR"], 'downloader.log')
+    if not os.path.isfile(log_path):
+        return log_response({
+            "success": True,
+            "text": "",
+            "cursor": 0,
+            "reset": cursor not in (None, 0),
+            "has_more": False,
+            "file_id": None,
+        })
+
+    try:
+        result = read_downloader_log_chunk(
+            log_path,
+            cursor,
+            expected_file_id=expected_file_id,
+        )
+    except OSError as exc:
+        app.logger.error("读取 downloader.log 失败: %s", exc)
+        return log_response({
+            "success": False,
+            "msg": "Failed to read downloader log",
+        }, 500)
+
+    return log_response({"success": True, **result})
 
 @app.route('/favicon.ico')
 def favicon():

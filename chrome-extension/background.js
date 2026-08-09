@@ -276,10 +276,6 @@ chrome.runtime.onStartup.addListener(() => {
   });
 });
 
-chrome.action.onClicked.addListener(() => {
-  chrome.runtime.openOptionsPage();
-});
-
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === TASK_POLL_ALARM) {
     return pollPendingTasks().catch((error) => {
