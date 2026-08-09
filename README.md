@@ -87,6 +87,18 @@ journalctl -u pyyoutubedl -f    # 实时日志
 
 播放器会使用 `ffprobe` 识别 MP4 内嵌字幕，并在浏览器请求字幕时通过 `ffmpeg` 转换为 WebVTT，Video.js 控制栏会显示可用的字幕选项。该功能不修改原视频，但运行环境必须能够直接执行 `ffprobe` 和 `ffmpeg`；无法识别或转换字幕时，视频仍可正常播放，只是不显示字幕选项。
 
+视频播放器支持按需生成 AI 总结。只有当前视频存在内嵌字幕且 AI 接口已配置时，“生成总结”按钮才可用；后端会读取当前选择的字幕流，通过 `chat/completions` 兼容接口生成简体中文总结，`AI_API_TOKEN` 不会发送给浏览器。请在不提交到 Git 的 `config.json` 中配置：
+
+```json
+{
+  "AI_API_BASE_URL": "https://ccx.v2ai.eu.cc/v1/chat/completions",
+  "AI_API_MODEL": "gpt-5.5",
+  "AI_API_TOKEN": "sk-xxxxx"
+}
+```
+
+`AI_API_BASE_URL` 应填写完整的 `chat/completions` 地址，而不是只填写 API 根路径。配置修改后需要重启 Web 应用。字幕文本单次最多发送 120000 个字符，超出部分会截断；同一服务进程内，相同视频版本、字幕流、接口和模型的结果会缓存，以减少重复请求和费用，服务重启后缓存失效。上游接口超时为 120 秒。
+
 播放器支持通过 `file` 查询参数选择指定视频，例如：
 
 ```text

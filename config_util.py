@@ -21,6 +21,9 @@ DEFAULT_CONFIG = {
     "AUDIO_PLAYER_FALLBACK_COVER_URL": "/static/images/audio-cover-default.svg", # 音频封面加载失败时的默认图
     "SHOW_WALINE_ON_INDEX": False,  # 是否在首页显示 Waline 评论
     "SHOW_WALINE_ON_PLAYER": False, # 是否在播放页显示 Waline 评论
+    "AI_API_BASE_URL": "",          # AI 总结使用的 chat/completions 兼容接口
+    "AI_API_MODEL": "",             # AI 总结模型名称
+    "AI_API_TOKEN": "",             # AI 总结接口 Token
     "BARK_DEVICE_TOKEN": "",        # Bark 通知推送 Token
     "EXTENSION_LOG_TOKEN": "",      # Chrome 扩展读取 downloader.log 的访问令牌；为空时禁用接口
     

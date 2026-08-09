@@ -2,10 +2,12 @@
 from flask import Flask, request, render_template, redirect, url_for, send_from_directory, jsonify, abort, Response
 import os
 import glob
+import html
 import time
 import json
 import re
 import subprocess
+import threading
 from functools import lru_cache
 from urllib.parse import parse_qs, unquote, urlparse
 import hashlib
@@ -73,6 +75,13 @@ AUDIO_MIME_TYPES = {
     'wav': 'audio/wav',
 }
 YOUTUBE_VIDEO_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]{11}$')
+SUBTITLE_TIMESTAMP_PATTERN = re.compile(
+    r'^(?:\d{2}:)?\d{2}:\d{2}[.,]\d{3}\s+-->\s+'
+)
+AI_SUMMARY_MAX_SUBTITLE_CHARS = 120000
+AI_SUMMARY_CACHE_MAX_ITEMS = 128
+ai_summary_cache = {}
+ai_summary_cache_lock = threading.Lock()
 
 # 保证文件夹存在
 os.makedirs(URLS_DIR, exist_ok=True)
@@ -595,6 +604,105 @@ def get_embedded_subtitles(filename):
     )]
 
 
+def extract_subtitle_text(filepath, stream_index):
+    """把指定内嵌字幕流转换为适合发送给 AI 的纯文本。"""
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-v", "error", "-i", filepath,
+                "-map", f"0:{stream_index}", "-f", "webvtt", "pipe:1",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("找不到 ffmpeg，无法读取视频字幕") from exc
+    except (subprocess.SubprocessError, OSError) as exc:
+        raise RuntimeError("读取视频字幕失败") from exc
+
+    subtitle = result.stdout.decode("utf-8", errors="replace")
+    text_lines = []
+    previous_line = None
+    skip_note = False
+    for raw_line in subtitle.splitlines():
+        line = raw_line.strip()
+        if not line:
+            skip_note = False
+            continue
+        if line == "WEBVTT" or line.startswith(("STYLE", "REGION")):
+            continue
+        if line.startswith("NOTE"):
+            skip_note = True
+            continue
+        if skip_note or SUBTITLE_TIMESTAMP_PATTERN.match(line) or line.isdigit():
+            continue
+        line = html.unescape(re.sub(r"<[^>]+>", "", line)).strip()
+        if line and line != previous_line:
+            text_lines.append(line)
+            previous_line = line
+
+    subtitle_text = "\n".join(text_lines)
+    if len(subtitle_text) > AI_SUMMARY_MAX_SUBTITLE_CHARS:
+        subtitle_text = subtitle_text[:AI_SUMMARY_MAX_SUBTITLE_CHARS]
+        subtitle_text += "\n（字幕内容过长，已截断）"
+    return subtitle_text
+
+
+def request_ai_summary(filename, subtitle_label, subtitle_text):
+    """调用 chat/completions 兼容接口并返回总结文本。"""
+    api_base_url = str(config.get("AI_API_BASE_URL") or "").strip()
+    api_model = str(config.get("AI_API_MODEL") or "").strip()
+    api_token = str(config.get("AI_API_TOKEN") or "").strip()
+    if not api_base_url or not api_model or not api_token:
+        raise RuntimeError("AI 总结尚未完成配置")
+
+    response = requests.post(
+        api_base_url,
+        headers={
+            "Authorization": f"Bearer {api_token}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": api_model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是一名严谨的视频内容总结助手。仅根据提供的字幕总结，"
+                        "不要补充字幕中没有的信息。使用简体中文输出，先给出简短概述，"
+                        "再列出关键要点；字幕信息不足或含糊时明确说明。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"视频文件名：{filename}\n"
+                        f"字幕：{subtitle_label}\n\n"
+                        f"字幕内容：\n{subtitle_text}"
+                    ),
+                },
+            ],
+        },
+        timeout=120,
+    )
+    response.raise_for_status()
+    try:
+        content = response.json()["choices"][0]["message"]["content"]
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("AI 接口返回了无法识别的数据") from exc
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("AI 接口未返回总结内容")
+    return content.strip()
+
+
+def ai_summary_is_configured():
+    return all(
+        isinstance(config.get(key), str) and config.get(key).strip()
+        for key in ("AI_API_BASE_URL", "AI_API_MODEL", "AI_API_TOKEN")
+    )
+
+
 def extract_youtube_video_id(source_url):
     """从常见 YouTube 地址中提取 11 位视频 ID。"""
     if not isinstance(source_url, str) or not source_url.strip():
@@ -834,6 +942,7 @@ def player():
             for language, quality in request.accept_languages
             if quality > 0
         ],
+        ai_summary_configured=ai_summary_is_configured(),
         show_waline=config.get("SHOW_WALINE_ON_PLAYER", False),
     )
 
@@ -924,6 +1033,93 @@ def serve_subtitle(filename, stream_index):
         return Response("subtitle conversion failed", status=500, content_type="text/plain; charset=utf-8")
 
     return Response(result.stdout, content_type="text/vtt; charset=utf-8")
+
+
+@app.route('/api/ai_summary', methods=['POST'])
+def api_ai_summary():
+    """读取当前视频的内嵌字幕并按需生成 AI 总结。"""
+    if not ai_summary_is_configured():
+        return jsonify({"success": False, "message": "AI 总结尚未完成配置"}), 503
+
+    data = request.get_json(silent=True) or {}
+    filename = data.get("filename")
+    stream_index = data.get("stream_index")
+    if not isinstance(filename, str) or not filename:
+        return jsonify({"success": False, "message": "缺少视频文件名"}), 400
+    if stream_index is not None and (
+        isinstance(stream_index, bool) or not isinstance(stream_index, int)
+    ):
+        return jsonify({"success": False, "message": "字幕流编号无效"}), 400
+
+    filepath = safe_join(FILES_DIR, filename)
+    if (
+        not filepath
+        or not filepath.lower().endswith('.mp4')
+        or not os.path.isfile(filepath)
+    ):
+        return jsonify({"success": False, "message": "视频文件不存在"}), 404
+
+    tracks = get_embedded_subtitles(filename)
+    if not tracks:
+        return jsonify({"success": False, "message": "当前视频没有可用字幕"}), 400
+    if stream_index is None:
+        selected_track = tracks[0]
+    else:
+        selected_track = next(
+            (track for track in tracks if track["stream_index"] == stream_index),
+            None,
+        )
+        if selected_track is None:
+            return jsonify({"success": False, "message": "所选字幕流不存在"}), 400
+
+    stat = os.stat(filepath)
+    cache_key = (
+        filepath,
+        stat.st_mtime_ns,
+        stat.st_size,
+        selected_track["stream_index"],
+        str(config.get("AI_API_BASE_URL") or "").strip(),
+        str(config.get("AI_API_MODEL") or "").strip(),
+    )
+    try:
+        with ai_summary_cache_lock:
+            summary = ai_summary_cache.get(cache_key)
+            cached = summary is not None
+            if summary is None:
+                subtitle_text = extract_subtitle_text(
+                    filepath,
+                    selected_track["stream_index"],
+                )
+                if not subtitle_text:
+                    return jsonify({
+                        "success": False,
+                        "message": "字幕中没有可总结的文本",
+                    }), 400
+                summary = request_ai_summary(
+                    filename,
+                    selected_track["label"],
+                    subtitle_text,
+                )
+                if len(ai_summary_cache) >= AI_SUMMARY_CACHE_MAX_ITEMS:
+                    ai_summary_cache.pop(next(iter(ai_summary_cache)))
+                ai_summary_cache[cache_key] = summary
+    except requests.RequestException as exc:
+        app.logger.error(
+            "AI 总结接口请求失败: %s (%s)",
+            filename,
+            type(exc).__name__,
+        )
+        return jsonify({"success": False, "message": "AI 接口请求失败"}), 502
+    except RuntimeError as exc:
+        app.logger.error("生成 AI 总结失败: %s (%s)", filename, exc)
+        return jsonify({"success": False, "message": str(exc)}), 500
+
+    return jsonify({
+        "success": True,
+        "summary": summary,
+        "subtitle": selected_track["label"],
+        "cached": cached,
+    })
 
 @app.route('/api/add_task', methods=['POST'])
 def api_add_task():

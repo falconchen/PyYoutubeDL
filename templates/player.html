@@ -38,6 +38,16 @@
                         <i class="fas fa-info-circle"></i> 视频播完后将自动播放下一条
                     </div>
                 </div>
+                <section class="ai-summary-panel" aria-labelledby="ai-summary-title">
+                    <div class="ai-summary-header">
+                        <h3 id="ai-summary-title"><i class="fas fa-wand-magic-sparkles"></i> AI 总结</h3>
+                        <button type="button" id="generate-ai-summary" class="ai-summary-button">
+                            生成总结
+                        </button>
+                    </div>
+                    <p id="ai-summary-status" class="ai-summary-status" role="status" aria-live="polite"></p>
+                    <div id="ai-summary-content" class="ai-summary-content" hidden></div>
+                </section>
                 {% if show_waline %}
                     <div class="comment-container player-comment-container">
                         <div id="waline"></div>
@@ -104,6 +114,8 @@
         var video_files = {{ video_files | tojson }};
         var subtitle_tracks = {{ subtitle_tracks | tojson }};
         var browser_subtitle_languages = {{ browser_subtitle_languages | tojson }};
+        var aiSummaryConfigured = {{ ai_summary_configured | tojson }};
+        var aiSummaryResults = {};
         var currentIndex = 0;
         var currentFilename = {{ (video_files[0] if video_files else '') | tojson }};
         var playbackProgressPrefix = 'pyyoutubedl:playback-progress:';
@@ -118,6 +130,7 @@
             controlBar.addChild('DownloadButton', {}, controlBar.children().length);
             player.textTracks().addEventListener('change', saveSubtitlePreference);
             applySubtitlePreference();
+            updateAiSummaryPanel(currentFilename);
             if (player.readyState() >= 1) {
                 restoreCurrentVideoProgress();
             }
@@ -383,7 +396,119 @@
             } else {
                 writeSubtitlePreference({ mode: 'off' });
             }
+            updateAiSummaryPanel(currentFilename);
         }
+
+        function getAiSummaryTrack(filename) {
+            var availableTracks = subtitle_tracks[filename] || [];
+            if (!availableTracks.length) {
+                return null;
+            }
+            var showingTrack = getSubtitleTracks().find(function (track) {
+                return track.mode === 'showing';
+            });
+            if (showingTrack) {
+                var matchingTrack = availableTracks.find(function (track) {
+                    return normalizeSubtitleLanguage(track.language)
+                        === normalizeSubtitleLanguage(showingTrack.language);
+                });
+                if (matchingTrack) {
+                    return matchingTrack;
+                }
+            }
+            return availableTracks[0];
+        }
+
+        function aiSummaryCacheKey(filename, track) {
+            return filename + ':' + (track ? track.stream_index : 'none');
+        }
+
+        function updateAiSummaryPanel(filename) {
+            var button = document.getElementById('generate-ai-summary');
+            var status = document.getElementById('ai-summary-status');
+            var content = document.getElementById('ai-summary-content');
+            var track = getAiSummaryTrack(filename);
+            var cachedSummary = track
+                ? aiSummaryResults[aiSummaryCacheKey(filename, track)]
+                : null;
+
+            button.textContent = '生成总结';
+            content.hidden = !cachedSummary;
+            content.textContent = cachedSummary || '';
+            if (!aiSummaryConfigured) {
+                button.disabled = true;
+                status.textContent = 'AI 总结尚未配置。';
+            } else if (!track) {
+                button.disabled = true;
+                status.textContent = filename ? '当前视频没有可用字幕。' : '暂无视频。';
+            } else {
+                button.disabled = false;
+                button.textContent = cachedSummary ? '重新显示' : '生成总结';
+                status.textContent = cachedSummary
+                    ? '已使用' + track.label + '生成总结。'
+                    : '将读取' + track.label + '并按需生成总结。';
+            }
+        }
+
+        async function generateAiSummary() {
+            var requestedFilename = currentFilename;
+            var track = getAiSummaryTrack(requestedFilename);
+            if (!aiSummaryConfigured || !requestedFilename || !track) {
+                updateAiSummaryPanel(requestedFilename);
+                return;
+            }
+
+            var button = document.getElementById('generate-ai-summary');
+            var status = document.getElementById('ai-summary-status');
+            var content = document.getElementById('ai-summary-content');
+            var cacheKey = aiSummaryCacheKey(requestedFilename, track);
+            if (aiSummaryResults[cacheKey]) {
+                content.textContent = aiSummaryResults[cacheKey];
+                content.hidden = false;
+                return;
+            }
+
+            button.disabled = true;
+            button.textContent = '生成中…';
+            content.hidden = true;
+            status.textContent = '正在读取字幕并生成总结，请稍候…';
+            try {
+                var response = await fetch({{ url_for('api_ai_summary') | tojson }}, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        filename: requestedFilename,
+                        stream_index: track.stream_index
+                    })
+                });
+                var result = await response.json();
+                if (!response.ok || !result.success) {
+                    throw new Error(result.message || '生成总结失败');
+                }
+                aiSummaryResults[cacheKey] = result.summary;
+                if (currentFilename === requestedFilename) {
+                    content.textContent = result.summary;
+                    content.hidden = false;
+                    status.textContent = '已使用' + result.subtitle + '生成总结。';
+                }
+            } catch (error) {
+                if (currentFilename === requestedFilename) {
+                    status.textContent = error.message || '生成总结失败，请稍后重试。';
+                }
+            } finally {
+                if (currentFilename === requestedFilename) {
+                    button.disabled = false;
+                    button.textContent = aiSummaryResults[cacheKey]
+                        ? '重新显示'
+                        : '生成总结';
+                }
+            }
+        }
+
+        document.getElementById('generate-ai-summary').addEventListener(
+            'click',
+            generateAiSummary
+        );
 
         function switchVideo(src, filename, element, savePrevious) {
             if (savePrevious !== false) {
@@ -396,6 +521,7 @@
             player.play();
             currentFilename = filename;
             updatePlayerUrl(filename);
+            updateAiSummaryPanel(filename);
 
             // 更新标题
             document.getElementById('current-video-title').textContent = '正在播放: ' + filename;

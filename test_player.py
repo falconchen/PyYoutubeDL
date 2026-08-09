@@ -2,7 +2,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import app as app_module
 from app import app
@@ -12,6 +12,7 @@ class TestPlayerPage(unittest.TestCase):
     def setUp(self):
         self.client = app.test_client()
         app.testing = True
+        app_module.ai_summary_cache.clear()
 
     def test_download_control_is_rendered_for_current_video(self):
         with tempfile.TemporaryDirectory() as files_dir:
@@ -312,6 +313,139 @@ class TestPlayerPage(unittest.TestCase):
         self.assertIn("writeSubtitlePreference({ mode: 'off' });", html)
         self.assertIn("savedPreference.mode !== 'off'", html)
         self.assertIn('applySubtitlePreference();', html)
+        preference_start = html.index('function saveSubtitlePreference()')
+        self.assertIn(
+            'updateAiSummaryPanel(currentFilename);',
+            html[preference_start:],
+        )
+
+    def test_player_renders_on_demand_ai_summary_controls(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, '带字幕.mp4').touch()
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch(
+                    'app.get_embedded_subtitles',
+                    return_value=[
+                        {'stream_index': 2, 'language': 'zh-Hans', 'label': '简体中文'},
+                    ],
+                ),
+                patch.dict(
+                    app_module.config,
+                    {
+                        'AI_API_BASE_URL': 'https://ai.example/v1/chat/completions',
+                        'AI_API_MODEL': 'test-model',
+                        'AI_API_TOKEN': 'test-token',
+                    },
+                ),
+            ):
+                response = self.client.get('/player')
+
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('id="generate-ai-summary"', html)
+        self.assertIn('var aiSummaryConfigured = true;', html)
+        self.assertIn("fetch(\"/api/ai_summary\"", html)
+        self.assertIn('stream_index: track.stream_index', html)
+        self.assertNotIn('test-token', html)
+
+    def test_ai_summary_requires_server_configuration(self):
+        with patch.dict(
+            app_module.config,
+            {'AI_API_BASE_URL': '', 'AI_API_MODEL': '', 'AI_API_TOKEN': ''},
+        ):
+            response = self.client.post(
+                '/api/ai_summary',
+                json={'filename': 'video.mp4', 'stream_index': 2},
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()['message'], 'AI 总结尚未完成配置')
+
+    def test_ai_summary_rejects_video_without_subtitles(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, '无字幕.mp4').touch()
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch('app.get_embedded_subtitles', return_value=[]),
+                patch.dict(
+                    app_module.config,
+                    {
+                        'AI_API_BASE_URL': 'https://ai.example/v1/chat/completions',
+                        'AI_API_MODEL': 'test-model',
+                        'AI_API_TOKEN': 'test-token',
+                    },
+                ),
+            ):
+                response = self.client.post(
+                    '/api/ai_summary',
+                    json={'filename': '无字幕.mp4'},
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['message'], '当前视频没有可用字幕')
+
+    def test_ai_summary_reads_selected_subtitle_calls_api_and_caches_result(self):
+        ffmpeg_result = subprocess.CompletedProcess(
+            args=['ffmpeg'],
+            returncode=0,
+            stdout=(
+                'WEBVTT\n\n00:00.000 --> 00:01.000\n<b>第一句</b>\n\n'
+                '00:01.000 --> 00:02.000\n第二句\n'
+            ).encode(),
+            stderr=b'',
+        )
+        ai_response = Mock()
+        ai_response.raise_for_status.return_value = None
+        ai_response.json.return_value = {
+            'choices': [{'message': {'content': '这是总结。'}}],
+        }
+
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, '带字幕.mp4').touch()
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch(
+                    'app.get_embedded_subtitles',
+                    return_value=[
+                        {'stream_index': 2, 'language': 'zh-Hans', 'label': '简体中文'},
+                    ],
+                ),
+                patch('app.subprocess.run', return_value=ffmpeg_result) as ffmpeg_run,
+                patch('app.requests.post', return_value=ai_response) as post,
+                patch.dict(
+                    app_module.config,
+                    {
+                        'AI_API_BASE_URL': 'https://ai.example/v1/chat/completions',
+                        'AI_API_MODEL': 'test-model',
+                        'AI_API_TOKEN': 'test-token',
+                    },
+                ),
+            ):
+                first = self.client.post(
+                    '/api/ai_summary',
+                    json={'filename': '带字幕.mp4', 'stream_index': 2},
+                )
+                second = self.client.post(
+                    '/api/ai_summary',
+                    json={'filename': '带字幕.mp4', 'stream_index': 2},
+                )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.get_json()['summary'], '这是总结。')
+        self.assertFalse(first.get_json()['cached'])
+        self.assertTrue(second.get_json()['cached'])
+        self.assertEqual(ffmpeg_run.call_count, 1)
+        self.assertEqual(post.call_count, 1)
+        request_kwargs = post.call_args.kwargs
+        self.assertEqual(
+            request_kwargs['headers']['Authorization'],
+            'Bearer test-token',
+        )
+        self.assertEqual(request_kwargs['json']['model'], 'test-model')
+        prompt = request_kwargs['json']['messages'][1]['content']
+        self.assertIn('第一句\n第二句', prompt)
+        self.assertNotIn('00:00.000', prompt)
 
     def test_probe_distinguishes_simplified_and_traditional_chinese_tracks(self):
         probe_result = subprocess.CompletedProcess(
