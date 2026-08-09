@@ -777,6 +777,21 @@ def index():
                          tasks=tasks,
                          show_waline=config.get("SHOW_WALINE_ON_INDEX", False))
 
+
+@app.route('/about')
+def about():
+    return render_template('about.html')
+
+
+@app.route('/terms')
+def terms():
+    return render_template('terms.html')
+
+
+@app.route('/privacy')
+def privacy():
+    return render_template('privacy.html')
+
 @app.route('/player')
 def player():
     exclude_keywords = get_player_exclude_keywords()

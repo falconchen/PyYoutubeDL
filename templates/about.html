@@ -1,0 +1,45 @@
+{% extends 'content_base.html' %}
+
+{% block title %}项目介绍{% endblock %}
+{% block description %}了解 PyYoutubeDL 的功能、工作方式与使用边界。{% endblock %}
+{% block heading %}一个轻量、可自托管的媒体下载工具{% endblock %}
+{% block lead %}
+<p class="content-lead">PyYoutubeDL 基于 Flask 与 yt-dlp，将链接提交、下载进度和本地播放整合在一个简洁的 Web 界面中。</p>
+{% endblock %}
+
+{% block content %}
+<section>
+    <h2>它能做什么</h2>
+    <div class="feature-grid">
+        <div class="feature-card">
+            <i class="fas fa-link" aria-hidden="true"></i>
+            <h3>提交链接</h3>
+            <p>通过网页或 API 创建视频、音频下载任务，并持续查看处理进度。</p>
+        </div>
+        <div class="feature-card">
+            <i class="fas fa-play-circle" aria-hidden="true"></i>
+            <h3>本地播放</h3>
+            <p>在浏览器中播放已下载的媒体，支持播放列表、进度恢复和视频字幕。</p>
+        </div>
+        <div class="feature-card">
+            <i class="fas fa-cloud-arrow-up" aria-hidden="true"></i>
+            <h3>可选远程存储</h3>
+            <p>实例管理员可按需启用 WebDAV 上传，并配置本地文件保留策略。</p>
+        </div>
+    </div>
+</section>
+
+<section>
+    <h2>工作方式</h2>
+    <ol>
+        <li>您提交媒体链接并选择视频或音频类型。</li>
+        <li>后台下载器调用 yt-dlp 获取内容并完成合并、字幕等后处理。</li>
+        <li>完成的文件可在本实例中播放，也可由管理员配置上传至 WebDAV。</li>
+    </ol>
+</section>
+
+<aside class="content-notice">
+    <strong>重要提示</strong>
+    <p>PyYoutubeDL 是独立的开源工具，并非 YouTube 或其他内容平台的官方服务。不同部署实例由各自运营者管理，功能、数据保留和可用性可能不同。</p>
+</aside>
+{% endblock %}

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="{% block description %}{% endblock %}">
+    <link rel="icon" href="{{ url_for('static', filename='images/favicon.png') }}">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
+    <title>{% block title %}{% endblock %} - PyYoutubeDL</title>
+    <link rel="stylesheet" href="{{ 'style.css' | versioned }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="content-page">
+    <main class="container content-container">
+        <a class="content-back-link" href="{{ url_for('index') }}">
+            <i class="fas fa-arrow-left" aria-hidden="true"></i> 返回下载页
+        </a>
+        <header class="content-header">
+            <p class="content-eyebrow">PyYoutubeDL</p>
+            <h1>{% block heading %}{% endblock %}</h1>
+            {% block lead %}{% endblock %}
+        </header>
+        <article class="content-article">
+            {% block content %}{% endblock %}
+        </article>
+    </main>
+    {% include '_site_footer.html' %}
+</body>
+</html>

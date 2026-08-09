@@ -175,6 +175,158 @@ body {
     text-align: left;
 }
 
+.site-footer {
+    width: 90%;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 0 1rem 1.5rem;
+    color: #6b7280;
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+.site-footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem 1.25rem;
+    margin-bottom: 0.5rem;
+}
+
+.site-footer a,
+.content-back-link {
+    color: #555;
+    text-decoration: none;
+}
+
+.site-footer a:hover,
+.content-back-link:hover {
+    color: var(--primary-color);
+}
+
+.site-footer a:focus-visible,
+.content-back-link:focus-visible {
+    border-radius: 3px;
+    outline: 3px solid rgba(255, 0, 0, 0.2);
+    outline-offset: 3px;
+}
+
+.content-page {
+    align-items: center;
+}
+
+.content-container {
+    max-width: 760px;
+    padding: clamp(1.5rem, 5vw, 3rem);
+}
+
+.content-back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-bottom: 2.25rem;
+    font-weight: 600;
+}
+
+.content-header {
+    padding-bottom: 2rem;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.content-eyebrow {
+    margin-bottom: 0.4rem;
+    color: var(--primary-color);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.content-header h1 {
+    margin-bottom: 0.75rem;
+    color: #171717;
+    font-size: clamp(1.9rem, 6vw, 2.8rem);
+    line-height: 1.2;
+}
+
+.content-lead {
+    max-width: 650px;
+    color: #525252;
+    font-size: 1.1rem;
+}
+
+.content-meta {
+    margin-top: 0.8rem;
+    color: #737373;
+    font-size: 0.9rem;
+}
+
+.content-article section {
+    margin-top: 2rem;
+}
+
+.content-article h2 {
+    margin-bottom: 0.75rem;
+    color: #262626;
+    font-size: 1.25rem;
+}
+
+.content-article h3 {
+    margin: 0.65rem 0 0.35rem;
+    color: #262626;
+    font-size: 1rem;
+}
+
+.content-article p + p {
+    margin-top: 0.75rem;
+}
+
+.content-article ul,
+.content-article ol {
+    padding-left: 1.25rem;
+}
+
+.content-article li + li {
+    margin-top: 0.65rem;
+}
+
+.content-article code {
+    padding: 0.1rem 0.3rem;
+    border-radius: 4px;
+    background: #f3f4f6;
+    font-size: 0.9em;
+}
+
+.feature-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.feature-card {
+    padding: 1.25rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #fafafa;
+}
+
+.feature-card > i {
+    color: var(--primary-color);
+    font-size: 1.25rem;
+}
+
+.content-notice {
+    margin-top: 2rem;
+    padding: 1.25rem;
+    border-left: 4px solid var(--primary-color);
+    border-radius: 0 8px 8px 0;
+    background: #fff5f5;
+}
+
+.content-notice p {
+    margin-top: 0.35rem;
+}
+
 /* 任务相关样式 */
 .task-container {
     background: white;
@@ -605,5 +757,13 @@ body {
 
     .url-display {
         max-width: 200px;
+    }
+
+    .feature-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .content-back-link {
+        margin-bottom: 1.5rem;
     }
 }
