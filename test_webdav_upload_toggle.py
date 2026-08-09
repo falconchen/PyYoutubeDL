@@ -137,6 +137,44 @@ start_services
             self.assertIn("'preview'", log_message)
             self.assertIn(str(media_file), log_message)
 
+    def test_subtitles_are_kept_locally_without_webdav_upload(self):
+        handler = webdav_uploader.WebDAVUploadHandler()
+
+        for extension in sorted(webdav_uploader.SUBTITLE_EXTENSIONS):
+            with self.subTest(extension=extension), tempfile.TemporaryDirectory() as root:
+                subtitle_file = Path(root) / f'episode.zh-Hans{extension}'
+                subtitle_file.write_text('subtitle', encoding='utf-8')
+                webdav_uploader.retry_count[str(subtitle_file)] = 1
+
+                with (
+                    patch.dict(
+                        webdav_uploader.config,
+                        {
+                            'ENABLE_WEBDAV_UPLOAD': True,
+                            'DELETE_AFTER_UPLOAD': True,
+                            'WEBDAV_UPLOAD_EXCLUDE_KEYWORDS': [],
+                        },
+                    ),
+                    patch.object(webdav_uploader, 'video_webdav') as video_client,
+                    patch.object(webdav_uploader, 'audio_webdav') as audio_client,
+                    patch.object(webdav_uploader.logger, 'info') as log_info,
+                ):
+                    handler.process_file(str(subtitle_file))
+
+                self.assertTrue(subtitle_file.exists())
+                self.assertNotIn(
+                    str(subtitle_file),
+                    webdav_uploader.retry_count,
+                )
+                video_client.check.assert_not_called()
+                video_client.upload_sync.assert_not_called()
+                audio_client.check.assert_not_called()
+                audio_client.upload_sync.assert_not_called()
+                log_message = log_info.call_args.args[0]
+                self.assertIn('字幕文件', log_message)
+                self.assertIn('保留本地文件', log_message)
+                self.assertIn(str(subtitle_file), log_message)
+
 
 if __name__ == '__main__':
     unittest.main()

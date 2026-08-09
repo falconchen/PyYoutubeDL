@@ -161,6 +161,7 @@ UPLOAD_RETRY_DELAY = config.get("UPLOAD_RETRY_DELAY", 60)
 # 记录每个文件的重试次数
 retry_count = {}
 retry_lock = threading.Lock()
+SUBTITLE_EXTENSIONS = {'.ass', '.lrc', '.srt', '.ssa', '.ttml', '.vtt'}
 
 
 def find_upload_exclude_keyword(filename, keywords):
@@ -271,6 +272,11 @@ class WebDAVUploadHandler(FileSystemEventHandler):
             return
 
         ext = os.path.splitext(file_path)[1].lower()
+        if ext in SUBTITLE_EXTENSIONS:
+            with retry_lock:
+                retry_count.pop(file_path, None)
+            logger.info(f"检测到字幕文件，跳过WebDAV上传并保留本地文件: {file_path}")
+            return
         if ext in ['.mp4', '.mkv', '.webm', '.mov']:
             category = 'Video'
             webdav_client = video_webdav
