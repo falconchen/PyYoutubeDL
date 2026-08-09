@@ -349,6 +349,37 @@ class TestPlayerPage(unittest.TestCase):
         self.assertIn('stream_index: track.stream_index', html)
         self.assertNotIn('test-token', html)
 
+    def test_ai_summary_renders_sanitized_markdown_as_html(self):
+        template = Path(app.template_folder, 'player.html').read_text(
+            encoding='utf-8',
+        )
+        css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
+
+        self.assertIn('marked@18.0.7/lib/marked.umd.js', template)
+        self.assertIn('dompurify@3.4.12/dist/purify.min.js', template)
+        self.assertIn('var renderedHtml = marked.parse(markdown', template)
+        self.assertIn('var sanitizedHtml = DOMPurify.sanitize(renderedHtml', template)
+        self.assertIn("FORBID_TAGS: ['img', 'svg', 'math', 'style']", template)
+        self.assertIn('content.innerHTML = sanitizedHtml;', template)
+        self.assertIn('content.textContent = markdown;', template)
+        self.assertIn('.ai-summary-content h2 {', css)
+        self.assertIn('.ai-summary-content pre code {', css)
+
+    def test_ai_summary_has_copy_and_expand_controls(self):
+        template = Path(app.template_folder, 'player.html').read_text(
+            encoding='utf-8',
+        )
+        css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
+
+        self.assertIn('id="copy-ai-summary"', template)
+        self.assertIn('id="toggle-ai-summary"', template)
+        self.assertIn('navigator.clipboard.writeText(summary);', template)
+        self.assertIn('fallbackCopyText(summary);', template)
+        self.assertIn("toggleButton.textContent = expanded ? '收起' : '展开';", template)
+        self.assertIn("toggleButton.setAttribute('aria-expanded', String(expanded));", template)
+        self.assertIn("content.classList.add('is-collapsed');", template)
+        self.assertIn('.ai-summary-content.is-collapsed {', css)
+
     def test_ai_summary_requires_server_configuration(self):
         with patch.dict(
             app_module.config,

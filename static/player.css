@@ -168,6 +168,14 @@
     color: var(--primary-color);
 }
 
+.ai-summary-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
 .ai-summary-button {
     flex-shrink: 0;
     padding: 0.6rem 1rem;
@@ -194,6 +202,12 @@
     cursor: not-allowed;
 }
 
+.ai-summary-button-secondary {
+    border: 1px solid #ddd;
+    background: #f8f9fa;
+    color: #444;
+}
+
 .ai-summary-status {
     margin: 0.85rem 0 0;
     color: #777;
@@ -201,13 +215,119 @@
 }
 
 .ai-summary-content {
+    position: relative;
     margin-top: 1rem;
     padding-top: 1rem;
     border-top: 1px solid #eee;
     color: #333;
     line-height: 1.75;
+    overflow-x: auto;
     overflow-wrap: anywhere;
-    white-space: pre-wrap;
+}
+
+.ai-summary-content.is-collapsed {
+    max-height: 360px;
+    overflow: hidden;
+}
+
+.ai-summary-content.is-collapsed::after {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 4rem;
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0), white);
+    content: '';
+    pointer-events: none;
+}
+
+.ai-summary-content > :first-child {
+    margin-top: 0;
+}
+
+.ai-summary-content > :last-child {
+    margin-bottom: 0;
+}
+
+.ai-summary-content h1,
+.ai-summary-content h2,
+.ai-summary-content h3,
+.ai-summary-content h4 {
+    margin: 1.25rem 0 0.6rem;
+    color: #282828;
+    line-height: 1.4;
+}
+
+.ai-summary-content h1 {
+    font-size: 1.35rem;
+}
+
+.ai-summary-content h2 {
+    font-size: 1.2rem;
+}
+
+.ai-summary-content h3,
+.ai-summary-content h4 {
+    font-size: 1.05rem;
+}
+
+.ai-summary-content p,
+.ai-summary-content ul,
+.ai-summary-content ol,
+.ai-summary-content blockquote,
+.ai-summary-content pre,
+.ai-summary-content table {
+    margin: 0.75rem 0;
+}
+
+.ai-summary-content ul,
+.ai-summary-content ol {
+    padding-left: 1.5rem;
+}
+
+.ai-summary-content blockquote {
+    padding: 0.15rem 1rem;
+    border-left: 4px solid var(--primary-color);
+    background: #fafafa;
+    color: #666;
+}
+
+.ai-summary-content code {
+    padding: 0.15em 0.35em;
+    border-radius: 4px;
+    background: #f3f4f6;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.9em;
+}
+
+.ai-summary-content pre {
+    padding: 1rem;
+    border-radius: 8px;
+    background: #1f2937;
+    color: #f9fafb;
+    overflow-x: auto;
+}
+
+.ai-summary-content pre code {
+    padding: 0;
+    background: transparent;
+    color: inherit;
+}
+
+.ai-summary-content table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.ai-summary-content th,
+.ai-summary-content td {
+    padding: 0.55rem 0.7rem;
+    border: 1px solid #ddd;
+    text-align: left;
+}
+
+.ai-summary-content a {
+    color: var(--primary-color);
 }
 
 .player-comment-container {

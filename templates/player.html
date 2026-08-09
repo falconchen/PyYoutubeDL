@@ -41,9 +41,18 @@
                 <section class="ai-summary-panel" aria-labelledby="ai-summary-title">
                     <div class="ai-summary-header">
                         <h3 id="ai-summary-title"><i class="fas fa-wand-magic-sparkles"></i> AI 总结</h3>
-                        <button type="button" id="generate-ai-summary" class="ai-summary-button">
-                            生成总结
-                        </button>
+                        <div class="ai-summary-actions">
+                            <button type="button" id="copy-ai-summary" class="ai-summary-button ai-summary-button-secondary" hidden>
+                                <i class="fas fa-copy" aria-hidden="true"></i> 复制
+                            </button>
+                            <button type="button" id="toggle-ai-summary" class="ai-summary-button ai-summary-button-secondary"
+                                aria-controls="ai-summary-content" aria-expanded="false" hidden>
+                                展开
+                            </button>
+                            <button type="button" id="generate-ai-summary" class="ai-summary-button">
+                                生成总结
+                            </button>
+                        </div>
                     </div>
                     <p id="ai-summary-status" class="ai-summary-status" role="status" aria-live="polite"></p>
                     <div id="ai-summary-content" class="ai-summary-content" hidden></div>
@@ -92,6 +101,8 @@
     {% include '_site_footer.html' %}
 
     <script src="https://unpkg.com/video.js/dist/video.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@18.0.7/lib/marked.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.12/dist/purify.min.js"></script>
     <script>
         var Button = videojs.getComponent('Button');
         class DownloadButton extends Button {
@@ -423,6 +434,52 @@
             return filename + ':' + (track ? track.stream_index : 'none');
         }
 
+        function resetAiSummaryContent() {
+            var content = document.getElementById('ai-summary-content');
+            var copyButton = document.getElementById('copy-ai-summary');
+            var toggleButton = document.getElementById('toggle-ai-summary');
+            content.replaceChildren();
+            content.hidden = true;
+            content.classList.remove('is-collapsed');
+            copyButton.hidden = true;
+            toggleButton.hidden = true;
+            toggleButton.textContent = '展开';
+            toggleButton.setAttribute('aria-expanded', 'false');
+        }
+
+        function renderAiSummary(markdown) {
+            var content = document.getElementById('ai-summary-content');
+            var copyButton = document.getElementById('copy-ai-summary');
+            var toggleButton = document.getElementById('toggle-ai-summary');
+            try {
+                if (
+                    typeof marked === 'undefined'
+                    || typeof marked.parse !== 'function'
+                    || typeof DOMPurify === 'undefined'
+                ) {
+                    throw new Error('Markdown 渲染组件未加载');
+                }
+                var renderedHtml = marked.parse(markdown, {
+                    gfm: true,
+                    breaks: true
+                });
+                var sanitizedHtml = DOMPurify.sanitize(renderedHtml, {
+                    FORBID_TAGS: ['img', 'svg', 'math', 'style'],
+                    FORBID_ATTR: ['style']
+                });
+                content.innerHTML = sanitizedHtml;
+            } catch (error) {
+                console.warn('Markdown 渲染失败，已回退为纯文本', error);
+                content.textContent = markdown;
+            }
+            content.hidden = false;
+            content.classList.add('is-collapsed');
+            copyButton.hidden = false;
+            toggleButton.hidden = false;
+            toggleButton.textContent = '展开';
+            toggleButton.setAttribute('aria-expanded', 'false');
+        }
+
         function updateAiSummaryPanel(filename) {
             var button = document.getElementById('generate-ai-summary');
             var status = document.getElementById('ai-summary-status');
@@ -433,8 +490,11 @@
                 : null;
 
             button.textContent = '生成总结';
-            content.hidden = !cachedSummary;
-            content.textContent = cachedSummary || '';
+            if (cachedSummary) {
+                renderAiSummary(cachedSummary);
+            } else {
+                resetAiSummaryContent();
+            }
             if (!aiSummaryConfigured) {
                 button.disabled = true;
                 status.textContent = 'AI 总结尚未配置。';
@@ -463,8 +523,7 @@
             var content = document.getElementById('ai-summary-content');
             var cacheKey = aiSummaryCacheKey(requestedFilename, track);
             if (aiSummaryResults[cacheKey]) {
-                content.textContent = aiSummaryResults[cacheKey];
-                content.hidden = false;
+                renderAiSummary(aiSummaryResults[cacheKey]);
                 return;
             }
 
@@ -487,8 +546,7 @@
                 }
                 aiSummaryResults[cacheKey] = result.summary;
                 if (currentFilename === requestedFilename) {
-                    content.textContent = result.summary;
-                    content.hidden = false;
+                    renderAiSummary(result.summary);
                     status.textContent = '已使用' + result.subtitle + '生成总结。';
                 }
             } catch (error) {
@@ -505,9 +563,67 @@
             }
         }
 
+        function fallbackCopyText(text) {
+            var textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            var copied = document.execCommand('copy');
+            textarea.remove();
+            if (!copied) {
+                throw new Error('浏览器拒绝复制');
+            }
+        }
+
+        async function copyAiSummary() {
+            var status = document.getElementById('ai-summary-status');
+            var copyButton = document.getElementById('copy-ai-summary');
+            var track = getAiSummaryTrack(currentFilename);
+            var summary = track
+                ? aiSummaryResults[aiSummaryCacheKey(currentFilename, track)]
+                : null;
+            if (!summary) {
+                return;
+            }
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(summary);
+                } else {
+                    fallbackCopyText(summary);
+                }
+                copyButton.textContent = '已复制';
+                status.textContent = 'AI 总结已复制。';
+                window.setTimeout(function () {
+                    copyButton.innerHTML = '<i class="fas fa-copy" aria-hidden="true"></i> 复制';
+                }, 1500);
+            } catch (error) {
+                status.textContent = '复制失败，请手动选择总结内容。';
+            }
+        }
+
+        function toggleAiSummary() {
+            var content = document.getElementById('ai-summary-content');
+            var toggleButton = document.getElementById('toggle-ai-summary');
+            var expanded = content.classList.contains('is-collapsed');
+            content.classList.toggle('is-collapsed', !expanded);
+            toggleButton.textContent = expanded ? '收起' : '展开';
+            toggleButton.setAttribute('aria-expanded', String(expanded));
+        }
+
         document.getElementById('generate-ai-summary').addEventListener(
             'click',
             generateAiSummary
+        );
+        document.getElementById('copy-ai-summary').addEventListener(
+            'click',
+            copyAiSummary
+        );
+        document.getElementById('toggle-ai-summary').addEventListener(
+            'click',
+            toggleAiSummary
         );
 
         function switchVideo(src, filename, element, savePrevious) {
