@@ -74,6 +74,7 @@ AUDIO_MIME_TYPES = {
     'opus': 'audio/ogg',
     'wav': 'audio/wav',
 }
+LYRICS_EXTENSIONS = {'lrc', 'srt', 'vtt'}
 YOUTUBE_VIDEO_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]{11}$')
 SUBTITLE_TIMESTAMP_PATTERN = re.compile(
     r'^(?:\d{2}:)?\d{2}:\d{2}[.,]\d{3}\s+-->\s+'
@@ -847,6 +848,83 @@ def get_audio_metadata(filename, fallback_cover_url):
     }
 
 
+def find_audio_lyrics(filename, preferred_languages=None):
+    """查找与音频同名的旁挂歌词，并返回浏览器可读取的信息。"""
+    audio_stem = os.path.splitext(filename)[0]
+    preferred_languages = preferred_languages or []
+    normalized_languages = []
+    for language in preferred_languages:
+        if not isinstance(language, str):
+            continue
+        normalized = language.strip().lower().replace('_', '-')
+        if not normalized:
+            continue
+        language_variants = [normalized]
+        if normalized in {'zh-cn', 'zh-sg'}:
+            language_variants.append('zh-hans')
+        elif normalized in {'zh-hk', 'zh-mo', 'zh-tw'}:
+            language_variants.append('zh-hant')
+        language_variants.append(normalized.split('-', 1)[0])
+        for variant in language_variants:
+            if variant not in normalized_languages:
+                normalized_languages.append(variant)
+
+    language_order = normalized_languages + [
+        'zh-hans', 'zh-cn', 'zh', 'zh-hant', 'zh-tw', 'en',
+    ]
+    language_order = list(dict.fromkeys(language_order))
+    extension_order = {'lrc': 0, 'vtt': 1, 'srt': 2}
+    candidates = []
+
+    try:
+        directory_entries = os.listdir(FILES_DIR)
+    except OSError as exc:
+        app.logger.warning("读取歌词目录失败: %s (%s)", FILES_DIR, exc)
+        return None
+
+    for candidate in directory_entries:
+        candidate_stem, extension = os.path.splitext(candidate)
+        extension = extension.lower().lstrip('.')
+        if extension not in LYRICS_EXTENSIONS:
+            continue
+        if candidate_stem == audio_stem:
+            language = ''
+        elif candidate_stem.startswith(f'{audio_stem}.'):
+            language = candidate_stem[len(audio_stem) + 1:]
+        else:
+            continue
+
+        candidate_path = safe_join(FILES_DIR, candidate)
+        if not candidate_path or not os.path.isfile(candidate_path):
+            continue
+
+        normalized_language = language.lower().replace('_', '-')
+        try:
+            language_rank = language_order.index(normalized_language)
+        except ValueError:
+            language_rank = len(language_order)
+        candidates.append((
+            0 if not normalized_language else 1,
+            language_rank,
+            extension_order[extension],
+            candidate.lower(),
+            candidate,
+            language,
+        ))
+
+    if not candidates:
+        return None
+
+    _, _, _, _, lyrics_filename, language = min(candidates)
+    extension = os.path.splitext(lyrics_filename)[1].lower().lstrip('.')
+    return {
+        'filename': lyrics_filename,
+        'url': url_for('serve_file', filename=lyrics_filename),
+        'format': extension,
+        'language': language,
+    }
+
+
 def get_player_exclude_keywords():
     exclude_keywords = config.get("PLAYER_FILENAME_EXCLUDE_KEYWORDS", [])
     if not isinstance(exclude_keywords, list):
@@ -976,11 +1054,17 @@ def audio_player():
         )
 
     audio_items = []
+    preferred_languages = [
+        language
+        for language, quality in request.accept_languages
+        if quality > 0
+    ]
     for filename in audio_files:
         metadata = get_audio_metadata(filename, fallback_cover_url)
         metadata.update({
             'filename': filename,
             'url': url_for('serve_file', filename=filename),
+            'lyrics': find_audio_lyrics(filename, preferred_languages),
         })
         audio_items.append(metadata)
 

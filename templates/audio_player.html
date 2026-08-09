@@ -41,6 +41,15 @@
                         <i class="fas fa-info-circle"></i> 音频播完后将自动播放下一首
                     </div>
                 </div>
+                <section class="lyrics-panel" aria-labelledby="lyrics-heading">
+                    <div class="lyrics-header">
+                        <h3 id="lyrics-heading"><i class="fas fa-align-left"></i> 歌词</h3>
+                        <span id="lyrics-language" class="lyrics-language" hidden></span>
+                    </div>
+                    <div id="lyrics-content" class="lyrics-content scrollbar-custom" aria-live="polite">
+                        <p class="lyrics-status">正在加载歌词…</p>
+                    </div>
+                </section>
             </div>
 
             <div class="playlist-section">
@@ -138,6 +147,11 @@
         var visualizerUnavailable = false;
         var visualizerPixelRatio = 1;
         var reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+        var lyricsContent = document.getElementById('lyrics-content');
+        var lyricsLanguage = document.getElementById('lyrics-language');
+        var currentLyrics = [];
+        var currentLyricIndex = -1;
+        var lyricsRequestSerial = 0;
 
         player.ready(function () {
             var controlBar = player.getChild('controlBar');
@@ -147,6 +161,9 @@
             setupAudioVisualizer();
             if (audioItems.length > 0) {
                 updatePoster(audioItems[0]);
+                loadLyrics(audioItems[0]);
+            } else {
+                showLyricsStatus('暂无音频');
             }
             if (player.readyState() >= 1) {
                 restoreCurrentAudioProgress();
@@ -508,6 +525,183 @@
             artist.hidden = !audioItem.artist;
         }
 
+        function showLyricsStatus(message) {
+            currentLyrics = [];
+            currentLyricIndex = -1;
+            lyricsContent.replaceChildren();
+            var status = document.createElement('p');
+            status.className = 'lyrics-status';
+            status.textContent = message;
+            lyricsContent.appendChild(status);
+            lyricsLanguage.hidden = true;
+            lyricsLanguage.textContent = '';
+        }
+
+        function parseLyricTimestamp(value) {
+            var normalized = value.trim().replace(',', '.');
+            var parts = normalized.split(':').map(Number);
+            if (parts.some(function (part) { return !Number.isFinite(part); })) {
+                return null;
+            }
+            if (parts.length === 2) {
+                return parts[0] * 60 + parts[1];
+            }
+            if (parts.length === 3) {
+                return parts[0] * 3600 + parts[1] * 60 + parts[2];
+            }
+            return null;
+        }
+
+        function parseLrcLyrics(text) {
+            var cues = [];
+            text.replace(/^\uFEFF/, '').split(/\r?\n/).forEach(function (line) {
+                var timestamps = [];
+                var timestampPattern = /\[(\d{1,3}:\d{2}(?:\.\d{1,3})?)\]/g;
+                var match;
+                while ((match = timestampPattern.exec(line)) !== null) {
+                    var time = parseLyricTimestamp(match[1]);
+                    if (time !== null) {
+                        timestamps.push(time);
+                    }
+                }
+                var lyric = line.replace(timestampPattern, '').trim();
+                if (!lyric || timestamps.length === 0) {
+                    return;
+                }
+                timestamps.forEach(function (time) {
+                    cues.push({ time: time, text: lyric });
+                });
+            });
+            return cues;
+        }
+
+        function stripLyricMarkup(text) {
+            var parsed = new DOMParser().parseFromString(text, 'text/html');
+            return (parsed.body.textContent || '').trim();
+        }
+
+        function parseTimedTextLyrics(text) {
+            var cues = [];
+            var lines = text.replace(/^\uFEFF/, '').replace(/\r/g, '').split('\n');
+            for (var index = 0; index < lines.length; index++) {
+                if (lines[index].indexOf('-->') === -1) {
+                    continue;
+                }
+                var start = parseLyricTimestamp(lines[index].split('-->')[0]);
+                if (start === null) {
+                    continue;
+                }
+                var lyricLines = [];
+                for (index += 1; index < lines.length && lines[index].trim(); index++) {
+                    lyricLines.push(lines[index].trim());
+                }
+                var lyric = stripLyricMarkup(lyricLines.join(' '));
+                if (lyric) {
+                    cues.push({ time: start, text: lyric });
+                }
+            }
+            return cues;
+        }
+
+        function parseLyrics(text, format) {
+            var cues = format === 'lrc'
+                ? parseLrcLyrics(text)
+                : parseTimedTextLyrics(text);
+            cues.sort(function (left, right) { return left.time - right.time; });
+            return cues;
+        }
+
+        function renderLyrics(cues, lyrics) {
+            lyricsContent.replaceChildren();
+            currentLyrics = cues;
+            currentLyricIndex = -1;
+            cues.forEach(function (cue, index) {
+                var line = document.createElement('button');
+                line.type = 'button';
+                line.className = 'lyrics-line';
+                line.textContent = cue.text;
+                line.dataset.lyricIndex = String(index);
+                line.addEventListener('click', function () {
+                    player.currentTime(cue.time);
+                    player.play();
+                });
+                lyricsContent.appendChild(line);
+            });
+            lyricsLanguage.textContent = lyrics.language || lyrics.format.toUpperCase();
+            lyricsLanguage.hidden = false;
+            syncLyrics();
+        }
+
+        function loadLyrics(audioItem) {
+            var requestSerial = ++lyricsRequestSerial;
+            if (!audioItem || !audioItem.lyrics) {
+                showLyricsStatus('暂无歌词');
+                return;
+            }
+            showLyricsStatus('正在加载歌词…');
+            fetch(audioItem.lyrics.url, { credentials: 'same-origin' })
+                .then(function (response) {
+                    if (!response.ok) {
+                        throw new Error('HTTP ' + response.status);
+                    }
+                    return response.text();
+                })
+                .then(function (text) {
+                    if (requestSerial !== lyricsRequestSerial) {
+                        return;
+                    }
+                    var cues = parseLyrics(text, audioItem.lyrics.format);
+                    if (cues.length === 0) {
+                        showLyricsStatus('歌词文件中没有可识别的时间轴');
+                        return;
+                    }
+                    renderLyrics(cues, audioItem.lyrics);
+                })
+                .catch(function (error) {
+                    if (requestSerial === lyricsRequestSerial) {
+                        console.warn('加载歌词失败', error);
+                        showLyricsStatus('歌词加载失败');
+                    }
+                });
+        }
+
+        function syncLyrics() {
+            if (currentLyrics.length === 0) {
+                return;
+            }
+            var currentTime = player.currentTime();
+            var nextIndex = -1;
+            for (var index = currentLyrics.length - 1; index >= 0; index--) {
+                if (currentLyrics[index].time <= currentTime + 0.05) {
+                    nextIndex = index;
+                    break;
+                }
+            }
+            if (nextIndex === currentLyricIndex) {
+                return;
+            }
+            var previousLine = lyricsContent.querySelector('.lyrics-line.active');
+            if (previousLine) {
+                previousLine.classList.remove('active');
+                previousLine.removeAttribute('aria-current');
+            }
+            currentLyricIndex = nextIndex;
+            if (nextIndex < 0) {
+                return;
+            }
+            var activeLine = lyricsContent.querySelector(
+                '[data-lyric-index="' + nextIndex + '"]'
+            );
+            if (activeLine) {
+                activeLine.classList.add('active');
+                activeLine.setAttribute('aria-current', 'true');
+                activeLine.scrollIntoView({
+                    behavior: reducedMotionQuery.matches ? 'auto' : 'smooth',
+                    block: 'center'
+                });
+            }
+        }
+
         function updateActiveItem(filename) {
             document.querySelectorAll('.playlist-item').forEach(function (item) {
                 var isActive = item.dataset.filename === filename;
@@ -534,6 +728,7 @@
             currentIndex = audioItems.indexOf(audioItem);
             player.src({ type: audioItem.mime_type, src: audioItem.url });
             updatePoster(audioItem);
+            loadLyrics(audioItem);
             updateCurrentAudioInfo(audioItem);
             updateActiveItem(filename);
             updatePlayerUrl(filename);
@@ -557,6 +752,7 @@
         player.on('play', startAudioVisualizer);
         player.on('pause', stopAudioVisualizer);
         player.on('timeupdate', function () {
+            syncLyrics();
             var now = Date.now();
             if (now - lastProgressSaveAt >= 2000) {
                 lastProgressSaveAt = now;

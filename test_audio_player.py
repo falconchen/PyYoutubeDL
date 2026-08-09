@@ -151,6 +151,55 @@ class TestAudioPlayerPage(unittest.TestCase):
         self.assertLess(html.index('requested song'), html.index('older.mp3'))
         self.assertNotIn('video.mp4', html)
 
+    def test_audio_page_matches_preferred_sidecar_lyrics(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            audio = Path(files_dir, 'song.mp3')
+            Path(files_dir, 'song.en.srt').write_text(
+                '1\n00:00:00,000 --> 00:00:01,000\nEnglish\n',
+                encoding='utf-8',
+            )
+            preferred = Path(files_dir, 'song.zh-Hans.srt')
+            preferred.write_text(
+                '1\n00:00:00,000 --> 00:00:01,000\n中文\n',
+                encoding='utf-8',
+            )
+            audio.touch()
+
+            with app.test_request_context(), patch('app.FILES_DIR', files_dir):
+                lyrics = app_module.find_audio_lyrics(
+                    audio.name,
+                    ['zh-Hans', 'en-US'],
+                )
+
+        self.assertEqual(lyrics['filename'], preferred.name)
+        self.assertEqual(lyrics['format'], 'srt')
+        self.assertIn('/files/song.zh-Hans.srt', lyrics['url'])
+
+    def test_audio_page_prefers_neutral_lrc_lyrics(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, 'song.mp3').touch()
+            Path(files_dir, 'song.zh-Hans.srt').touch()
+            neutral = Path(files_dir, 'song.lrc')
+            neutral.touch()
+
+            with app.test_request_context(), patch('app.FILES_DIR', files_dir):
+                lyrics = app_module.find_audio_lyrics('song.mp3', ['zh-CN'])
+
+        self.assertEqual(lyrics['filename'], neutral.name)
+        self.assertEqual(lyrics['format'], 'lrc')
+
+    def test_audio_page_matches_language_family(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, 'song.mp3').touch()
+            english = Path(files_dir, 'song.en.srt')
+            english.touch()
+            Path(files_dir, 'song.zh-Hans.srt').touch()
+
+            with app.test_request_context(), patch('app.FILES_DIR', files_dir):
+                lyrics = app_module.find_audio_lyrics('song.mp3', ['en-US'])
+
+        self.assertEqual(lyrics['filename'], english.name)
+
     def test_audio_player_uses_poster_mode_and_race_safe_fallback(self):
         template = Path(app.template_folder, 'audio_player.html').read_text(
             encoding='utf-8',
@@ -203,6 +252,21 @@ class TestAudioPlayerPage(unittest.TestCase):
             template.index('playlist-section'),
             template.index('audio-comment-container'),
         )
+
+    def test_audio_player_loads_and_synchronizes_sidecar_lyrics(self):
+        template = Path(app.template_folder, 'audio_player.html').read_text(
+            encoding='utf-8',
+        )
+        css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
+
+        self.assertIn('id="lyrics-content"', template)
+        self.assertIn('function parseLrcLyrics(text)', template)
+        self.assertIn('function parseTimedTextLyrics(text)', template)
+        self.assertIn('fetch(audioItem.lyrics.url', template)
+        self.assertIn('function syncLyrics()', template)
+        self.assertIn('player.currentTime(cue.time);', template)
+        self.assertIn('loadLyrics(audioItem);', template)
+        self.assertIn('.lyrics-line.active {', css)
 
     def test_default_cover_config_and_asset_exist(self):
         self.assertEqual(
