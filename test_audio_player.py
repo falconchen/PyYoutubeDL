@@ -150,6 +150,7 @@ class TestAudioPlayerPage(unittest.TestCase):
         self.assertIn('<source src="/files/requested%20song.m4a" type="audio/mp4">', html)
         self.assertLess(html.index('requested song'), html.index('older.mp3'))
         self.assertNotIn('video.mp4', html)
+        self.assertIn('aria-labelledby="lyrics-heading"\n                        hidden', html)
 
     def test_audio_page_matches_preferred_sidecar_lyrics(self):
         with tempfile.TemporaryDirectory() as files_dir:
@@ -221,6 +222,9 @@ class TestAudioPlayerPage(unittest.TestCase):
         self.assertIn('id="audio-visualizer"', template)
         self.assertIn('id="audio-cover-gradient"', template)
         self.assertIn('player.el().appendChild(coverGradient);', template)
+        self.assertIn('filter: blur(16px)', css)
+        self.assertIn('transform: scale(1.08);', css)
+        self.assertIn('bottom: 2.5rem;', css)
         self.assertIn("aria-hidden=\"true\"", template)
         self.assertIn('window.AudioContext || window.webkitAudioContext', template)
         self.assertIn('createMediaElementSource(', template)
@@ -260,13 +264,38 @@ class TestAudioPlayerPage(unittest.TestCase):
         css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
 
         self.assertIn('id="lyrics-content"', template)
+        self.assertIn('player.el().appendChild(lyricsPanel);', template)
         self.assertIn('function parseLrcLyrics(text)', template)
         self.assertIn('function parseTimedTextLyrics(text)', template)
         self.assertIn('fetch(audioItem.lyrics.url', template)
         self.assertIn('function syncLyrics()', template)
+        self.assertIn('function hideLyricsPanel()', template)
+        self.assertIn('lyricsPanel.hidden = true;', template)
+        self.assertIn('lyricsPanel.hidden = false;', template)
+        self.assertIn('if (!audioItem || !audioItem.lyrics) {', template)
+        self.assertIn('.audio-player-page .lyrics-panel[hidden] {', css)
         self.assertIn('player.currentTime(cue.time);', template)
         self.assertIn('loadLyrics(audioItem);', template)
         self.assertIn('.lyrics-line.active {', css)
+        self.assertIn('.audio-player-page .lyrics-panel {', css)
+        self.assertIn('z-index: 3;', css)
+        lyrics_panel_rule = css.split(
+            '.audio-player-page .lyrics-panel {',
+            1,
+        )[1].split('}', 1)[0]
+        self.assertIn('top: 1%;', lyrics_panel_rule)
+        self.assertIn('bottom: 42%;', lyrics_panel_rule)
+        self.assertIn('border: none;', lyrics_panel_rule)
+        self.assertNotIn('right:', lyrics_panel_rule)
+        self.assertNotIn('left:', lyrics_panel_rule)
+        self.assertNotIn('border-radius:', lyrics_panel_rule)
+        self.assertNotIn('background:', lyrics_panel_rule)
+        self.assertNotIn('box-shadow:', lyrics_panel_rule)
+        self.assertNotIn('backdrop-filter:', lyrics_panel_rule)
+        self.assertLess(
+            template.index('id="audio-visualizer"'),
+            template.index('class="lyrics-panel"'),
+        )
 
     def test_default_cover_config_and_asset_exist(self):
         self.assertEqual(

@@ -30,6 +30,16 @@
                     </audio>
                     <div id="audio-cover-gradient" class="audio-cover-gradient" aria-hidden="true"></div>
                     <canvas id="audio-visualizer" class="audio-visualizer" aria-hidden="true"></canvas>
+                    <section class="lyrics-panel" aria-labelledby="lyrics-heading"
+                        {% if not audio_items or not audio_items[0].lyrics %}hidden{% endif %}>
+                        <div class="lyrics-header">
+                            <h3 id="lyrics-heading"><i class="fas fa-align-left"></i> 歌词</h3>
+                            <span id="lyrics-language" class="lyrics-language" hidden></span>
+                        </div>
+                        <div id="lyrics-content" class="lyrics-content scrollbar-custom" aria-live="polite">
+                            <p class="lyrics-status">正在加载歌词…</p>
+                        </div>
+                    </section>
                 </div>
                 <div class="video-info-panel audio-info-panel">
                     <p class="now-playing-label">正在播放</p>
@@ -41,15 +51,6 @@
                         <i class="fas fa-info-circle"></i> 音频播完后将自动播放下一首
                     </div>
                 </div>
-                <section class="lyrics-panel" aria-labelledby="lyrics-heading">
-                    <div class="lyrics-header">
-                        <h3 id="lyrics-heading"><i class="fas fa-align-left"></i> 歌词</h3>
-                        <span id="lyrics-language" class="lyrics-language" hidden></span>
-                    </div>
-                    <div id="lyrics-content" class="lyrics-content scrollbar-custom" aria-live="polite">
-                        <p class="lyrics-status">正在加载歌词…</p>
-                    </div>
-                </section>
             </div>
 
             <div class="playlist-section">
@@ -147,6 +148,7 @@
         var visualizerUnavailable = false;
         var visualizerPixelRatio = 1;
         var reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+        var lyricsPanel = document.querySelector('.lyrics-panel');
         var lyricsContent = document.getElementById('lyrics-content');
         var lyricsLanguage = document.getElementById('lyrics-language');
         var currentLyrics = [];
@@ -158,12 +160,13 @@
             controlBar.addChild('DownloadButton', {}, controlBar.children().length);
             player.el().appendChild(coverGradient);
             player.el().appendChild(visualizerCanvas);
+            player.el().appendChild(lyricsPanel);
             setupAudioVisualizer();
             if (audioItems.length > 0) {
                 updatePoster(audioItems[0]);
                 loadLyrics(audioItems[0]);
             } else {
-                showLyricsStatus('暂无音频');
+                hideLyricsPanel();
             }
             if (player.readyState() >= 1) {
                 restoreCurrentAudioProgress();
@@ -528,6 +531,7 @@
         function showLyricsStatus(message) {
             currentLyrics = [];
             currentLyricIndex = -1;
+            lyricsPanel.hidden = false;
             lyricsContent.replaceChildren();
             var status = document.createElement('p');
             status.className = 'lyrics-status';
@@ -535,6 +539,15 @@
             lyricsContent.appendChild(status);
             lyricsLanguage.hidden = true;
             lyricsLanguage.textContent = '';
+        }
+
+        function hideLyricsPanel() {
+            currentLyrics = [];
+            currentLyricIndex = -1;
+            lyricsContent.replaceChildren();
+            lyricsLanguage.hidden = true;
+            lyricsLanguage.textContent = '';
+            lyricsPanel.hidden = true;
         }
 
         function parseLyricTimestamp(value) {
@@ -615,6 +628,7 @@
             lyricsContent.replaceChildren();
             currentLyrics = cues;
             currentLyricIndex = -1;
+            lyricsPanel.hidden = false;
             cues.forEach(function (cue, index) {
                 var line = document.createElement('button');
                 line.type = 'button';
@@ -635,7 +649,7 @@
         function loadLyrics(audioItem) {
             var requestSerial = ++lyricsRequestSerial;
             if (!audioItem || !audioItem.lyrics) {
-                showLyricsStatus('暂无歌词');
+                hideLyricsPanel();
                 return;
             }
             showLyricsStatus('正在加载歌词…');
@@ -652,7 +666,7 @@
                     }
                     var cues = parseLyrics(text, audioItem.lyrics.format);
                     if (cues.length === 0) {
-                        showLyricsStatus('歌词文件中没有可识别的时间轴');
+                        hideLyricsPanel();
                         return;
                     }
                     renderLyrics(cues, audioItem.lyrics);
@@ -660,7 +674,7 @@
                 .catch(function (error) {
                     if (requestSerial === lyricsRequestSerial) {
                         console.warn('加载歌词失败', error);
-                        showLyricsStatus('歌词加载失败');
+                        hideLyricsPanel();
                     }
                 });
         }
