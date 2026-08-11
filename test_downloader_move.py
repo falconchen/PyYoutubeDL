@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import downloader
 
@@ -285,6 +285,52 @@ class TestDownloaderMove(unittest.TestCase):
                 started_at=123.5,
             )
             self.assertTrue((Path(root) / 'v20260804120000Tim.ok').exists())
+
+    def test_runtime_command_adds_metadata_for_video_and_audio(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            log_dir = root_path / 'logs'
+            tmp_dir = root_path / 'tmp'
+            log_dir.mkdir()
+            tmp_dir.mkdir()
+
+            for mode in ('video', 'audio'):
+                with self.subTest(mode=mode):
+                    process = MagicMock()
+                    process.stdout = []
+                    process.returncode = 0
+
+                    with (
+                        patch.dict(
+                            downloader.config,
+                            {
+                                'LOG_DIR': str(log_dir),
+                                'TMP_DIR': str(tmp_dir),
+                            },
+                        ),
+                        patch(
+                            'downloader.subprocess.Popen',
+                            return_value=process,
+                        ) as popen,
+                        patch.object(self.handler, 'move_files', return_value=True),
+                    ):
+                        result = self.handler.download(
+                            'https://example.com/media',
+                            f'{mode}-metadata',
+                            mode,
+                        )
+
+                    self.assertTrue(result)
+                    cmd = popen.call_args.args[0]
+                    self.assertEqual(cmd.count('--add-metadata'), 1)
+                    self.assertLess(
+                        cmd.index('--config-location'),
+                        cmd.index('--add-metadata'),
+                    )
+                    self.assertLess(
+                        cmd.index('--add-metadata'),
+                        cmd.index('https://example.com/media'),
+                    )
 
 
 if __name__ == '__main__':

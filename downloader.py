@@ -287,6 +287,7 @@ class DownloadHandler(FileSystemEventHandler):
         cmd = [
             'yt-dlp',
             '--config-location', conf_path,
+            '--add-metadata',     # 视频和音频统一在运行时写入媒体元信息
             '--newline',           # 强制进度输出换行，以便逐行读取
             '--progress',          # 强制显示进度条（即使在管道中运行）
             '--progress-template',
