@@ -34,6 +34,10 @@
                 </div>
                 <div class="video-info-panel">
                     <h2 id="current-video-title">正在播放: {{ video_files[0] if video_files else '暂无视频' }}</h2>
+                    {% set initial_video_source_url = video_source_urls.get(video_files[0], '') if video_files else '' %}
+                    <p id="current-video-source" class="media-source" {% if not initial_video_source_url %}hidden{% endif %}>
+                        原始链接：<a href="{{ initial_video_source_url }}" target="_blank" rel="noopener noreferrer">{{ initial_video_source_url }}</a>
+                    </p>
                     <div class="player-controls-hint">
                         <i class="fas fa-info-circle"></i> 视频播完后将自动播放下一条
                     </div>
@@ -123,6 +127,7 @@
 
         var player = videojs('video-player');
         var video_files = {{ video_files | tojson }};
+        var video_source_urls = {{ video_source_urls | tojson }};
         var subtitle_tracks = {{ subtitle_tracks | tojson }};
         var browser_subtitle_languages = {{ browser_subtitle_languages | tojson }};
         var aiSummaryConfigured = {{ ai_summary_configured | tojson }};
@@ -641,6 +646,7 @@
 
             // 更新标题
             document.getElementById('current-video-title').textContent = '正在播放: ' + filename;
+            updateCurrentVideoSource(filename);
 
             // 更新列表状态
             document.querySelectorAll('.playlist-item').forEach(function (item) {
@@ -653,6 +659,15 @@
                 // 更新当前索引
                 currentIndex = video_files.indexOf(filename);
             }
+        }
+
+        function updateCurrentVideoSource(filename) {
+            var source = document.getElementById('current-video-source');
+            var link = source.querySelector('a');
+            var sourceUrl = video_source_urls[filename] || '';
+            link.href = sourceUrl;
+            link.textContent = sourceUrl;
+            source.hidden = !sourceUrl;
         }
 
         function updateSubtitleTracks(filename) {

@@ -44,6 +44,10 @@
                 <div class="video-info-panel audio-info-panel">
                     <p class="now-playing-label">正在播放</p>
                     <h2 id="current-audio-title">{{ audio_items[0].title if audio_items else '暂无音频' }}</h2>
+                    {% set initial_audio_source_url = audio_items[0].source_url if audio_items else '' %}
+                    <p id="current-audio-source" class="media-source" {% if not initial_audio_source_url %}hidden{% endif %}>
+                        原始链接：<a href="{{ initial_audio_source_url }}" target="_blank" rel="noopener noreferrer">{{ initial_audio_source_url }}</a>
+                    </p>
                     <p id="current-audio-artist" class="audio-artist" {% if not audio_items or not audio_items[0].artist %}hidden{% endif %}>
                         {{ audio_items[0].artist if audio_items else '' }}
                     </p>
@@ -523,6 +527,12 @@
 
         function updateCurrentAudioInfo(audioItem) {
             document.getElementById('current-audio-title').textContent = audioItem.title;
+            var source = document.getElementById('current-audio-source');
+            var sourceLink = source.querySelector('a');
+            var sourceUrl = audioItem.source_url || '';
+            sourceLink.href = sourceUrl;
+            sourceLink.textContent = sourceUrl;
+            source.hidden = !sourceUrl;
             var artist = document.getElementById('current-audio-artist');
             artist.textContent = audioItem.artist || '';
             artist.hidden = !audioItem.artist;

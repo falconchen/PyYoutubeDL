@@ -754,6 +754,34 @@ def extract_youtube_video_id_from_text(text):
     return None
 
 
+def extract_media_source_url(tags):
+    """从媒体 metadata 的 purl/comment 标签中提取安全的来源页面 URL。"""
+    if not isinstance(tags, dict):
+        return ''
+
+    normalized_tags = {
+        str(key).lower(): value
+        for key, value in tags.items()
+        if isinstance(value, str)
+    }
+    for tag_name in ('purl', 'comment'):
+        text = normalized_tags.get(tag_name, '')
+        urls = re.findall(
+            r'https?://[^\s\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]+',
+            text,
+            flags=re.IGNORECASE,
+        )
+        for raw_url in urls:
+            source_url = raw_url.rstrip('.,;:)]\'"。，；：）、）')
+            try:
+                parsed = urlparse(source_url)
+            except ValueError:
+                continue
+            if parsed.scheme.lower() in {'http', 'https'} and parsed.hostname:
+                return source_url
+    return ''
+
+
 def build_audio_cover_candidates(video_id, fallback_url):
     """生成按清晰度和可靠性排序的音频封面候选地址。"""
     candidates = []
@@ -788,7 +816,7 @@ def _probe_audio_metadata(filepath, file_mtime_ns, file_size):
         raw_tags = payload.get('format', {}).get('tags', {})
     except (FileNotFoundError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
         app.logger.warning("读取音频 metadata 失败，使用文件名和默认封面: %s (%s)", filepath, exc)
-        return '', '', None
+        return '', '', None, ''
 
     if not isinstance(raw_tags, dict):
         raw_tags = {}
@@ -798,12 +826,54 @@ def _probe_audio_metadata(filepath, file_mtime_ns, file_size):
         for key, value in raw_tags.items()
         if isinstance(value, str)
     }
+    source_url = extract_media_source_url(tags)
     video_id = None
     for tag_name in ('purl', 'comment'):
         video_id = extract_youtube_video_id_from_text(tags.get(tag_name, ''))
         if video_id:
             break
-    return tags.get('title', ''), tags.get('artist', ''), video_id
+    return tags.get('title', ''), tags.get('artist', ''), video_id, source_url
+
+
+@lru_cache(maxsize=256)
+def _probe_media_source_url(filepath, file_mtime_ns, file_size):
+    """读取视频等媒体文件的来源 URL；文件属性用于缓存自动失效。"""
+    del file_mtime_ns, file_size
+    try:
+        result = subprocess.run(
+            [
+                'ffprobe', '-v', 'error',
+                '-show_entries', 'format_tags=purl,comment',
+                '-of', 'json', filepath,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        payload = json.loads(result.stdout)
+        raw_tags = payload.get('format', {}).get('tags', {})
+    except (FileNotFoundError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+        app.logger.warning("读取媒体来源 metadata 失败，已忽略来源链接: %s (%s)", filepath, exc)
+        return ''
+    return extract_media_source_url(raw_tags)
+
+
+def get_media_source_url(filename):
+    """安全读取 FILES_DIR 中媒体文件保存的来源页面 URL。"""
+    filepath = safe_join(FILES_DIR, filename)
+    if not filepath or not os.path.isfile(filepath):
+        return ''
+    try:
+        stat = os.stat(filepath)
+        return _probe_media_source_url(
+            filepath,
+            stat.st_mtime_ns,
+            stat.st_size,
+        )
+    except OSError as exc:
+        app.logger.warning("读取媒体文件属性失败，已忽略来源链接: %s (%s)", filepath, exc)
+        return ''
 
 
 def get_audio_metadata(filename, fallback_cover_url):
@@ -819,6 +889,7 @@ def get_audio_metadata(filename, fallback_cover_url):
         return {
             'title': fallback_title,
             'artist': '',
+            'source_url': '',
             'mime_type': AUDIO_MIME_TYPES.get(extension, 'audio/mpeg'),
             'cover_candidates': build_audio_cover_candidates(
                 None,
@@ -828,18 +899,19 @@ def get_audio_metadata(filename, fallback_cover_url):
 
     try:
         stat = os.stat(filepath)
-        title, artist, video_id = _probe_audio_metadata(
+        title, artist, video_id, source_url = _probe_audio_metadata(
             filepath,
             stat.st_mtime_ns,
             stat.st_size,
         )
     except OSError as exc:
         app.logger.warning("读取音频文件属性失败，使用默认信息: %s (%s)", filepath, exc)
-        title, artist, video_id = '', '', None
+        title, artist, video_id, source_url = '', '', None, ''
 
     return {
         'title': title or fallback_title,
         'artist': artist,
+        'source_url': source_url,
         'mime_type': AUDIO_MIME_TYPES.get(extension, 'audio/mpeg'),
         'cover_candidates': build_audio_cover_candidates(
             video_id,
@@ -1001,7 +1073,9 @@ def player():
         video_files.insert(0, requested_file)
 
     subtitle_tracks = {}
+    video_source_urls = {}
     for filename in video_files:
+        video_source_urls[filename] = get_media_source_url(filename)
         tracks = get_embedded_subtitles(filename)
         for track in tracks:
             track["url"] = url_for(
@@ -1014,6 +1088,7 @@ def player():
     return render_template(
         'player.html',
         video_files=video_files,
+        video_source_urls=video_source_urls,
         subtitle_tracks=subtitle_tracks,
         browser_subtitle_languages=[
             language

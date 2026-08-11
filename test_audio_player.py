@@ -15,6 +15,7 @@ class TestAudioPlayerPage(unittest.TestCase):
         self.client = app.test_client()
         app.testing = True
         app_module._probe_audio_metadata.cache_clear()
+        app_module._probe_media_source_url.cache_clear()
 
     def test_extracts_supported_youtube_video_urls(self):
         cases = {
@@ -55,6 +56,27 @@ class TestAudioPlayerPage(unittest.TestCase):
             '/static/images/audio-cover-default.svg',
         ])
 
+    def test_extracts_safe_media_source_url_from_metadata(self):
+        self.assertEqual(
+            app_module.extract_media_source_url({
+                'COMMENT': '来源 https://example.com/watch/123。',
+            }),
+            'https://example.com/watch/123',
+        )
+        self.assertEqual(
+            app_module.extract_media_source_url({
+                'purl': 'https://youtu.be/Hh3AmV46epI?t=20',
+                'comment': 'https://example.com/fallback',
+            }),
+            'https://youtu.be/Hh3AmV46epI?t=20',
+        )
+        self.assertEqual(
+            app_module.extract_media_source_url({
+                'comment': 'javascript:alert(1)',
+            }),
+            '',
+        )
+
     def test_audio_metadata_uses_ffprobe_tags_and_mime_type(self):
         probe_result = subprocess.CompletedProcess(
             args=['ffprobe'],
@@ -85,6 +107,10 @@ class TestAudioPlayerPage(unittest.TestCase):
 
         self.assertEqual(metadata['title'], '测试标题')
         self.assertEqual(metadata['artist'], '测试作者')
+        self.assertEqual(
+            metadata['source_url'],
+            'https://www.youtube.com/watch?v=Hh3AmV46epI',
+        )
         self.assertEqual(metadata['mime_type'], 'audio/mpeg')
         self.assertEqual(
             metadata['cover_candidates'][0],
@@ -110,6 +136,7 @@ class TestAudioPlayerPage(unittest.TestCase):
 
         self.assertEqual(metadata['title'], 'fallback-title')
         self.assertEqual(metadata['artist'], '')
+        self.assertEqual(metadata['source_url'], '')
         self.assertEqual(metadata['mime_type'], 'audio/flac')
         self.assertEqual(metadata['cover_candidates'], ['/fallback.svg'])
 
@@ -128,6 +155,7 @@ class TestAudioPlayerPage(unittest.TestCase):
                 return {
                     'title': Path(filename).stem,
                     'artist': 'Artist',
+                    'source_url': 'https://example.com/original-audio',
                     'mime_type': 'audio/mp4' if extension == '.m4a' else 'audio/mpeg',
                     'cover_candidates': [fallback_url],
                 }
@@ -150,6 +178,9 @@ class TestAudioPlayerPage(unittest.TestCase):
         self.assertIn('<source src="/files/requested%20song.m4a" type="audio/mp4">', html)
         self.assertLess(html.index('requested song'), html.index('older.mp3'))
         self.assertNotIn('video.mp4', html)
+        self.assertIn('href="https://example.com/original-audio"', html)
+        self.assertIn('id="current-audio-source"', html)
+        self.assertIn('sourceLink.href = sourceUrl;', html)
         self.assertIn('aria-labelledby="lyrics-heading"\n                        hidden', html)
 
     def test_audio_page_matches_preferred_sidecar_lyrics(self):

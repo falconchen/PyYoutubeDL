@@ -129,6 +129,23 @@
     font-size: 0.95rem;
 }
 
+.media-source {
+    margin: 0 0 0.75rem;
+    color: #666;
+    font-size: 0.9rem;
+    overflow-wrap: anywhere;
+}
+
+.media-source a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.media-source a:hover,
+.media-source a:focus-visible {
+    text-decoration: underline;
+}
+
 .video-info-panel {
     background: white;
     padding: 1.5rem;

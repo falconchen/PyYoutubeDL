@@ -13,6 +13,49 @@ class TestPlayerPage(unittest.TestCase):
         self.client = app.test_client()
         app.testing = True
         app_module.ai_summary_cache.clear()
+        self.source_url_patcher = patch('app.get_media_source_url', return_value='')
+        self.source_url_patcher.start()
+        self.addCleanup(self.source_url_patcher.stop)
+
+    def test_player_shows_and_switches_original_source_url(self):
+        source_url = 'https://www.youtube.com/watch?v=Hh3AmV46epI'
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, 'source.mp4').touch()
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch('app.get_embedded_subtitles', return_value=[]),
+                patch('app.get_media_source_url', return_value=source_url),
+            ):
+                response = self.client.get('/player')
+
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(f'href="{source_url}"', html)
+        self.assertIn('id="current-video-source"', html)
+        self.assertIn('var video_source_urls = {"source.mp4":', html)
+        self.assertIn('updateCurrentVideoSource(filename);', html)
+        self.assertIn('link.href = sourceUrl;', html)
+
+    def test_video_source_url_probe_reads_purl_or_comment_tags(self):
+        source_url = 'https://example.com/original-video'
+        probe_result = subprocess.CompletedProcess(
+            args=['ffprobe'],
+            returncode=0,
+            stdout=(
+                '{"format":{"tags":{"comment":"'
+                + source_url
+                + '"}}}'
+            ),
+            stderr='',
+        )
+        app_module._probe_media_source_url.cache_clear()
+
+        with patch('app.subprocess.run', return_value=probe_result) as run:
+            result = app_module._probe_media_source_url('/tmp/video.mp4', 1, 2)
+
+        self.assertEqual(result, source_url)
+        command = run.call_args.args[0]
+        self.assertIn('format_tags=purl,comment', command)
 
     def test_download_control_is_rendered_for_current_video(self):
         with tempfile.TemporaryDirectory() as files_dir:
