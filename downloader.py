@@ -36,6 +36,177 @@ logger = setup_logger(
 
 VIDEO_OUTPUT_EXTENSIONS = {'.avi', '.flv', '.mkv', '.mov', '.mp4', '.webm'}
 AUDIO_OUTPUT_EXTENSIONS = {'.aac', '.flac', '.m4a', '.mp3', '.ogg', '.opus', '.wav'}
+SUBTITLE_LANGUAGE_PREFERENCES = ('zh-Hans', 'zh-Hant', 'zh', 'en')
+SUBTITLE_TRANSLATION_PREFIXES = ('zh-Hans-', 'zh-Hant-', 'zh-', 'en-')
+SUBTITLE_PROBE_TIMEOUT_SECONDS = 120
+
+
+def _available_subtitle_languages(subtitle_map):
+    """返回确实包含格式且适合 AI 总结的字幕语言代码。"""
+    if not isinstance(subtitle_map, dict):
+        return []
+    return [
+        language
+        for language, formats in subtitle_map.items()
+        if (
+            isinstance(language, str)
+            and language
+            and language != 'live_chat'
+            and isinstance(formats, list)
+            and formats
+        )
+    ]
+
+
+def _find_subtitle_language(languages, candidates):
+    """按候选顺序查找语言代码，同时兼容大小写差异。"""
+    language_by_lowercase = {
+        language.lower(): language for language in languages
+    }
+    for candidate in candidates:
+        if not isinstance(candidate, str) or not candidate:
+            continue
+        matched = language_by_lowercase.get(candidate.lower())
+        if matched:
+            return matched
+    return None
+
+
+def select_subtitle_fallback(video_info):
+    """配置未匹配字幕时，为 AI 总结选择一条准确性优先的回退字幕。"""
+    if not isinstance(video_info, dict):
+        return None
+    if video_info.get('requested_subtitles'):
+        return None
+
+    manual_languages = _available_subtitle_languages(
+        video_info.get('subtitles')
+    )
+    automatic_captions = video_info.get('automatic_captions')
+    automatic_languages = _available_subtitle_languages(automatic_captions)
+    source_language = video_info.get('language')
+    source_candidates = [source_language]
+    if isinstance(source_language, str) and '-' in source_language:
+        source_candidates.append(source_language.split('-', 1)[0])
+
+    # 人工原文字幕的准确性通常高于自动翻译，因此优先使用任意人工字幕。
+    selected = _find_subtitle_language(
+        manual_languages,
+        SUBTITLE_LANGUAGE_PREFERENCES,
+    )
+    if not selected:
+        selected = _find_subtitle_language(manual_languages, source_candidates)
+    if not selected and manual_languages:
+        selected = manual_languages[0]
+    if selected:
+        return selected, '人工字幕'
+
+    selected = _find_subtitle_language(
+        automatic_languages,
+        SUBTITLE_LANGUAGE_PREFERENCES,
+    )
+    if not selected:
+        selected = _find_subtitle_language(
+            automatic_languages,
+            source_candidates,
+        )
+
+    # YouTube 的原文自动字幕通常没有 “from ...” 后缀；用它补足来源
+    # 语言元数据缺失或语言变体不一致的情况。
+    if not selected and isinstance(automatic_captions, dict):
+        for language in automatic_languages:
+            formats = automatic_captions.get(language) or []
+            names = [
+                item.get('name')
+                for item in formats
+                if isinstance(item, dict) and isinstance(item.get('name'), str)
+            ]
+            if names and all(' from ' not in name.lower() for name in names):
+                selected = language
+                break
+
+    if selected:
+        return selected, '自动原文字幕'
+
+    for prefix in SUBTITLE_TRANSLATION_PREFIXES:
+        selected = next(
+            (
+                language for language in automatic_languages
+                if language.lower().startswith(prefix.lower())
+            ),
+            None,
+        )
+        if selected:
+            return selected, '自动翻译字幕'
+
+    if automatic_languages:
+        return automatic_languages[0], '自动字幕'
+    return None
+
+
+def _first_video_info(info):
+    """从单视频或播放列表元数据中取出首个有效视频条目。"""
+    if not isinstance(info, dict):
+        return None
+    entries = info.get('entries')
+    if isinstance(entries, list):
+        for entry in entries:
+            video_info = _first_video_info(entry)
+            if video_info:
+                return video_info
+        return None
+    return info
+
+
+def probe_subtitle_fallback(url, conf_path):
+    """使用实际 yt-dlp 配置预检字幕，仅在配置未匹配时返回回退项。"""
+    cmd = [
+        'yt-dlp',
+        '--config-location', conf_path,
+        '--simulate',
+        '--skip-download',
+        '--playlist-end', '1',
+        '--sleep-requests', '0',
+        '--sleep-interval', '0',
+        '--max-sleep-interval', '0',
+        '--sleep-subtitles', '0',
+        '--dump-single-json',
+        url,
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=SUBTITLE_PROBE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("字幕预检执行失败，继续使用原配置: %s", exc)
+        return None
+
+    if result.returncode != 0:
+        logger.warning(
+            "字幕预检返回失败状态 %s，继续使用原配置",
+            result.returncode,
+        )
+        return None
+    try:
+        video_info = _first_video_info(json.loads(result.stdout))
+    except (TypeError, json.JSONDecodeError) as exc:
+        logger.warning("字幕预检结果无法解析，继续使用原配置: %s", exc)
+        return None
+
+    fallback = select_subtitle_fallback(video_info)
+    if fallback:
+        language, subtitle_type = fallback
+        logger.info(
+            "当前配置未匹配字幕，动态回退到%s: %s",
+            subtitle_type,
+            language,
+        )
+    elif video_info and not video_info.get('requested_subtitles'):
+        logger.info("字幕预检未发现可用字幕")
+    return fallback
 
 
 def destination_with_counter(destination, counter):
@@ -282,6 +453,15 @@ class DownloadHandler(FileSystemEventHandler):
             base_output_template,
             config.get("TIMEZONE", "UTC"),
         )
+
+        dynamic_subtitle_args = []
+        if mode == 'video':
+            subtitle_fallback = probe_subtitle_fallback(url, conf_path)
+            if subtitle_fallback:
+                dynamic_subtitle_args = [
+                    '--sub-langs',
+                    subtitle_fallback[0],
+                ]
         
         # 核心修改：添加 --newline 和 --progress 确保进度条被捕获
         cmd = [
@@ -298,6 +478,7 @@ class DownloadHandler(FileSystemEventHandler):
                 '%(progress._eta_str)s|%(info.ext)s|%(info.format_id)s|'
                 '%(info.vcodec)s|%(info.acodec)s'
             ),
+            *dynamic_subtitle_args,
             '-o', os.path.join(task_tmp_dir, output_template),
             url
         ]

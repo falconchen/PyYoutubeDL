@@ -312,6 +312,10 @@ class TestDownloaderMove(unittest.TestCase):
                             'downloader.subprocess.Popen',
                             return_value=process,
                         ) as popen,
+                        patch(
+                            'downloader.probe_subtitle_fallback',
+                            return_value=None,
+                        ),
                         patch.object(self.handler, 'move_files', return_value=True),
                     ):
                         result = self.handler.download(
@@ -331,6 +335,127 @@ class TestDownloaderMove(unittest.TestCase):
                         cmd.index('--add-metadata'),
                         cmd.index('https://example.com/media'),
                     )
+
+    def test_subtitle_fallback_is_not_used_when_config_matched(self):
+        result = downloader.select_subtitle_fallback({
+            'requested_subtitles': {'zh': {'ext': 'vtt'}},
+            'subtitles': {'zh': [{'ext': 'vtt'}]},
+        })
+
+        self.assertIsNone(result)
+
+    def test_subtitle_fallback_prefers_requested_order_for_manual_subtitles(self):
+        result = downloader.select_subtitle_fallback({
+            'requested_subtitles': None,
+            'language': 'ja',
+            'subtitles': {
+                'en': [{'ext': 'vtt'}],
+                'zh': [{'ext': 'vtt'}],
+                'ja': [{'ext': 'vtt'}],
+            },
+        })
+
+        self.assertEqual(result, ('zh', '人工字幕'))
+
+    def test_subtitle_fallback_prefers_any_manual_track_over_translation(self):
+        result = downloader.select_subtitle_fallback({
+            'requested_subtitles': None,
+            'language': 'ja',
+            'subtitles': {'ja': [{'ext': 'vtt'}]},
+            'automatic_captions': {
+                'zh-Hans-ja': [{'ext': 'vtt', 'name': 'Chinese from Japanese'}],
+            },
+        })
+
+        self.assertEqual(result, ('ja', '人工字幕'))
+
+    def test_subtitle_fallback_prefers_automatic_original_track(self):
+        result = downloader.select_subtitle_fallback({
+            'requested_subtitles': None,
+            'language': 'ja-JP',
+            'automatic_captions': {
+                'zh-Hans-ja': [{'ext': 'vtt', 'name': 'Chinese from Japanese'}],
+                'ja': [{'ext': 'vtt', 'name': 'Japanese'}],
+            },
+        })
+
+        self.assertEqual(result, ('ja', '自动原文字幕'))
+
+    def test_subtitle_fallback_uses_preferred_automatic_translation_last(self):
+        result = downloader.select_subtitle_fallback({
+            'requested_subtitles': None,
+            'automatic_captions': {
+                'fr-ja': [{'ext': 'vtt', 'name': 'French from Japanese'}],
+                'zh-Hant-ja': [
+                    {'ext': 'vtt', 'name': 'Chinese from Japanese'},
+                ],
+            },
+        })
+
+        self.assertEqual(result, ('zh-Hant-ja', '自动翻译字幕'))
+
+    def test_video_download_adds_dynamic_subtitle_language(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            log_dir = root_path / 'logs'
+            tmp_dir = root_path / 'tmp'
+            log_dir.mkdir()
+            tmp_dir.mkdir()
+            process = MagicMock(stdout=[], returncode=0)
+
+            with (
+                patch.dict(
+                    downloader.config,
+                    {'LOG_DIR': str(log_dir), 'TMP_DIR': str(tmp_dir)},
+                ),
+                patch(
+                    'downloader.probe_subtitle_fallback',
+                    return_value=('ja', '人工字幕'),
+                ),
+                patch(
+                    'downloader.subprocess.Popen',
+                    return_value=process,
+                ) as popen,
+                patch.object(self.handler, 'move_files', return_value=True),
+            ):
+                result = self.handler.download(
+                    'https://example.com/video',
+                    'video-subtitle-fallback',
+                    'video',
+                )
+
+            self.assertTrue(result)
+            cmd = popen.call_args.args[0]
+            self.assertEqual(
+                cmd[cmd.index('--sub-langs') + 1],
+                'ja',
+            )
+
+    def test_probe_uses_real_config_and_disables_configured_sleep(self):
+        metadata = {
+            'requested_subtitles': None,
+            'subtitles': {'ja': [{'ext': 'vtt'}]},
+        }
+        completed = MagicMock(
+            returncode=0,
+            stdout=json.dumps(metadata),
+        )
+
+        with patch('downloader.subprocess.run', return_value=completed) as run:
+            result = downloader.probe_subtitle_fallback(
+                'https://example.com/video',
+                '/project/yt-dlp.local.conf',
+            )
+
+        self.assertEqual(result, ('ja', '人工字幕'))
+        cmd = run.call_args.args[0]
+        self.assertEqual(
+            cmd[cmd.index('--config-location') + 1],
+            '/project/yt-dlp.local.conf',
+        )
+        self.assertEqual(cmd[cmd.index('--sleep-subtitles') + 1], '0')
+        self.assertIn('--simulate', cmd)
+        self.assertIn('--dump-single-json', cmd)
 
 
 if __name__ == '__main__':
