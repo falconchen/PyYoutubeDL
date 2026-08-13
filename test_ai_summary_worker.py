@@ -10,6 +10,40 @@ import app as app_module
 
 
 class TestAiSummaryWorker(unittest.TestCase):
+    def test_chat_completions_streams_cumulative_markdown(self):
+        class FakeResponse:
+            headers = {'Content-Type': 'text/event-stream'}
+
+            def raise_for_status(self):
+                return None
+
+            def iter_lines(self, decode_unicode=False):
+                self.decode_unicode = decode_unicode
+                return iter([
+                    'data: {"choices":[{"delta":{"content":"## 概述"}}]}',
+                    'data: {"choices":[{"delta":{"content":"\\n要点"}}]}',
+                    'data: [DONE]',
+                ])
+
+        runtime = {
+            'AI_API_BASE_URL': 'https://ai.example/v1/chat/completions',
+            'AI_API_MODEL': 'test-model',
+            'AI_API_TOKEN': 'provider-token',
+        }
+        partials = []
+        with (
+            patch.dict(app_module.config, runtime),
+            patch('app.requests.post', return_value=FakeResponse()) as post,
+        ):
+            result = app_module.request_ai_summary(
+                '视频', '中文字幕', '字幕正文', on_delta=partials.append,
+            )
+
+        self.assertEqual(result, '## 概述\n要点')
+        self.assertEqual(partials, ['## 概述', '## 概述\n要点'])
+        self.assertTrue(post.call_args.kwargs['json']['stream'])
+        self.assertTrue(post.call_args.kwargs['stream'])
+
     def test_prefers_configured_requested_subtitle(self):
         selected = worker.select_summary_subtitle({
             'requested_subtitles': {

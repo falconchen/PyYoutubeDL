@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 PROMPT_VERSION = 1
 YOUTUBE_HOSTS = {
     'youtube.com',
@@ -158,11 +158,12 @@ def connect(db_path):
 def init_db(db_path):
     with connect(db_path) as db:
         db.execute('PRAGMA journal_mode = WAL')
+        db.execute('BEGIN IMMEDIATE')
         version = db.execute('PRAGMA user_version').fetchone()[0]
         if version > SCHEMA_VERSION:
             raise RuntimeError(f'AI 总结数据库版本过新: {version}')
         if version == 0:
-            db.executescript(
+            schema = (
                 """
                 CREATE TABLE media_sources (
                     id INTEGER PRIMARY KEY,
@@ -215,6 +216,8 @@ def init_db(db_path):
                     error_code TEXT,
                     error_message TEXT,
                     error_retryable INTEGER NOT NULL DEFAULT 0,
+                    partial_markdown TEXT NOT NULL DEFAULT '',
+                    stream_revision INTEGER NOT NULL DEFAULT 0,
                     created_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL,
                     started_at INTEGER,
@@ -226,6 +229,17 @@ def init_db(db_path):
                     ON ai_summary_jobs(normalized_url, profile_key)
                     WHERE status IN ('queued', 'resolving', 'downloading_subtitle', 'generating');
                 """
+            )
+            for statement in schema.split(';'):
+                if statement.strip():
+                    db.execute(statement)
+            db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
+        elif version == 1:
+            db.execute(
+                "ALTER TABLE ai_summary_jobs ADD COLUMN partial_markdown TEXT NOT NULL DEFAULT ''"
+            )
+            db.execute(
+                'ALTER TABLE ai_summary_jobs ADD COLUMN stream_revision INTEGER NOT NULL DEFAULT 0'
             )
             db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
         db.commit()
@@ -468,7 +482,8 @@ def claim_next_job(db_path, worker_id, lease_seconds=180):
             SET status = 'resolving', attempts = attempts + 1,
                 lease_owner = ?, lease_until = ?, updated_at = ?,
                 started_at = COALESCE(started_at, ?), error_code = NULL,
-                error_message = NULL, error_retryable = 0
+                error_message = NULL, error_retryable = 0,
+                partial_markdown = '', stream_revision = stream_revision + 1
             WHERE id = ?
             """,
             (worker_id, timestamp + lease_seconds, timestamp, timestamp, row['id']),
@@ -489,6 +504,33 @@ def update_job(db_path, job_id, status, **fields):
     values = list(updates.values()) + [job_id]
     with connect(db_path) as db:
         db.execute(f'UPDATE ai_summary_jobs SET {assignments} WHERE id = ?', values)
+        db.commit()
+
+
+def update_job_stream(db_path, job_id, partial_markdown, lease_until=None):
+    """持久化 AI 流式输出，供 Web 与扩展断线后继续读取。"""
+    timestamp = now_ts()
+    with connect(db_path) as db:
+        if lease_until is None:
+            db.execute(
+                """
+                UPDATE ai_summary_jobs
+                SET partial_markdown = ?, stream_revision = stream_revision + 1,
+                    updated_at = ?
+                WHERE id = ? AND status = 'generating'
+                """,
+                (partial_markdown, timestamp, job_id),
+            )
+        else:
+            db.execute(
+                """
+                UPDATE ai_summary_jobs
+                SET partial_markdown = ?, stream_revision = stream_revision + 1,
+                    lease_until = ?, updated_at = ?
+                WHERE id = ? AND status = 'generating'
+                """,
+                (partial_markdown, lease_until, timestamp, job_id),
+            )
         db.commit()
 
 
@@ -534,10 +576,14 @@ def save_summary_and_complete(
             UPDATE ai_summary_jobs
             SET status = 'completed', media_source_id = ?, summary_id = ?,
                 cache_hit = ?, lease_owner = NULL, lease_until = NULL,
+                partial_markdown = ?, stream_revision = stream_revision + 1,
                 updated_at = ?, completed_at = ?
             WHERE id = ?
             """,
-            (media_source_id, summary_id, int(cache_hit), timestamp, timestamp, job_id),
+            (
+                media_source_id, summary_id, int(cache_hit), summary_markdown,
+                timestamp, timestamp, job_id,
+            ),
         )
         row = db.execute(
             _summary_query() + ' WHERE s.id = ?',
@@ -555,10 +601,13 @@ def complete_job_from_cache(db_path, job_id, media_source_id, summary_id):
             UPDATE ai_summary_jobs
             SET status = 'completed', media_source_id = ?, summary_id = ?,
                 cache_hit = 1, lease_owner = NULL, lease_until = NULL,
+                partial_markdown = (
+                    SELECT summary_markdown FROM ai_summaries WHERE id = ?
+                ), stream_revision = stream_revision + 1,
                 updated_at = ?, completed_at = ?
             WHERE id = ?
             """,
-            (media_source_id, summary_id, timestamp, timestamp, job_id),
+            (media_source_id, summary_id, summary_id, timestamp, timestamp, job_id),
         )
         db.commit()
 

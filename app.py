@@ -1,5 +1,5 @@
 #!venv/bin/python
-from flask import Flask, request, render_template, redirect, url_for, send_from_directory, jsonify, abort, Response
+from flask import Flask, request, render_template, redirect, url_for, send_from_directory, jsonify, abort, Response, stream_with_context
 import os
 import glob
 import html
@@ -648,8 +648,8 @@ def extract_subtitle_text(filepath, stream_index):
     return subtitle_text
 
 
-def request_ai_summary(filename, subtitle_label, subtitle_text):
-    """调用 chat/completions 兼容接口并返回总结文本。"""
+def request_ai_summary(filename, subtitle_label, subtitle_text, on_delta=None):
+    """流式调用 chat/completions 兼容接口并返回完整总结文本。"""
     api_base_url = str(config.get("AI_API_BASE_URL") or "").strip()
     api_model = str(config.get("AI_API_MODEL") or "").strip()
     api_token = str(config.get("AI_API_TOKEN") or "").strip()
@@ -664,6 +664,7 @@ def request_ai_summary(filename, subtitle_label, subtitle_text):
         },
         json={
             "model": api_model,
+            "stream": True,
             "messages": [
                 {
                     "role": "system",
@@ -683,16 +684,44 @@ def request_ai_summary(filename, subtitle_label, subtitle_text):
                 },
             ],
         },
-        timeout=120,
+        timeout=(15, 120),
+        stream=True,
     )
     response.raise_for_status()
-    try:
-        content = response.json()["choices"][0]["message"]["content"]
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError("AI 接口返回了无法识别的数据") from exc
-    if not isinstance(content, str) or not content.strip():
+    content_type = response.headers.get('Content-Type', '')
+    chunks = []
+    if 'text/event-stream' not in content_type.lower():
+        try:
+            content = response.json()["choices"][0]["message"]["content"]
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError("AI 接口返回了无法识别的数据") from exc
+        if isinstance(content, str):
+            chunks.append(content)
+            if on_delta:
+                on_delta(content)
+    else:
+        for raw_line in response.iter_lines(decode_unicode=True):
+            if isinstance(raw_line, bytes):
+                raw_line = raw_line.decode('utf-8', errors='replace')
+            line = (raw_line or '').strip()
+            if not line.startswith('data:'):
+                continue
+            data = line[5:].strip()
+            if data == '[DONE]':
+                break
+            try:
+                event = json.loads(data)
+                delta = event['choices'][0].get('delta', {}).get('content')
+            except (ValueError, KeyError, IndexError, TypeError):
+                continue
+            if isinstance(delta, str) and delta:
+                chunks.append(delta)
+                if on_delta:
+                    on_delta(''.join(chunks))
+    content = ''.join(chunks).strip()
+    if not content:
         raise RuntimeError("AI 接口未返回总结内容")
-    return content.strip()
+    return content
 
 
 def ai_summary_is_configured():
@@ -754,7 +783,44 @@ def ai_summary_job_payload(job, legacy=False):
         'status': job['status'],
         'job_id': job['id'],
         'cached': False,
+        'partial_markdown': job.get('partial_markdown') or '',
+        'stream_revision': job.get('stream_revision') or 0,
     }, 202
+
+
+def ai_summary_job_stream(job_id, legacy=False):
+    """将 SQLite 中的任务增量以 NDJSON 持续发送给浏览器。"""
+    initial = ai_summary_store.get_job(config['AI_SUMMARY_DB_PATH'], job_id)
+    if not initial:
+        return ai_summary_api_response({'success': False, 'message': 'AI 总结任务不存在'}, 404)
+
+    @stream_with_context
+    def generate():
+        last_marker = None
+        last_keepalive = time.monotonic()
+        while True:
+            job = ai_summary_store.get_job(config['AI_SUMMARY_DB_PATH'], job_id)
+            if not job:
+                payload = {'success': False, 'status': 'missing', 'message': 'AI 总结任务不存在'}
+                yield json.dumps(payload, ensure_ascii=False) + '\n'
+                return
+            marker = (job['status'], job.get('stream_revision') or 0, job.get('updated_at'))
+            if marker != last_marker:
+                payload, _ = ai_summary_job_payload(job, legacy=legacy)
+                yield json.dumps(payload, ensure_ascii=False) + '\n'
+                last_marker = marker
+                last_keepalive = time.monotonic()
+            if job['status'] in {'completed', 'failed'}:
+                return
+            if time.monotonic() - last_keepalive >= 15:
+                yield json.dumps({'type': 'keepalive'}) + '\n'
+                last_keepalive = time.monotonic()
+            time.sleep(0.2)
+
+    response = Response(generate(), content_type='application/x-ndjson; charset=utf-8')
+    response.headers['Cache-Control'] = 'no-store, private'
+    response.headers['X-Accel-Buffering'] = 'no'
+    return response
 
 
 def require_ai_summary_access():
@@ -1356,6 +1422,14 @@ def api_ai_summary():
     return ai_summary_api_response(payload, status)
 
 
+@app.route('/api/ai_summary/jobs/<job_id>/stream', methods=['GET'])
+def api_ai_summary_stream(job_id):
+    """播放器使用的同源流式总结接口。"""
+    if not ai_summary_is_configured():
+        return ai_summary_api_response({'success': False, 'message': 'AI 总结尚未完成配置'}, 503)
+    return ai_summary_job_stream(job_id, legacy=True)
+
+
 @app.route('/api/ai_summaries', methods=['POST'])
 def api_ai_summaries():
     """Chrome 扩展按 URL 查询或创建 AI 总结任务。"""
@@ -1407,6 +1481,15 @@ def api_ai_summary_job(job_id):
         }, 404)
     payload, status = ai_summary_job_payload(job)
     return ai_summary_api_response(payload, status)
+
+
+@app.route('/api/ai_summaries/jobs/<job_id>/stream', methods=['GET'])
+def api_ai_summary_job_stream(job_id):
+    """Chrome 扩展使用的鉴权流式总结接口。"""
+    denied = require_ai_summary_access()
+    if denied:
+        return denied
+    return ai_summary_job_stream(job_id)
 
 @app.route('/api/add_task', methods=['POST'])
 def api_add_task():

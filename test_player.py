@@ -432,7 +432,9 @@ class TestPlayerPage(unittest.TestCase):
         self.assertIn('fallbackCopyText(summary);', template)
         self.assertIn("toggleButton.textContent = expanded ? '收起' : '展开';", template)
         self.assertIn("toggleButton.setAttribute('aria-expanded', String(expanded));", template)
-        self.assertIn("content.classList.add('is-collapsed');", template)
+        self.assertIn("content.classList.toggle('is-collapsed', !streaming);", template)
+        self.assertIn('consumeAiSummaryStream(result.job_id', template)
+        self.assertIn('application/x-ndjson', template)
         self.assertIn('.ai-summary-content.is-collapsed {', css)
 
     def test_ai_summary_requires_server_configuration(self):

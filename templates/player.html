@@ -452,7 +452,7 @@
             toggleButton.setAttribute('aria-expanded', 'false');
         }
 
-        function renderAiSummary(markdown) {
+        function renderAiSummary(markdown, streaming) {
             var content = document.getElementById('ai-summary-content');
             var copyButton = document.getElementById('copy-ai-summary');
             var toggleButton = document.getElementById('toggle-ai-summary');
@@ -478,11 +478,47 @@
                 content.textContent = markdown;
             }
             content.hidden = false;
-            content.classList.add('is-collapsed');
-            copyButton.hidden = false;
-            toggleButton.hidden = false;
+            content.classList.toggle('is-collapsed', !streaming);
+            copyButton.hidden = Boolean(streaming);
+            toggleButton.hidden = Boolean(streaming);
             toggleButton.textContent = '展开';
             toggleButton.setAttribute('aria-expanded', 'false');
+        }
+
+        async function consumeAiSummaryStream(jobId, onMessage) {
+            var response = await fetch(
+                '/api/ai_summary/jobs/' + encodeURIComponent(jobId) + '/stream',
+                { headers: { 'Accept': 'application/x-ndjson' } }
+            );
+            if (!response.ok || !response.body) {
+                var errorResult = await response.json().catch(function () { return {}; });
+                throw new Error(errorResult.message || '无法连接总结流');
+            }
+            var reader = response.body.getReader();
+            var decoder = new TextDecoder();
+            var buffer = '';
+            var terminal = false;
+            while (true) {
+                var chunk = await reader.read();
+                buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done });
+                var lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (var i = 0; i < lines.length; i += 1) {
+                    if (!lines[i].trim()) continue;
+                    var message = JSON.parse(lines[i]);
+                    if (message.type !== 'keepalive') {
+                        onMessage(message);
+                        terminal = message.status === 'completed' || message.status === 'failed';
+                    }
+                }
+                if (chunk.done) break;
+            }
+            if (buffer.trim()) {
+                var finalMessage = JSON.parse(buffer);
+                onMessage(finalMessage);
+                terminal = finalMessage.status === 'completed' || finalMessage.status === 'failed';
+            }
+            if (!terminal) throw new Error('AI 总结流提前结束');
         }
 
         function updateAiSummaryPanel(filename) {
@@ -546,21 +582,30 @@
                     })
                 });
                 var result = await response.json();
-                while (response.status === 202 && result.success && result.job_id) {
+                if (response.status === 202 && result.success && result.job_id) {
                     var stageLabels = {
-                        queued: '总结任务已排队…',
-                        resolving: '正在读取媒体信息…',
-                        downloading_subtitle: '正在准备字幕…',
-                        generating: '正在调用 AI 生成总结…'
+                        queued: '总结任务已排队…', resolving: '正在读取媒体信息…',
+                        downloading_subtitle: '正在准备字幕…', generating: 'AI 正在流式生成总结…'
                     };
-                    status.textContent = stageLabels[result.status] || '正在生成总结…';
-                    await new Promise(function (resolve) { setTimeout(resolve, 2000); });
-                    response = await fetch({{ url_for('api_ai_summary') | tojson }}, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ job_id: result.job_id })
-                    });
-                    result = await response.json();
+                    var streamError = null;
+                    for (var streamAttempt = 0; streamAttempt < 3; streamAttempt += 1) {
+                        try {
+                            await consumeAiSummaryStream(result.job_id, function (streamResult) {
+                                result = streamResult;
+                                if (streamResult.partial_markdown && currentFilename === requestedFilename) {
+                                    renderAiSummary(streamResult.partial_markdown, true);
+                                }
+                                status.textContent = stageLabels[streamResult.status] || '正在生成总结…';
+                            });
+                            streamError = null;
+                            break;
+                        } catch (error) {
+                            streamError = error;
+                            status.textContent = '流式连接中断，正在恢复…';
+                            await new Promise(function (resolve) { setTimeout(resolve, 1000); });
+                        }
+                    }
+                    if (streamError) throw streamError;
                 }
                 if (!response.ok || !result.success) {
                     throw new Error(

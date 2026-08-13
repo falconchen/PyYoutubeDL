@@ -108,6 +108,32 @@ class TestAiSummaryApi(unittest.TestCase):
         self.assertEqual(response.get_json()['error']['code'], 'no_subtitles')
         self.assertFalse(response.get_json()['error']['retryable'])
 
+    def test_job_stream_returns_partial_and_completed_ndjson(self):
+        job_id = self.submit().get_json()['job_id']
+        claimed = store.claim_next_job(self.db_path, 'worker-one')
+        store.update_job(self.db_path, job_id, 'generating')
+        store.update_job_stream(self.db_path, job_id, '## 部分')
+
+        response = self.client.get(
+            f'/api/ai_summaries/jobs/{job_id}/stream',
+            headers=self.headers,
+            buffered=False,
+        )
+        iterator = iter(response.response)
+        partial = next(iterator).decode('utf-8')
+        self.assertIn('"partial_markdown": "## 部分"', partial)
+
+        media_id = store.upsert_media(
+            self.db_path, 'youtube', 'l38ceFOWOAE', self.url, '测试视频', aliases=(self.url,),
+        )
+        store.save_summary_and_complete(
+            self.db_path, job_id, media_id, store.summary_profile_key(app_module.config),
+            'test-model', 'zh', 'manual', 'hash', '## 完整总结',
+        )
+        completed = next(iterator).decode('utf-8')
+        self.assertIn('"status": "completed"', completed)
+        self.assertIn('## 完整总结', completed)
+
 
 if __name__ == '__main__':
     unittest.main()

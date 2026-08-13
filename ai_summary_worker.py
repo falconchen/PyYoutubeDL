@@ -407,10 +407,39 @@ def generate_and_save(job, prepared):
         job['id'],
         str(config.get('AI_API_MODEL') or '').strip(),
     )
+    last_stream_write = {'time': 0.0, 'length': 0}
+
+    def persist_stream(partial_markdown):
+        current_time = time.monotonic()
+        if (
+            current_time - last_stream_write['time'] < 0.15
+            and len(partial_markdown) - last_stream_write['length'] < 64
+        ):
+            return
+        store.update_job_stream(
+            config['AI_SUMMARY_DB_PATH'],
+            job['id'],
+            partial_markdown,
+            lease_until=store.now_ts() + JOB_LEASE_SECONDS,
+        )
+        last_stream_write['time'] = current_time
+        last_stream_write['length'] = len(partial_markdown)
+
     try:
-        summary = app_module.request_ai_summary(title, label, subtitle_text)
+        summary = app_module.request_ai_summary(
+            title,
+            label,
+            subtitle_text,
+            on_delta=persist_stream,
+        )
     except RuntimeError as exc:
         raise JobFailure('ai_invalid_response', str(exc)) from exc
+    store.update_job_stream(
+        config['AI_SUMMARY_DB_PATH'],
+        job['id'],
+        summary,
+        lease_until=store.now_ts() + JOB_LEASE_SECONDS,
+    )
     saved_summary, cache_hit = store.save_summary_and_complete(
         config['AI_SUMMARY_DB_PATH'],
         job['id'],

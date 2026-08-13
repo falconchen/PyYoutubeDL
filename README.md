@@ -161,11 +161,13 @@ curl http://localhost:5000/api/ai_summaries/jobs/<job_id> \
 
 对于没有完成摘要的旧任务，任务 API 只从仍存在的主媒体文件读取最终大小，不使用最后一个下载阶段的耗时和速率；无法可靠恢复的总耗时及平均速率会省略。未生成 `result.json` 的旧任务还会尝试从 downloader 的文件移动日志中恢复最终文件名；只有日志记录和本地文件都仍然存在时才会返回播放链接。
 
-AI 总结接口命中 SQLite 中当前接口、模型和提示词版本的记录时返回 HTTP 200；未命中时返回 HTTP 202、`job_id` 和 `Retry-After: 2`。任务完成后返回原始 Markdown；无字幕等确定性失败返回 HTTP 422。扩展接口必须使用独立的 `AI_SUMMARY_ACCESS_TOKEN`，令牌只通过 `X-Yter-AI-Token` 请求头传递。
+AI 总结接口命中 SQLite 中当前接口、模型和提示词版本的记录时返回 HTTP 200；未命中时返回 HTTP 202、`job_id` 和 `Retry-After: 2`。播放器和 Chrome 扩展随后通过 NDJSON 流实时接收 AI 生成的 Markdown，增量会写入 SQLite，断线后可恢复；任务完成后返回原始 Markdown，无字幕等确定性失败返回 HTTP 422。扩展接口必须使用独立的 `AI_SUMMARY_ACCESS_TOKEN`，令牌只通过 `X-Yter-AI-Token` 请求头传递。
 
 总结永久保存在 `AI_SUMMARY_DB_PATH` 指定的 SQLite 数据库中。数据库使用 WAL、外键和任务租约；模型、接口地址或内部提示词版本变化时生成新版本。字幕只在 `TMP_DIR/ai-summary/` 临时存在并在任务结束后删除，完成和失败的任务记录默认保留 30 天。`ai_summary_worker.py` 独立处理 URL 字幕下载、本地视频内嵌字幕和 AI 请求；预检使用实际生效的 yt-dlp 视频配置，但只下载字幕，不下载视频。
 
 AI Worker 的运行日志写入 `LOG_DIR/ai-summary-worker.log`，正常任务会记录领取、媒体解析、字幕选择与获取、AI 调用、缓存命中和完成阶段。日志只记录任务标识及必要的阶段元数据，不记录访问令牌、字幕正文或总结正文。
+
+反向代理需要允许流接口保持长连接并禁用响应缓冲。应用已返回 `X-Accel-Buffering: no` 和 `Cache-Control: no-store, private`；如果代理未遵循该响应头，需要在 `/api/ai_summary/` 和 `/api/ai_summaries/` 对应位置显式设置 `proxy_buffering off`。
 
 ### Chrome 右键下载扩展
 
@@ -175,7 +177,7 @@ AI Worker 的运行日志写入 `LOG_DIR/ai-summary-worker.log`，正常任务�
 
 点击“AI总结”后，扩展会在当前页面注入隔离样式的浮层并显示任务状态。完成后安全渲染 Markdown，提供复制、展开/收起和关闭按钮。AI 令牌仅保存在 `chrome.storage.local` 并由扩展 Service Worker 使用，不会传入当前网页；页面不可用或已经离开时改用 Chrome 通知提示结果。
 
-左键点击浏览器工具栏中的扩展图标会直接显示服务地址设置和保存按钮，不再跳转后才配置。
+左键点击浏览器工具栏中的扩展图标，会显示针对当前 HTTP/HTTPS 页面的“下载视频”、“下载音频”和“AI总结”快捷按钮；“服务设置”默认折叠，点击后才展开服务地址、访问令牌和保存按钮。
 
 弹窗中的“实时日志”会打开独立日志页，每秒增量读取当前服务器的 `downloader.log`，效果类似 `tail -f`。该接口必须配置 `EXTENSION_LOG_TOKEN`，令牌通过请求头传递，并仅保存在扩展本机存储中。
 

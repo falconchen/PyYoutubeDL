@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,11 +17,26 @@ class TestAiSummaryStore(unittest.TestCase):
 
     def test_initializes_wal_schema(self):
         with store.connect(self.db_path) as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 1)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 2)
             self.assertEqual(
                 db.execute('PRAGMA journal_mode').fetchone()[0].lower(),
                 'wal',
             )
+
+    def test_migrates_version_one_jobs_for_streaming(self):
+        migration_path = str(Path(self.temp_dir.name) / 'version-one.sqlite3')
+        with sqlite3.connect(migration_path) as db:
+            db.execute('CREATE TABLE ai_summary_jobs (id TEXT PRIMARY KEY)')
+            db.execute('PRAGMA user_version = 1')
+        store.init_db(migration_path)
+
+        with sqlite3.connect(migration_path) as db:
+            columns = {
+                row[1] for row in db.execute('PRAGMA table_info(ai_summary_jobs)')
+            }
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 2)
+        self.assertIn('partial_markdown', columns)
+        self.assertIn('stream_revision', columns)
 
     def test_normalizes_youtube_aliases(self):
         expected = 'https://www.youtube.com/watch?v=l38ceFOWOAE'
@@ -91,6 +107,17 @@ class TestAiSummaryStore(unittest.TestCase):
             'new-profile',
         )
         self.assertIsNone(other_profile)
+
+    def test_persists_streaming_markdown_progress(self):
+        url = 'https://video.example/stream'
+        job = store.create_url_job(self.db_path, url, url, self.profile)['job']
+        claimed = store.claim_next_job(self.db_path, 'worker-one')
+        store.update_job(self.db_path, claimed['id'], 'generating')
+        store.update_job_stream(self.db_path, claimed['id'], '## 部分总结')
+
+        updated = store.get_job(self.db_path, job['id'])
+        self.assertEqual(updated['partial_markdown'], '## 部分总结')
+        self.assertGreater(updated['stream_revision'], 0)
 
     def test_cleanup_only_removes_old_terminal_jobs(self):
         url = 'https://video.example/old'
