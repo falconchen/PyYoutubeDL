@@ -13,7 +13,7 @@ function createEvent() {
   };
 }
 
-function createHarness() {
+function createHarness(harnessOptions = {}) {
   const localStorage = {};
   const alarms = new Map();
   const notifications = [];
@@ -94,6 +94,9 @@ function createHarness() {
       async get(tabId) {
         return { id: tabId, url: 'https://video.example/watch/1' };
       },
+      async query() {
+        return [{ id: 7, url: 'https://video.example/watch/1', title: '测试视频' }];
+      },
       async sendMessage(tabId, message) {
         overlayMessages.push({ tabId, message });
       },
@@ -136,6 +139,15 @@ function createHarness() {
     }
 
     if (url.endsWith('/api/ai_summaries')) {
+      if (harnessOptions.streamAiSummary) {
+        return {
+          ok: true,
+          status: 202,
+          async json() {
+            return { success: true, status: 'queued', job_id: 'summary-job-1' };
+          },
+        };
+      }
       return {
         ok: true,
         status: 200,
@@ -150,6 +162,28 @@ function createHarness() {
       };
     }
 
+    if (url.endsWith('/api/ai_summaries/jobs/summary-job-1/stream')) {
+      const chunks = [
+        '{"success":true,"status":"generating","job_id":"summary-job-1","partial_markdown":"## 部分"}\n',
+        '{"success":true,"status":"completed","job_id":"summary-job-1","cached":false,"summary":{"title":"测试视频","markdown":"## 完整总结"}}\n',
+      ].map((value) => new TextEncoder().encode(value));
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader() {
+            return {
+              async read() {
+                return chunks.length
+                  ? { done: false, value: chunks.shift() }
+                  : { done: true, value: undefined };
+              },
+            };
+          },
+        },
+      };
+    }
+
     throw new Error(`Unexpected URL: ${url}`);
   }
 
@@ -157,6 +191,8 @@ function createHarness() {
     chrome,
     console,
     fetch,
+    TextDecoder,
+    Uint8Array,
   });
   const source = fs.readFileSync(
     path.join(__dirname, '..', 'background.js'),
@@ -252,14 +288,50 @@ test('toolbar action opens the inline settings popup', () => {
     path.join(extensionRoot, 'popup.html'),
     'utf8',
   );
+  const popupStyles = fs.readFileSync(
+    path.join(extensionRoot, 'popup.css'),
+    'utf8',
+  );
 
-  assert.equal(manifest.version, '1.4.0');
+  assert.equal(manifest.version, '1.5.0');
   assert.equal(manifest.action.default_popup, 'popup.html');
+  assert.match(popup, /<details class="settings-card">/);
+  assert.doesNotMatch(popup, /<details class="settings-card" open>/);
   assert.match(popup, /id="settings-form"/);
   assert.match(popup, /id="server-url"/);
   assert.match(popup, /id="status"/);
   assert.match(popup, /id="ai-summary-token"/);
+  assert.match(popup, /data-page-action="video"/);
+  assert.match(popup, /data-page-action="audio"/);
+  assert.match(popup, /data-page-action="ai-summary"/);
   assert.match(popup, /src="options\.js"/);
+  assert.match(popup, /src="popup\.js"/);
+  assert.match(popupStyles, /html,\s*body\s*\{[^}]*width:\s*360px;/s);
+  assert.match(
+    popupStyles,
+    /\.popup-shell\s*\{[^}]*max-height:\s*600px;[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;/s,
+  );
+});
+
+test('toolbar page action submits the active page as a video task', async () => {
+  const harness = createHarness();
+  const response = await new Promise((resolve) => {
+    const keepChannelOpen = harness.events.runtimeMessage.listener({
+      type: 'run-yter-page-action',
+      action: 'video',
+      tabId: 7,
+      pageUrl: 'https://video.example/watch/1',
+    }, {}, resolve);
+    assert.equal(keepChannelOpen, true);
+  });
+
+  assert.equal(response.success, true);
+  const [task] = Object.keys(harness.localStorage.pendingTasks);
+  assert.equal(
+    harness.localStorage.pendingTasks[task].sourceUrl,
+    'https://video.example/watch/1',
+  );
+  assert.match(harness.notifications.at(-1).title, /视频下载已加入队列/);
 });
 
 test('AI summary menu injects a safe local overlay and returns cached content', async () => {
@@ -284,6 +356,26 @@ test('AI summary menu injects a safe local overlay and returns cached content', 
   );
   assert.match(source, /DOMPurify\.sanitize/);
   assert.match(source, /FORBID_TAGS/);
+});
+
+test('AI summary menu forwards streamed markdown and final result', async () => {
+  const harness = createHarness({ streamAiSummary: true });
+  harness.localStorage.aiSummaryToken = 'extension-ai-token';
+
+  await harness.events.contextClicked.listener({
+    menuItemId: 'yter-ai-summary',
+    pageUrl: 'https://video.example/watch/1',
+  }, { id: 7, url: 'https://video.example/watch/1' });
+
+  const messages = harness.overlayMessages.map((entry) => entry.message);
+  assert.ok(messages.some(
+    (message) => message.type === 'streaming' && message.markdown === '## 部分',
+  ), JSON.stringify(messages));
+  assert.ok(messages.some(
+    (message) => message.type === 'completed'
+      && message.summary.markdown === '## 完整总结',
+  ));
+  assert.equal(Object.keys(harness.localStorage.pendingAiSummaries || {}).length, 0);
 });
 
 test('extension includes a token-protected live log page', () => {

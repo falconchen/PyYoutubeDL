@@ -2843,6 +2843,22 @@ Please report this to https://github.com/markedjs/marked.`, e) {
     const copy = shadow.querySelector(".copy");
     const toggle = shadow.querySelector(".toggle");
     status.classList.toggle("error", message.type === "error");
+    if (message.type === "streaming") {
+      const markdown = message.markdown || "";
+      content.innerHTML = purify.sanitize(
+        g.parse(markdown, { gfm: true, breaks: true }),
+        {
+          FORBID_TAGS: ["img", "svg", "math", "style", "script"],
+          FORBID_ATTR: ["style"]
+        }
+      );
+      content.dataset.markdown = markdown;
+      content.classList.remove("hidden", "collapsed");
+      copy.classList.add("hidden");
+      toggle.classList.add("hidden");
+      status.textContent = message.text || "AI \u6B63\u5728\u6D41\u5F0F\u751F\u6210\u603B\u7ED3\u2026";
+      return;
+    }
     if (message.type === "completed") {
       schedulePoll(null);
       const markdown = message.summary?.markdown || "";

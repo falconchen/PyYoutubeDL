@@ -17,9 +17,13 @@
   box-sizing: border-box;
 }
 
+html,
 body {
   width: 360px;
+  min-width: 360px;
+  max-width: 360px;
   margin: 0;
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
   font-size: 14px;
@@ -31,7 +35,11 @@ input {
 }
 
 .popup-shell {
-  overflow: hidden;
+  width: 360px;
+  max-width: 360px;
+  max-height: 600px;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--card);
 }
 
@@ -92,21 +100,88 @@ h1 {
   box-shadow: 0 0 0 3px rgb(33 164 93 / 13%);
 }
 
-.settings-card {
+.settings-card,
+.action-card {
   margin: 16px;
-  padding: 16px;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--card);
   box-shadow: 0 7px 22px rgb(20 29 39 / 6%);
 }
 
+.action-card {
+  padding: 16px;
+}
+
+.settings-card {
+  overflow: hidden;
+}
+
 .section-heading {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 16px;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.section-heading::-webkit-details-marker {
+  display: none;
+}
+
+.section-heading:hover {
+  background: var(--field);
+}
+
+.section-heading:focus-visible {
+  outline: 3px solid rgb(237 56 51 / 22%);
+  outline-offset: -3px;
+}
+
+.heading-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.section-description {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.summary-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.chevron {
+  fill: none;
+  stroke: var(--muted);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  transition: transform 150ms ease;
+}
+
+.settings-card[open] .chevron {
+  transform: rotate(180deg);
+}
+
+.settings-card[open] .section-heading {
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-content {
+  padding: 16px;
 }
 
 h2 {
@@ -114,10 +189,14 @@ h2 {
   line-height: 1.3;
 }
 
-.section-heading p {
+.action-heading p {
   margin-top: 4px;
   color: var(--muted);
   font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 235px;
 }
 
 .polling-label {
@@ -128,6 +207,117 @@ h2 {
   color: var(--accent-strong);
   font-size: 10px;
   font-weight: 700;
+}
+
+.action-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 13px;
+}
+
+.page-label {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: #eef3ff;
+  color: #3157a4;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.page-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.page-action {
+  display: flex;
+  min-width: 0;
+  min-height: 72px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 5px;
+  border: 1px solid #d8dde4;
+  border-radius: 11px;
+  background: var(--field);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.page-action svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.video-action {
+  color: #c82d29;
+}
+
+.audio-action {
+  color: #3157a4;
+}
+
+.summary-action {
+  color: #7152a3;
+}
+
+.page-action:hover:not(:disabled) {
+  border-color: currentColor;
+  background: var(--card);
+  transform: translateY(-1px);
+}
+
+.page-action:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.page-action:focus-visible {
+  outline: 3px solid rgb(237 56 51 / 22%);
+  outline-offset: 2px;
+}
+
+.page-action:disabled {
+  color: var(--muted);
+  cursor: wait;
+  opacity: .55;
+}
+
+.action-help {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+#action-status {
+  min-height: 0;
+  margin-top: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+#action-status:not(:empty) {
+  margin-top: 9px;
+}
+
+#action-status.success {
+  color: var(--success);
+}
+
+#action-status.error {
+  color: #b42318;
 }
 
 label {
@@ -298,7 +488,13 @@ input::placeholder {
     background: #203a2b;
   }
 
-  .url-field {
+  .page-label {
+    background: #263551;
+    color: #a9c4ff;
+  }
+
+  .url-field,
+  .page-action {
     border-color: #4b5259;
   }
 }

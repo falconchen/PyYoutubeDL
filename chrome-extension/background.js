@@ -89,6 +89,38 @@ async function fetchAiSummaryJob(serverUrl, token, jobId) {
   return { response, result };
 }
 
+async function streamAiSummaryJob(pendingItem, token) {
+  const response = await fetch(
+    `${pendingItem.serverUrl}/api/ai_summaries/jobs/${pendingItem.jobId}/stream`,
+    { headers: { 'X-Yter-AI-Token': token, Accept: 'application/x-ndjson' } },
+  );
+  if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let terminal = false;
+  while (true) {
+    const chunk = await reader.read();
+    buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const result = JSON.parse(line);
+      if (result.type === 'keepalive') continue;
+      if (await deliverAiSummaryResult(pendingItem, result)) {
+        terminal = true;
+        const pending = await getPendingSummaries();
+        delete pending[pendingItem.jobId];
+        await savePendingSummaries(pending);
+        return;
+      }
+    }
+    if (chunk.done) break;
+  }
+  if (!terminal) throw new Error('AI 总结流提前结束');
+}
+
 async function submitAiSummary(serverUrl, token, sourceUrl) {
   const response = await fetch(`${serverUrl}/api/ai_summaries`, {
     method: 'POST',
@@ -160,6 +192,19 @@ async function deliverAiSummaryResult(pendingItem, result) {
       await showNotification('yter AI总结已完成', result.summary.title || pendingItem.pageUrl);
     }
     return true;
+  }
+  if (result.partial_markdown) {
+    try {
+      await sendSummaryOverlayMessage(pendingItem.tabId, {
+        type: 'streaming',
+        markdown: result.partial_markdown,
+        text: SUMMARY_STAGE_TEXT[result.status] || 'AI 正在流式生成总结…',
+        jobId: pendingItem.jobId,
+      });
+    } catch (error) {
+      // 页面不可用时继续由后台跟踪，完成后发送通知。
+    }
+    return false;
   }
   if (result.status === 'failed') {
     const message = result.error?.message || '生成总结失败';
@@ -233,8 +278,18 @@ async function handleAiSummaryClick(targetUrl, tab) {
     await sendSummaryOverlayMessage(tab.id, {
       type: 'pending',
       text: SUMMARY_STAGE_TEXT[result.status] || '总结任务已提交…',
-      jobId: result.job_id,
     });
+    const pendingItem = (await getPendingSummaries())[result.job_id];
+    try {
+      await streamAiSummaryJob(pendingItem, token);
+    } catch (streamError) {
+      console.warn('AI 总结流连接中断，将使用状态轮询恢复', streamError);
+      await sendSummaryOverlayMessage(tab.id, {
+        type: 'pending',
+        text: '流式连接中断，正在恢复任务状态…',
+        jobId: result.job_id,
+      });
+    }
   } catch (error) {
     await sendSummaryOverlayMessage(tab.id, { type: 'error', text: error.message });
   }
@@ -455,6 +510,25 @@ async function addDownloadTask(linkUrl, type) {
   };
 }
 
+async function handleDownloadAction(targetUrl, type) {
+  const typeLabel = type === 'video' ? '视频' : '音频';
+  const result = await addDownloadTask(targetUrl, type);
+  const taskText = result.tasks.length
+    ? `任务：${result.tasks.join(', ')}`
+    : '任务已提交';
+  try {
+    await trackPendingTasks(result.tasks, type, result.serverUrl, targetUrl);
+  } catch (error) {
+    await showNotification(
+      `yter ${typeLabel}任务已提交，但无法跟踪`,
+      error.message,
+    );
+    return `${taskText}；但无法跟踪完成状态`;
+  }
+  await showNotification(`yter ${typeLabel}下载已加入队列`, taskText);
+  return taskText;
+}
+
 chrome.runtime.onInstalled.addListener((details) => {
   createContextMenus();
   ensureTaskPollingAlarm().catch((error) => {
@@ -479,10 +553,40 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type !== 'poll-yter-ai-summary' || !message.jobId) return undefined;
-  pollAiSummary(message.jobId)
-    .then((result) => sendResponse({ success: true, result }))
-    .catch((error) => sendResponse({ success: false, message: error.message }));
+  if (message?.type === 'poll-yter-ai-summary' && message.jobId) {
+    pollAiSummary(message.jobId)
+      .then((result) => sendResponse({ success: true, result }))
+      .catch((error) => sendResponse({ success: false, message: error.message }));
+    return true;
+  }
+
+  if (message?.type !== 'run-yter-page-action') return undefined;
+  const { action, pageUrl, tabId } = message;
+  if (!['video', 'audio', 'ai-summary'].includes(action)
+      || typeof tabId !== 'number'
+      || typeof pageUrl !== 'string'
+      || !/^https?:\/\//i.test(pageUrl)) {
+    sendResponse({ success: false, message: '当前页面不支持此操作' });
+    return undefined;
+  }
+
+  chrome.tabs.get(tabId).then((tab) => {
+    if (!tab || tab.url !== pageUrl) throw new Error('当前页面已经变化，请重试');
+    if (action === 'ai-summary') {
+      sendResponse({ success: true, message: 'AI总结已开始，请在当前页面查看。' });
+      handleAiSummaryClick(pageUrl, tab).catch(async (error) => {
+        await showNotification('yter AI总结失败', error.message);
+      });
+      return;
+    }
+    handleDownloadAction(pageUrl, action)
+      .then((taskText) => sendResponse({ success: true, message: taskText }))
+      .catch(async (error) => {
+        const typeLabel = action === 'video' ? '视频' : '音频';
+        await showNotification(`yter ${typeLabel}下载失败`, error.message);
+        sendResponse({ success: false, message: error.message });
+      });
+  }).catch((error) => sendResponse({ success: false, message: error.message }));
   return true;
 });
 
@@ -514,27 +618,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     return;
   }
 
-  const typeLabel = type === 'video' ? '视频' : '音频';
-  let result;
   try {
-    result = await addDownloadTask(targetUrl, type);
+    await handleDownloadAction(targetUrl, type);
   } catch (error) {
+    const typeLabel = type === 'video' ? '视频' : '音频';
     await showNotification(`yter ${typeLabel}下载失败`, error.message);
-    return;
   }
-
-  try {
-    await trackPendingTasks(result.tasks, type, result.serverUrl, targetUrl);
-  } catch (error) {
-    await showNotification(
-      `yter ${typeLabel}任务已提交，但无法跟踪`,
-      error.message,
-    );
-    return;
-  }
-
-  const taskText = result.tasks.length
-    ? `任务：${result.tasks.join(', ')}`
-    : '任务已提交';
-  await showNotification(`yter ${typeLabel}下载已加入队列`, taskText);
 });

@@ -81,6 +81,22 @@ function renderMessage(message) {
   const copy = shadow.querySelector('.copy');
   const toggle = shadow.querySelector('.toggle');
   status.classList.toggle('error', message.type === 'error');
+  if (message.type === 'streaming') {
+    const markdown = message.markdown || '';
+    content.innerHTML = DOMPurify.sanitize(
+      marked.parse(markdown, { gfm: true, breaks: true }),
+      {
+        FORBID_TAGS: ['img', 'svg', 'math', 'style', 'script'],
+        FORBID_ATTR: ['style'],
+      },
+    );
+    content.dataset.markdown = markdown;
+    content.classList.remove('hidden', 'collapsed');
+    copy.classList.add('hidden');
+    toggle.classList.add('hidden');
+    status.textContent = message.text || 'AI 正在流式生成总结…';
+    return;
+  }
   if (message.type === 'completed') {
     schedulePoll(null);
     const markdown = message.summary?.markdown || '';
