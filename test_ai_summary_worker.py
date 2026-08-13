@@ -78,12 +78,23 @@ class TestAiSummaryWorker(unittest.TestCase):
                 patch('app.extract_subtitle_text', return_value='第一句\n第二句'),
                 patch('app.request_ai_summary', return_value='# 这是总结') as request_ai,
             ):
-                self.assertTrue(worker.run_once())
+                with self.assertLogs(worker.logger, level='INFO') as captured_logs:
+                    self.assertTrue(worker.run_once())
 
             job = store.get_job(db_path, created['job']['id'])
             self.assertEqual(job['status'], 'completed')
             self.assertEqual(job['summary']['markdown'], '# 这是总结')
             request_ai.assert_called_once()
+            log_output = '\n'.join(captured_logs.output)
+            self.assertIn('已领取 AI 总结任务:', log_output)
+            self.assertIn('开始读取本地媒体:', log_output)
+            self.assertIn('已选择字幕:', log_output)
+            self.assertIn('开始提取内嵌字幕:', log_output)
+            self.assertIn('开始调用 AI:', log_output)
+            self.assertIn('AI 总结完成:', log_output)
+            self.assertNotIn('provider-token', log_output)
+            self.assertNotIn('第一句', log_output)
+            self.assertNotIn('# 这是总结', log_output)
             summary_tmp = tmp_dir / 'ai-summary'
             self.assertEqual(list(summary_tmp.iterdir()), [])
 

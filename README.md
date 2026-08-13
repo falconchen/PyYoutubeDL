@@ -165,6 +165,8 @@ AI 总结接口命中 SQLite 中当前接口、模型和提示词版本的记录
 
 总结永久保存在 `AI_SUMMARY_DB_PATH` 指定的 SQLite 数据库中。数据库使用 WAL、外键和任务租约；模型、接口地址或内部提示词版本变化时生成新版本。字幕只在 `TMP_DIR/ai-summary/` 临时存在并在任务结束后删除，完成和失败的任务记录默认保留 30 天。`ai_summary_worker.py` 独立处理 URL 字幕下载、本地视频内嵌字幕和 AI 请求；预检使用实际生效的 yt-dlp 视频配置，但只下载字幕，不下载视频。
 
+AI Worker 的运行日志写入 `LOG_DIR/ai-summary-worker.log`，正常任务会记录领取、媒体解析、字幕选择与获取、AI 调用、缓存命中和完成阶段。日志只记录任务标识及必要的阶段元数据，不记录访问令牌、字幕正文或总结正文。
+
 ### Chrome 右键下载扩展
 
 仓库中的 `chrome-extension/` 是 Manifest V3 扩展。加载后，右键点击网页空白处或网页链接，可在“使用yter下载”二级菜单中选择“下载视频”、“下载音频”或“AI总结”。空白处使用当前页面 URL，链接处优先使用链接 URL；下载操作调用 `/api/add_task`，AI 总结调用 `/api/ai_summaries`。

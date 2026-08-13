@@ -276,6 +276,7 @@ def resolve_local_media(job, filepath):
 
 
 def process_url_job(job, temp_dir):
+    logger.info('开始解析媒体信息: job_id=%s', job['id'])
     info = run_yt_dlp_metadata(job['request_url'])
     extractor, extractor_id, canonical_url, title = media_from_info(
         info,
@@ -295,6 +296,11 @@ def process_url_job(job, temp_dir):
         job['profile_key'],
     )
     if cached:
+        logger.info(
+            '命中已保存总结: job_id=%s summary_id=%s',
+            job['id'],
+            cached['id'],
+        )
         store.complete_job_from_cache(
             config['AI_SUMMARY_DB_PATH'],
             job['id'],
@@ -304,6 +310,12 @@ def process_url_job(job, temp_dir):
         return
 
     language, subtitle_kind, subtitle_label = select_summary_subtitle(info)
+    logger.info(
+        '已选择字幕: job_id=%s language=%s kind=%s',
+        job['id'],
+        language,
+        subtitle_kind,
+    )
     store.update_job(
         config['AI_SUMMARY_DB_PATH'],
         job['id'],
@@ -311,6 +323,7 @@ def process_url_job(job, temp_dir):
         media_source_id=media_id,
         lease_until=store.now_ts() + JOB_LEASE_SECONDS,
     )
+    logger.info('开始下载字幕: job_id=%s', job['id'])
     subtitle_path = download_subtitles(
         job['request_url'],
         language,
@@ -323,6 +336,7 @@ def process_url_job(job, temp_dir):
 def process_local_job(job):
     import app as app_module
 
+    logger.info('开始读取本地媒体: job_id=%s', job['id'])
     filepath = safe_join(config['FILES_DIR'], job['filename'])
     if not filepath or not os.path.isfile(filepath):
         raise JobFailure('video_not_found', '视频文件不存在')
@@ -343,6 +357,11 @@ def process_local_job(job):
         job['profile_key'],
     )
     if cached:
+        logger.info(
+            '命中已保存总结: job_id=%s summary_id=%s',
+            job['id'],
+            cached['id'],
+        )
         store.complete_job_from_cache(
             config['AI_SUMMARY_DB_PATH'],
             job['id'],
@@ -350,6 +369,12 @@ def process_local_job(job):
             cached['id'],
         )
         return
+    logger.info(
+        '已选择字幕: job_id=%s language=%s kind=embedded',
+        job['id'],
+        selected.get('language') or '',
+    )
+    logger.info('开始提取内嵌字幕: job_id=%s', job['id'])
     subtitle_text = app_module.extract_subtitle_text(
         filepath,
         selected['stream_index'],
@@ -377,11 +402,16 @@ def generate_and_save(job, prepared):
         media_source_id=media_id,
         lease_until=store.now_ts() + JOB_LEASE_SECONDS,
     )
+    logger.info(
+        '开始调用 AI: job_id=%s model=%s',
+        job['id'],
+        str(config.get('AI_API_MODEL') or '').strip(),
+    )
     try:
         summary = app_module.request_ai_summary(title, label, subtitle_text)
     except RuntimeError as exc:
         raise JobFailure('ai_invalid_response', str(exc)) from exc
-    store.save_summary_and_complete(
+    saved_summary, cache_hit = store.save_summary_and_complete(
         config['AI_SUMMARY_DB_PATH'],
         job['id'],
         media_id,
@@ -391,6 +421,12 @@ def generate_and_save(job, prepared):
         kind,
         hashlib.sha256(subtitle_text.encode('utf-8')).hexdigest(),
         summary,
+    )
+    logger.info(
+        'AI 总结完成: job_id=%s summary_id=%s cache_hit=%s',
+        job['id'],
+        saved_summary['id'],
+        cache_hit,
     )
 
 
@@ -419,6 +455,12 @@ def run_once():
     )
     if not job:
         return False
+    logger.info(
+        '已领取 AI 总结任务: job_id=%s input_kind=%s attempt=%s',
+        job['id'],
+        job['input_kind'],
+        job['attempts'],
+    )
     try:
         process_job(job)
     except JobFailure as exc:
