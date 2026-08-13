@@ -7,7 +7,6 @@ import time
 import json
 import re
 import subprocess
-import threading
 from functools import lru_cache
 from urllib.parse import parse_qs, unquote, urlparse
 import hashlib
@@ -21,6 +20,7 @@ from datetime import datetime
 import requests
 from requests.auth import HTTPBasicAuth
 from log_util import setup_logger
+import ai_summary_store
 import click
 from flask.cli import with_appcontext
 
@@ -80,13 +80,11 @@ SUBTITLE_TIMESTAMP_PATTERN = re.compile(
     r'^(?:\d{2}:)?\d{2}:\d{2}[.,]\d{3}\s+-->\s+'
 )
 AI_SUMMARY_MAX_SUBTITLE_CHARS = 120000
-AI_SUMMARY_CACHE_MAX_ITEMS = 128
-ai_summary_cache = {}
-ai_summary_cache_lock = threading.Lock()
 
 # 保证文件夹存在
 os.makedirs(URLS_DIR, exist_ok=True)
 os.makedirs(FILES_DIR, exist_ok=True)
+ai_summary_store.init_db(config["AI_SUMMARY_DB_PATH"])
 
 def get_file_hash(filepath):
     """获取文件的MD5哈希值"""
@@ -704,6 +702,77 @@ def ai_summary_is_configured():
     )
 
 
+def ai_summary_access_is_configured():
+    return bool(str(config.get("AI_SUMMARY_ACCESS_TOKEN") or "").strip())
+
+
+def ai_summary_api_response(payload, status=200):
+    response = jsonify(payload)
+    response.status_code = status
+    response.headers['Cache-Control'] = 'no-store, private'
+    if status == 202:
+        response.headers['Retry-After'] = '2'
+    return response
+
+
+def ai_summary_job_payload(job, legacy=False):
+    if job['status'] == 'completed' and job.get('summary'):
+        summary = job['summary']
+        if legacy:
+            return {
+                'success': True,
+                'status': 'completed',
+                'job_id': job['id'],
+                'summary': summary['markdown'],
+                'subtitle': summary['subtitle_language'] or summary['subtitle_kind'],
+                'cached': bool(job.get('cache_hit')),
+            }, 200
+        return {
+            'success': True,
+            'status': 'completed',
+            'job_id': job['id'],
+            'cached': bool(job.get('cache_hit')),
+            'summary': summary,
+        }, 200
+    if job['status'] == 'failed':
+        error = {
+            'code': job.get('error_code') or 'summary_failed',
+            'message': job.get('error_message') or '生成总结失败',
+            'retryable': bool(job.get('error_retryable')),
+        }
+        payload = {
+            'success': False,
+            'status': 'failed',
+            'job_id': job['id'],
+            'error': error,
+        }
+        if legacy:
+            payload['message'] = error['message']
+        return payload, 422
+    return {
+        'success': True,
+        'status': job['status'],
+        'job_id': job['id'],
+        'cached': False,
+    }, 202
+
+
+def require_ai_summary_access():
+    configured_token = str(config.get("AI_SUMMARY_ACCESS_TOKEN") or "").strip()
+    if not configured_token:
+        return ai_summary_api_response({
+            'success': False,
+            'message': 'AI 总结扩展接口尚未配置访问令牌',
+        }, 503)
+    request_token = request.headers.get('X-Yter-AI-Token', '')
+    if not hmac.compare_digest(request_token, configured_token):
+        return ai_summary_api_response({
+            'success': False,
+            'message': 'AI 总结访问令牌无效',
+        }, 401)
+    return None
+
+
 def extract_youtube_video_id(source_url):
     """从常见 YouTube 地址中提取 11 位视频 ID。"""
     if not isinstance(source_url, str) or not source_url.strip():
@@ -1196,19 +1265,30 @@ def serve_subtitle(filename, stream_index):
 
 @app.route('/api/ai_summary', methods=['POST'])
 def api_ai_summary():
-    """读取当前视频的内嵌字幕并按需生成 AI 总结。"""
+    """播放器兼容接口：命中持久化总结或创建本地字幕异步任务。"""
     if not ai_summary_is_configured():
-        return jsonify({"success": False, "message": "AI 总结尚未完成配置"}), 503
+        return ai_summary_api_response({"success": False, "message": "AI 总结尚未完成配置"}, 503)
 
     data = request.get_json(silent=True) or {}
+    job_id = data.get('job_id')
+    if isinstance(job_id, str) and job_id:
+        job = ai_summary_store.get_job(config['AI_SUMMARY_DB_PATH'], job_id)
+        if not job:
+            return ai_summary_api_response({
+                'success': False,
+                'message': 'AI 总结任务不存在',
+            }, 404)
+        payload, status = ai_summary_job_payload(job, legacy=True)
+        return ai_summary_api_response(payload, status)
+
     filename = data.get("filename")
     stream_index = data.get("stream_index")
     if not isinstance(filename, str) or not filename:
-        return jsonify({"success": False, "message": "缺少视频文件名"}), 400
+        return ai_summary_api_response({"success": False, "message": "缺少视频文件名"}, 400)
     if stream_index is not None and (
         isinstance(stream_index, bool) or not isinstance(stream_index, int)
     ):
-        return jsonify({"success": False, "message": "字幕流编号无效"}), 400
+        return ai_summary_api_response({"success": False, "message": "字幕流编号无效"}, 400)
 
     filepath = safe_join(FILES_DIR, filename)
     if (
@@ -1216,11 +1296,11 @@ def api_ai_summary():
         or not filepath.lower().endswith('.mp4')
         or not os.path.isfile(filepath)
     ):
-        return jsonify({"success": False, "message": "视频文件不存在"}), 404
+        return ai_summary_api_response({"success": False, "message": "视频文件不存在"}, 404)
 
     tracks = get_embedded_subtitles(filename)
     if not tracks:
-        return jsonify({"success": False, "message": "当前视频没有可用字幕"}), 400
+        return ai_summary_api_response({"success": False, "message": "当前视频没有可用字幕"}, 400)
     if stream_index is None:
         selected_track = tracks[0]
     else:
@@ -1229,56 +1309,104 @@ def api_ai_summary():
             None,
         )
         if selected_track is None:
-            return jsonify({"success": False, "message": "所选字幕流不存在"}), 400
+            return ai_summary_api_response({"success": False, "message": "所选字幕流不存在"}, 400)
 
-    stat = os.stat(filepath)
-    cache_key = (
-        filepath,
-        stat.st_mtime_ns,
-        stat.st_size,
-        selected_track["stream_index"],
-        str(config.get("AI_API_BASE_URL") or "").strip(),
-        str(config.get("AI_API_MODEL") or "").strip(),
-    )
-    try:
-        with ai_summary_cache_lock:
-            summary = ai_summary_cache.get(cache_key)
-            cached = summary is not None
-            if summary is None:
-                subtitle_text = extract_subtitle_text(
-                    filepath,
-                    selected_track["stream_index"],
-                )
-                if not subtitle_text:
-                    return jsonify({
-                        "success": False,
-                        "message": "字幕中没有可总结的文本",
-                    }), 400
-                summary = request_ai_summary(
-                    filename,
-                    selected_track["label"],
-                    subtitle_text,
-                )
-                if len(ai_summary_cache) >= AI_SUMMARY_CACHE_MAX_ITEMS:
-                    ai_summary_cache.pop(next(iter(ai_summary_cache)))
-                ai_summary_cache[cache_key] = summary
-    except requests.RequestException as exc:
-        app.logger.error(
-            "AI 总结接口请求失败: %s (%s)",
-            filename,
-            type(exc).__name__,
+    profile_key = ai_summary_store.summary_profile_key(config)
+    source_url = get_media_source_url(filename)
+    normalized_key = None
+    if source_url:
+        try:
+            normalized_key = ai_summary_store.normalize_source_url(source_url)
+        except ValueError:
+            normalized_key = None
+    if normalized_key:
+        summary = ai_summary_store.find_summary_for_url(
+            config['AI_SUMMARY_DB_PATH'],
+            normalized_key,
+            profile_key,
         )
-        return jsonify({"success": False, "message": "AI 接口请求失败"}), 502
-    except RuntimeError as exc:
-        app.logger.error("生成 AI 总结失败: %s (%s)", filename, exc)
-        return jsonify({"success": False, "message": str(exc)}), 500
+        if summary:
+            return ai_summary_api_response({
+                'success': True,
+                'status': 'completed',
+                'summary': summary['markdown'],
+                'subtitle': summary['subtitle_language'] or summary['subtitle_kind'],
+                'cached': True,
+            })
+    else:
+        normalized_key = ai_summary_store.local_source_key(filepath)
 
-    return jsonify({
-        "success": True,
-        "summary": summary,
-        "subtitle": selected_track["label"],
-        "cached": cached,
-    })
+    created = ai_summary_store.create_local_job(
+        config['AI_SUMMARY_DB_PATH'],
+        filename,
+        selected_track['stream_index'],
+        normalized_key,
+        profile_key,
+    )
+    if created['summary']:
+        summary = created['summary']
+        return ai_summary_api_response({
+            'success': True,
+            'status': 'completed',
+            'summary': summary['markdown'],
+            'subtitle': summary['subtitle_language'] or summary['subtitle_kind'],
+            'cached': True,
+        })
+    payload, status = ai_summary_job_payload(created['job'], legacy=True)
+    return ai_summary_api_response(payload, status)
+
+
+@app.route('/api/ai_summaries', methods=['POST'])
+def api_ai_summaries():
+    """Chrome 扩展按 URL 查询或创建 AI 总结任务。"""
+    denied = require_ai_summary_access()
+    if denied:
+        return denied
+    if not ai_summary_is_configured():
+        return ai_summary_api_response({
+            'success': False,
+            'message': 'AI 总结尚未完成配置',
+        }, 503)
+    data = request.get_json(silent=True) or {}
+    source_url = data.get('url')
+    try:
+        normalized_url = ai_summary_store.validate_public_url(source_url)
+    except ValueError as exc:
+        return ai_summary_api_response({
+            'success': False,
+            'message': str(exc),
+        }, 400)
+    created = ai_summary_store.create_url_job(
+        config['AI_SUMMARY_DB_PATH'],
+        source_url.strip(),
+        normalized_url,
+        ai_summary_store.summary_profile_key(config),
+    )
+    if created['summary']:
+        return ai_summary_api_response({
+            'success': True,
+            'status': 'completed',
+            'cached': True,
+            'job_id': None,
+            'summary': created['summary'],
+        })
+    payload, status = ai_summary_job_payload(created['job'])
+    return ai_summary_api_response(payload, status)
+
+
+@app.route('/api/ai_summaries/jobs/<job_id>', methods=['GET'])
+def api_ai_summary_job(job_id):
+    denied = require_ai_summary_access()
+    if denied:
+        return denied
+    job = ai_summary_store.get_job(config['AI_SUMMARY_DB_PATH'], job_id)
+    if not job:
+        return ai_summary_api_response({
+            'success': False,
+            'message': 'AI 总结任务不存在',
+        }, 404)
+    payload, status = ai_summary_job_payload(job)
+    return ai_summary_api_response(payload, status)
 
 @app.route('/api/add_task', methods=['POST'])
 def api_add_task():

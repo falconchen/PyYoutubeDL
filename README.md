@@ -145,17 +145,33 @@ curl -X POST http://localhost:5001/api/task_info \
 # 首次读取 downloader.log 末尾；后续请求传回响应中的 cursor 和 file_id
 curl "http://localhost:5001/api/downloader_log" \
   -H "X-Yter-Log-Token: <EXTENSION_LOG_TOKEN>"
+
+# 按 URL 查询或创建 AI 总结任务
+curl -X POST http://localhost:5000/api/ai_summaries \
+  -H "Content-Type: application/json" \
+  -H "X-Yter-AI-Token: <AI_SUMMARY_ACCESS_TOKEN>" \
+  -d '{"url":"https://www.youtube.com/watch?v=l38ceFOWOAE"}'
+
+# 查询异步 AI 总结任务
+curl http://localhost:5000/api/ai_summaries/jobs/<job_id> \
+  -H "X-Yter-AI-Token: <AI_SUMMARY_ACCESS_TOKEN>"
 ```
 
 `/api/task_info` 会返回任务的 `state`（`queued`、`downloading`、`completed`、`failed` 或 `missing`）和 `progress`。下载中任务的 `progress` 包含可用的 `percent`、`downloaded`、`total`、`speed`、`eta` 等字段；新任务完成后包含 `final_size_bytes`、`elapsed_seconds`、`average_speed_bytes_per_second`。视频或音频任务完成并且主媒体产物仍在本地时，还会返回对应的 `player_url`。
 
 对于没有完成摘要的旧任务，任务 API 只从仍存在的主媒体文件读取最终大小，不使用最后一个下载阶段的耗时和速率；无法可靠恢复的总耗时及平均速率会省略。未生成 `result.json` 的旧任务还会尝试从 downloader 的文件移动日志中恢复最终文件名；只有日志记录和本地文件都仍然存在时才会返回播放链接。
 
+AI 总结接口命中 SQLite 中当前接口、模型和提示词版本的记录时返回 HTTP 200；未命中时返回 HTTP 202、`job_id` 和 `Retry-After: 2`。任务完成后返回原始 Markdown；无字幕等确定性失败返回 HTTP 422。扩展接口必须使用独立的 `AI_SUMMARY_ACCESS_TOKEN`，令牌只通过 `X-Yter-AI-Token` 请求头传递。
+
+总结永久保存在 `AI_SUMMARY_DB_PATH` 指定的 SQLite 数据库中。数据库使用 WAL、外键和任务租约；模型、接口地址或内部提示词版本变化时生成新版本。字幕只在 `TMP_DIR/ai-summary/` 临时存在并在任务结束后删除，完成和失败的任务记录默认保留 30 天。`ai_summary_worker.py` 独立处理 URL 字幕下载、本地视频内嵌字幕和 AI 请求；预检使用实际生效的 yt-dlp 视频配置，但只下载字幕，不下载视频。
+
 ### Chrome 右键下载扩展
 
-仓库中的 `chrome-extension/` 是 Manifest V3 扩展。加载后，右键点击网页空白处或网页链接，可在“使用yter下载”二级菜单中选择“下载视频”或“下载音频”。空白处使用当前页面 URL，链接处优先使用链接 URL，扩展会调用 `/api/add_task` 创建对应任务。
+仓库中的 `chrome-extension/` 是 Manifest V3 扩展。加载后，右键点击网页空白处或网页链接，可在“使用yter下载”二级菜单中选择“下载视频”、“下载音频”或“AI总结”。空白处使用当前页面 URL，链接处优先使用链接 URL；下载操作调用 `/api/add_task`，AI 总结调用 `/api/ai_summaries`。
 
 任务提交后，扩展每 30 秒调用 `/api/task_info` 查询状态，并在下载完成或失败时发送 Chrome 通知。
+
+点击“AI总结”后，扩展会在当前页面注入隔离样式的浮层并显示任务状态。完成后安全渲染 Markdown，提供复制、展开/收起和关闭按钮。AI 令牌仅保存在 `chrome.storage.local` 并由扩展 Service Worker 使用，不会传入当前网页；页面不可用或已经离开时改用 Chrome 通知提示结果。
 
 左键点击浏览器工具栏中的扩展图标会直接显示服务地址设置和保存按钮，不再跳转后才配置。
 
@@ -198,6 +214,9 @@ video (2).mp4
 | `AUDIO_WEBDAV_OPTIONS` | object | 音频 WebDAV 远程存储配置 |
 | `BARK_DEVICE_TOKEN` | string | Bark 推送通知 Token |
 | `EXTENSION_LOG_TOKEN` | string | Chrome 扩展读取 `downloader.log` 的访问令牌；为空时禁用日志接口 |
+| `AI_SUMMARY_DB_PATH` | string | AI 总结 SQLite 数据库路径，默认 `./data/ai_summaries.sqlite3` |
+| `AI_SUMMARY_ACCESS_TOKEN` | string | Chrome 扩展调用 AI 总结接口的独立访问令牌；为空时禁用扩展接口 |
+| `AI_SUMMARY_JOB_RETENTION_DAYS` | int | 已完成和失败的 AI 总结任务记录保留天数，默认 30；总结正文不随任务清理 |
 | `TIMEZONE` | string | 时区，如 `Asia/Shanghai` |
 | `FLASK_HOST` | string | Flask 监听地址，默认 `0.0.0.0` |
 | `FLASK_DEBUG` | bool | Flask 调试模式 |

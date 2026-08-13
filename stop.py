@@ -10,6 +10,7 @@ import psutil
 BASE_DIR = os.path.realpath(os.path.dirname(os.path.abspath(__file__)))
 TARGET_SCRIPT_NAMES = {
     'app.py',
+    'ai_summary_worker.py',
     'downloader.py',
     'start.py',
     'webdav_uploader.py',

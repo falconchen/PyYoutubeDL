@@ -5,14 +5,26 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import app as app_module
+import ai_summary_store
 from app import app
 
 
 class TestPlayerPage(unittest.TestCase):
     def setUp(self):
+        self.summary_temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.summary_temp_dir.cleanup)
+        self.summary_db_path = str(
+            Path(self.summary_temp_dir.name) / 'ai-summaries.sqlite3'
+        )
+        self.config_patcher = patch.dict(
+            app_module.config,
+            {'AI_SUMMARY_DB_PATH': self.summary_db_path},
+        )
+        self.config_patcher.start()
+        self.addCleanup(self.config_patcher.stop)
+        ai_summary_store.init_db(self.summary_db_path)
         self.client = app.test_client()
         app.testing = True
-        app_module.ai_summary_cache.clear()
         self.source_url_patcher = patch('app.get_media_source_url', return_value='')
         self.source_url_patcher.start()
         self.addCleanup(self.source_url_patcher.stop)
@@ -459,22 +471,7 @@ class TestPlayerPage(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()['message'], '当前视频没有可用字幕')
 
-    def test_ai_summary_reads_selected_subtitle_calls_api_and_caches_result(self):
-        ffmpeg_result = subprocess.CompletedProcess(
-            args=['ffmpeg'],
-            returncode=0,
-            stdout=(
-                'WEBVTT\n\n00:00.000 --> 00:01.000\n<b>第一句</b>\n\n'
-                '00:01.000 --> 00:02.000\n第二句\n'
-            ).encode(),
-            stderr=b'',
-        )
-        ai_response = Mock()
-        ai_response.raise_for_status.return_value = None
-        ai_response.json.return_value = {
-            'choices': [{'message': {'content': '这是总结。'}}],
-        }
-
+    def test_ai_summary_creates_and_reuses_async_local_job(self):
         with tempfile.TemporaryDirectory() as files_dir:
             Path(files_dir, '带字幕.mp4').touch()
             with (
@@ -485,8 +482,6 @@ class TestPlayerPage(unittest.TestCase):
                         {'stream_index': 2, 'language': 'zh-Hans', 'label': '简体中文'},
                     ],
                 ),
-                patch('app.subprocess.run', return_value=ffmpeg_result) as ffmpeg_run,
-                patch('app.requests.post', return_value=ai_response) as post,
                 patch.dict(
                     app_module.config,
                     {
@@ -505,21 +500,10 @@ class TestPlayerPage(unittest.TestCase):
                     json={'filename': '带字幕.mp4', 'stream_index': 2},
                 )
 
-        self.assertEqual(first.status_code, 200)
-        self.assertEqual(first.get_json()['summary'], '这是总结。')
+        self.assertEqual(first.status_code, 202)
         self.assertFalse(first.get_json()['cached'])
-        self.assertTrue(second.get_json()['cached'])
-        self.assertEqual(ffmpeg_run.call_count, 1)
-        self.assertEqual(post.call_count, 1)
-        request_kwargs = post.call_args.kwargs
-        self.assertEqual(
-            request_kwargs['headers']['Authorization'],
-            'Bearer test-token',
-        )
-        self.assertEqual(request_kwargs['json']['model'], 'test-model')
-        prompt = request_kwargs['json']['messages'][1]['content']
-        self.assertIn('第一句\n第二句', prompt)
-        self.assertNotIn('00:00.000', prompt)
+        self.assertEqual(first.get_json()['status'], 'queued')
+        self.assertEqual(first.get_json()['job_id'], second.get_json()['job_id'])
 
     def test_probe_distinguishes_simplified_and_traditional_chinese_tracks(self):
         probe_result = subprocess.CompletedProcess(

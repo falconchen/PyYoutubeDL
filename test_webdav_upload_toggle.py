@@ -46,6 +46,28 @@ class TestWebDAVUploadToggle(unittest.TestCase):
 
         self.assertIn(('webdav_uploader.py', '上传器'), scripts)
 
+    def test_start_services_include_ai_worker_only_when_configured(self):
+        disabled = start.get_service_scripts({})
+        enabled = start.get_service_scripts({
+            'AI_API_BASE_URL': 'https://ai.example/v1/chat/completions',
+            'AI_API_MODEL': 'test-model',
+            'AI_API_TOKEN': 'test-token',
+        })
+
+        self.assertNotIn(('ai_summary_worker.py', 'AI总结Worker'), disabled)
+        self.assertIn(('ai_summary_worker.py', 'AI总结Worker'), enabled)
+
+    def test_start_services_include_ai_worker_only_when_configured(self):
+        disabled = start.get_service_scripts({})
+        enabled = start.get_service_scripts({
+            'AI_API_BASE_URL': 'https://ai.example/v1/chat/completions',
+            'AI_API_MODEL': 'test-model',
+            'AI_API_TOKEN': 'test-token',
+        })
+
+        self.assertNotIn(('ai_summary_worker.py', 'AI总结Worker'), disabled)
+        self.assertIn(('ai_summary_worker.py', 'AI总结Worker'), enabled)
+
     def test_runner_reports_disabled_upload_and_skips_uploader(self):
         result = subprocess.run(
             [
@@ -55,6 +77,7 @@ class TestWebDAVUploadToggle(unittest.TestCase):
 source ./runner.sh
 command() { return 0; }
 start_service() { echo "START:$1"; }
+ai_summary_status() { return 10; }
 webdav_upload_status() { return 10; }
 start_services
 ''',

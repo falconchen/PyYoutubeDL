@@ -546,8 +546,28 @@
                     })
                 });
                 var result = await response.json();
+                while (response.status === 202 && result.success && result.job_id) {
+                    var stageLabels = {
+                        queued: '总结任务已排队…',
+                        resolving: '正在读取媒体信息…',
+                        downloading_subtitle: '正在准备字幕…',
+                        generating: '正在调用 AI 生成总结…'
+                    };
+                    status.textContent = stageLabels[result.status] || '正在生成总结…';
+                    await new Promise(function (resolve) { setTimeout(resolve, 2000); });
+                    response = await fetch({{ url_for('api_ai_summary') | tojson }}, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ job_id: result.job_id })
+                    });
+                    result = await response.json();
+                }
                 if (!response.ok || !result.success) {
-                    throw new Error(result.message || '生成总结失败');
+                    throw new Error(
+                        result.message
+                        || (result.error && result.error.message)
+                        || '生成总结失败'
+                    );
                 }
                 aiSummaryResults[cacheKey] = result.summary;
                 if (currentFilename === requestedFilename) {

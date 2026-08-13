@@ -13,3 +13,5 @@ logs/
 *.local.conf
 firefox-cookies.txt
 youtube-cookies.txt
+data/
+chrome-extension/node_modules/

@@ -51,9 +51,11 @@ def get_domain_from_path():
 
 def get_service_scripts(runtime_config):
     """返回当前配置需要启动的后台服务。"""
-    from config_util import is_webdav_upload_enabled
+    from config_util import is_ai_summary_enabled, is_webdav_upload_enabled
 
     scripts = [('downloader.py', '下载器')]
+    if is_ai_summary_enabled(runtime_config):
+        scripts.append(('ai_summary_worker.py', 'AI总结Worker'))
     if is_webdav_upload_enabled(runtime_config):
         scripts.append(('webdav_uploader.py', '上传器'))
     return scripts
@@ -62,7 +64,7 @@ def start_processes():
     """启动下载器、上传器和Web应用进程"""
     # 确保在虚拟环境中运行
     restart_in_venv()
-    from config_util import is_webdav_upload_enabled, load_config
+    from config_util import is_ai_summary_enabled, is_webdav_upload_enabled, load_config
 
     # 获取脚本所在目录
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -73,6 +75,8 @@ def start_processes():
     scripts = get_service_scripts(runtime_config)
     if not is_webdav_upload_enabled(runtime_config):
         print("WebDAV上传已关闭，已跳过启动上传器。")
+    if not is_ai_summary_enabled(runtime_config):
+        print("AI总结尚未配置，已跳过启动AI总结Worker。")
 
     try:
         # 启动所有进程

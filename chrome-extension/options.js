@@ -2,6 +2,7 @@ const DEFAULT_SERVER_URL = 'https://yter.cellmean.com';
 const form = document.querySelector('#settings-form');
 const serverUrlInput = document.querySelector('#server-url');
 const logTokenInput = document.querySelector('#log-token');
+const aiSummaryTokenInput = document.querySelector('#ai-summary-token');
 const status = document.querySelector('#status');
 const openOptionsButton = document.querySelector('#open-options');
 
@@ -28,10 +29,11 @@ function setStatus(message, type) {
 async function restoreSettings() {
   const [synced, local] = await Promise.all([
     chrome.storage.sync.get({ serverUrl: DEFAULT_SERVER_URL }),
-    chrome.storage.local.get({ logToken: '' }),
+    chrome.storage.local.get({ logToken: '', aiSummaryToken: '' }),
   ]);
   serverUrlInput.value = synced.serverUrl;
   logTokenInput.value = local.logToken;
+  aiSummaryTokenInput.value = local.aiSummaryToken;
 }
 
 form.addEventListener('submit', async (event) => {
@@ -57,7 +59,10 @@ form.addEventListener('submit', async (event) => {
 
     await Promise.all([
       chrome.storage.sync.set({ serverUrl }),
-      chrome.storage.local.set({ logToken: logTokenInput.value.trim() }),
+      chrome.storage.local.set({
+        logToken: logTokenInput.value.trim(),
+        aiSummaryToken: aiSummaryTokenInput.value.trim(),
+      }),
     ]);
     serverUrlInput.value = serverUrl;
     setStatus('设置已保存，可以通过右键菜单提交下载。', 'success');

@@ -89,6 +89,15 @@ sys.exit(0 if is_webdav_upload_enabled(load_config()) else 10)
 '
 }
 
+ai_summary_status() {
+    python -c '
+import sys
+from config_util import is_ai_summary_enabled, load_config
+
+sys.exit(0 if is_ai_summary_enabled(load_config()) else 10)
+'
+}
+
 start_services() {
     local services_failed=0
     local webdav_status
@@ -101,6 +110,17 @@ start_services() {
     fi
 
     start_service "下载器" "downloader.py" || services_failed=1
+    if ai_summary_status; then
+        start_service "AI总结Worker" "ai_summary_worker.py" || services_failed=1
+    else
+        ai_summary_status_code=$?
+        if [ "$ai_summary_status_code" -eq 10 ]; then
+            echo "AI总结尚未配置，已跳过启动AI总结Worker。"
+        else
+            echo "无法读取AI总结配置，已跳过启动AI总结Worker。"
+            services_failed=1
+        fi
+    fi
     if webdav_upload_status; then
         start_service "上传器" "webdav_uploader.py" || services_failed=1
     else

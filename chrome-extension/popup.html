@@ -61,6 +61,20 @@
           >
         </div>
         <p class="help">令牌仅保存在本机，用于访问实时日志。</p>
+        <label class="secondary-label" for="ai-summary-token">AI总结访问令牌</label>
+        <div class="url-field">
+          <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18">
+            <path d="M7 10V8a5 5 0 0 1 10 0v2M6 10h12v10H6V10Zm6 4v2"/>
+          </svg>
+          <input
+            id="ai-summary-token"
+            name="ai-summary-token"
+            type="password"
+            autocomplete="off"
+            placeholder="服务器 AI 总结令牌"
+          >
+        </div>
+        <p class="help">令牌仅保存在本机，不会传入当前网页。</p>
         <button class="save-button" type="submit">
           <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18">
             <path d="M5 4h12l2 2v14H5V4Zm3 0v6h8V4M8 20v-6h8v6"/>
@@ -86,7 +100,7 @@
           设置
         </button>
       </div>
-      <span>v1.3.0</span>
+      <span>v1.4.0</span>
     </footer>
   </main>
   <script src="options.js"></script>

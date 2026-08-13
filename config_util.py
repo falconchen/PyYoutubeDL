@@ -24,6 +24,9 @@ DEFAULT_CONFIG = {
     "AI_API_BASE_URL": "",          # AI 总结使用的 chat/completions 兼容接口
     "AI_API_MODEL": "",             # AI 总结模型名称
     "AI_API_TOKEN": "",             # AI 总结接口 Token
+    "AI_SUMMARY_DB_PATH": "./data/ai_summaries.sqlite3", # AI 总结持久化数据库
+    "AI_SUMMARY_ACCESS_TOKEN": "",  # Chrome 扩展调用 AI 总结接口的独立令牌
+    "AI_SUMMARY_JOB_RETENTION_DAYS": 30, # 已完成/失败 AI 任务记录保留天数
     "BARK_DEVICE_TOKEN": "",        # Bark 通知推送 Token
     "EXTENSION_LOG_TOKEN": "",      # Chrome 扩展读取 downloader.log 的访问令牌；为空时禁用接口
     
@@ -45,7 +48,7 @@ DEFAULT_CONFIG = {
 # 需要转换为绝对路径的配置项
 PATH_CONFIG_KEYS = [
     "URLS_DIR",  "TMP_DIR", 
-    "FILES_DIR", "LOG_DIR"
+    "FILES_DIR", "LOG_DIR", "AI_SUMMARY_DB_PATH"
 ]
 
 
@@ -59,6 +62,15 @@ def build_dated_output_template(output_template, timezone_name):
 def is_webdav_upload_enabled(runtime_config):
     """返回是否启用 WebDAV 上传；未配置时默认启用。"""
     return bool(runtime_config.get("ENABLE_WEBDAV_UPLOAD", True))
+
+
+def is_ai_summary_enabled(runtime_config):
+    """AI 接口三项配置完整时启用持久化总结 worker。"""
+    return all(
+        isinstance(runtime_config.get(key), str)
+        and runtime_config.get(key).strip()
+        for key in ('AI_API_BASE_URL', 'AI_API_MODEL', 'AI_API_TOKEN')
+    )
 
 
 def load_config(default_config=None, config_keys=None):

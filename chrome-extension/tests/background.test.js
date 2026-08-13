@@ -17,6 +17,8 @@ function createHarness() {
   const localStorage = {};
   const alarms = new Map();
   const notifications = [];
+  const overlayMessages = [];
+  const injectedScripts = [];
   const taskStates = new Map();
   let nextTaskNumber = 1;
   let pollError = null;
@@ -27,6 +29,7 @@ function createHarness() {
     installed: createEvent(),
     startup: createEvent(),
     actionClicked: createEvent(),
+    runtimeMessage: createEvent(),
   };
 
   function storageArea(values) {
@@ -74,12 +77,26 @@ function createHarness() {
     },
     runtime: {
       onInstalled: events.installed,
+      onMessage: events.runtimeMessage,
       onStartup: events.startup,
       openOptionsPage() {},
     },
     storage: {
       local: storageArea(localStorage),
       sync: storageArea({ serverUrl: 'https://yter.example' }),
+    },
+    scripting: {
+      async executeScript(options) {
+        injectedScripts.push(options);
+      },
+    },
+    tabs: {
+      async get(tabId) {
+        return { id: tabId, url: 'https://video.example/watch/1' };
+      },
+      async sendMessage(tabId, message) {
+        overlayMessages.push({ tabId, message });
+      },
     },
   };
 
@@ -118,6 +135,21 @@ function createHarness() {
       };
     }
 
+    if (url.endsWith('/api/ai_summaries')) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            success: true,
+            status: 'completed',
+            cached: true,
+            summary: { title: '测试视频', markdown: '# 已保存总结' },
+          };
+        },
+      };
+    }
+
     throw new Error(`Unexpected URL: ${url}`);
   }
 
@@ -137,6 +169,8 @@ function createHarness() {
     events,
     localStorage,
     notifications,
+    overlayMessages,
+    injectedScripts,
     taskStates,
     setPollError(error) {
       pollError = error;
@@ -219,12 +253,37 @@ test('toolbar action opens the inline settings popup', () => {
     'utf8',
   );
 
-  assert.equal(manifest.version, '1.3.0');
+  assert.equal(manifest.version, '1.4.0');
   assert.equal(manifest.action.default_popup, 'popup.html');
   assert.match(popup, /id="settings-form"/);
   assert.match(popup, /id="server-url"/);
   assert.match(popup, /id="status"/);
+  assert.match(popup, /id="ai-summary-token"/);
   assert.match(popup, /src="options\.js"/);
+});
+
+test('AI summary menu injects a safe local overlay and returns cached content', async () => {
+  const harness = createHarness();
+  harness.localStorage.aiSummaryToken = 'ai-token';
+
+  await harness.events.contextClicked.listener(
+    {
+      menuItemId: 'yter-ai-summary',
+      pageUrl: 'https://video.example/watch/1',
+    },
+    { id: 7, url: 'https://video.example/watch/1' },
+  );
+
+  assert.equal(harness.injectedScripts.length, 1);
+  assert.equal(harness.injectedScripts[0].files[0], 'summary-overlay.bundle.js');
+  assert.equal(harness.overlayMessages.at(-1).message.type, 'completed');
+  assert.equal(harness.overlayMessages.at(-1).message.summary.markdown, '# 已保存总结');
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'summary-overlay-entry.js'),
+    'utf8',
+  );
+  assert.match(source, /DOMPurify\.sanitize/);
+  assert.match(source, /FORBID_TAGS/);
 });
 
 test('extension includes a token-protected live log page', () => {

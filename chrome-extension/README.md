@@ -1,6 +1,6 @@
 # 使用 yter 下载（Chrome 扩展）
 
-右键点击网页空白处或网页中的链接，在“使用yter下载”二级菜单中选择“下载视频”或“下载音频”，扩展会调用 yter 的 `/api/add_task` 接口创建任务。点击空白处时提交当前页面 URL，点击链接时优先提交该链接的 URL。
+右键点击网页空白处或网页中的链接，在“使用yter下载”二级菜单中选择“下载视频”、“下载音频”或“AI总结”。点击空白处时提交当前页面 URL，点击链接时优先提交该链接的 URL。
 
 ## 安装
 
@@ -14,16 +14,19 @@
 实时日志需要服务端在 `config.json` 中配置足够长的随机令牌，并在扩展设置中填写相同值：
 
 ```json
-"EXTENSION_LOG_TOKEN": "replace_with_a_long_random_token"
+"EXTENSION_LOG_TOKEN": "replace_with_a_long_random_token",
+"AI_SUMMARY_ACCESS_TOKEN": "replace_with_a_different_long_random_token"
 ```
 
 令牌为空时，服务端 `/api/downloader_log` 返回 503 并保持禁用。扩展把令牌保存在 `chrome.storage.local`，不会随 Chrome 账号同步，也不会放入 URL。
+
+AI 总结使用独立令牌和 `X-Yter-AI-Token` 请求头。点击“AI总结”后会立即在当前页面显示 Shadow DOM 浮层；缓存未命中时扩展轮询异步任务，完成后安全渲染 Markdown，并提供复制、展开/收起和关闭按钮。AI 令牌不会发送给当前网页。
 
 ## 使用与验证
 
 1. 在任意网页空白处或网页链接上点击右键。
 2. 打开“使用yter下载”。
-3. 选择“下载视频”或“下载音频”。
+3. 选择“下载视频”、“下载音频”或“AI总结”。
 4. Chrome 通知显示任务编号即代表 yter 已接受任务。
 5. 扩展每 30 秒通过 `/api/task_info` 查询一次；下载完成或失败后会再次发送 Chrome 通知。
 
@@ -31,6 +34,6 @@
 
 点击弹窗底部“实时日志”会打开日志页。页面首次显示 `downloader.log` 末尾约 64 KB，之后每秒只读取新增内容；支持暂停、继续、重新连接、清空当前显示和关闭自动滚动。日志轮转后会自动切换到新文件。
 
-扩展只读取当前页面 URL 或用户右键点击的链接，不注入页面脚本。菜单旁的图标由 Chrome 使用扩展的 16×16 图标显示；Chrome 的 `contextMenus` API 不支持为每个子菜单单独指定图标。
+扩展只读取当前页面 URL 或用户右键点击的链接。仅在用户主动点击“AI总结”后，使用 `activeTab` 权限注入本地打包的总结浮层；不会把服务器令牌注入页面。菜单旁的图标由 Chrome 使用扩展的 16×16 图标显示；Chrome 的 `contextMenus` API 不支持为每个子菜单单独指定图标。
 
 待完成任务保存在 `chrome.storage.local` 中。关闭下载页面或扩展 Service Worker 被 Chrome 回收不会丢失跟踪状态；Chrome 重启后会恢复轮询。电脑休眠期间不会查询，唤醒后再继续。网络请求失败会保留任务并在下一轮重试；连续 3 次找不到任务时会通知用户并停止跟踪。

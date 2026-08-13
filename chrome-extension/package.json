@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "esbuild summary-overlay-entry.js --bundle --format=iife --platform=browser --target=chrome120 --outfile=summary-overlay.bundle.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "dompurify": "3.4.13",
+    "marked": "18.0.7"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.8"
+  }
+}

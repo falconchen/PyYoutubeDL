@@ -2,8 +2,11 @@ const DEFAULT_SERVER_URL = 'https://yter.cellmean.com';
 const MENU_PARENT = 'yter-download';
 const MENU_VIDEO = 'yter-download-video';
 const MENU_AUDIO = 'yter-download-audio';
+const MENU_AI_SUMMARY = 'yter-ai-summary';
 const PENDING_TASKS_KEY = 'pendingTasks';
+const PENDING_SUMMARIES_KEY = 'pendingAiSummaries';
 const TASK_POLL_ALARM = 'yter-task-poll';
+const SUMMARY_POLL_ALARM = 'yter-ai-summary-poll';
 const TASK_POLL_INTERVAL_MINUTES = 0.5;
 const MISSING_POLL_LIMIT = 3;
 
@@ -32,6 +35,13 @@ function createContextMenus() {
       contexts: ['link', 'page'],
       documentUrlPatterns: ['http://*/*', 'https://*/*'],
     });
+    chrome.contextMenus.create({
+      id: MENU_AI_SUMMARY,
+      parentId: MENU_PARENT,
+      title: 'AI总结',
+      contexts: ['link', 'page'],
+      documentUrlPatterns: ['http://*/*', 'https://*/*'],
+    });
   });
 }
 
@@ -42,6 +52,192 @@ function normalizeServerUrl(value) {
 async function readServerUrl() {
   const stored = await chrome.storage.sync.get({ serverUrl: DEFAULT_SERVER_URL });
   return normalizeServerUrl(stored.serverUrl);
+}
+
+async function readAiSummaryToken() {
+  const stored = await chrome.storage.local.get({ aiSummaryToken: '' });
+  return (stored.aiSummaryToken || '').trim();
+}
+
+async function sendSummaryOverlayMessage(tabId, message) {
+  await chrome.tabs.sendMessage(tabId, {
+    channel: 'yter-ai-summary',
+    ...message,
+  });
+}
+
+async function injectSummaryOverlay(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['summary-overlay.bundle.js'],
+  });
+}
+
+async function fetchAiSummaryJob(serverUrl, token, jobId) {
+  const response = await fetch(`${serverUrl}/api/ai_summaries/jobs/${jobId}`, {
+    headers: { 'X-Yter-AI-Token': token },
+  });
+  let result = {};
+  try {
+    result = await response.json();
+  } catch (error) {
+    // 非 JSON 错误页由状态分支处理。
+  }
+  if (![200, 202, 422].includes(response.status)) {
+    throw new Error(result.message || `HTTP ${response.status}`);
+  }
+  return { response, result };
+}
+
+async function submitAiSummary(serverUrl, token, sourceUrl) {
+  const response = await fetch(`${serverUrl}/api/ai_summaries`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Yter-AI-Token': token,
+    },
+    body: JSON.stringify({ url: sourceUrl }),
+  });
+  let result = {};
+  try {
+    result = await response.json();
+  } catch (error) {
+    // 非 JSON 错误页由状态分支处理。
+  }
+  if (![200, 202].includes(response.status) || !result.success) {
+    throw new Error(result.message || `HTTP ${response.status}`);
+  }
+  return { response, result };
+}
+
+async function getPendingSummaries() {
+  const stored = await chrome.storage.local.get({ [PENDING_SUMMARIES_KEY]: {} });
+  return stored[PENDING_SUMMARIES_KEY] || {};
+}
+
+async function savePendingSummaries(pending) {
+  await chrome.storage.local.set({ [PENDING_SUMMARIES_KEY]: pending });
+  if (Object.keys(pending).length) {
+    const alarm = await chrome.alarms.get(SUMMARY_POLL_ALARM);
+    if (!alarm) {
+      await chrome.alarms.create(SUMMARY_POLL_ALARM, {
+        periodInMinutes: TASK_POLL_INTERVAL_MINUTES,
+      });
+    }
+  } else {
+    await chrome.alarms.clear(SUMMARY_POLL_ALARM);
+  }
+}
+
+async function ensureSummaryPollingAlarm() {
+  await savePendingSummaries(await getPendingSummaries());
+}
+
+async function trackAiSummary(jobId, tabId, pageUrl, serverUrl) {
+  const pending = await getPendingSummaries();
+  pending[jobId] = { jobId, tabId, pageUrl, serverUrl, submittedAt: Date.now() };
+  await savePendingSummaries(pending);
+}
+
+const SUMMARY_STAGE_TEXT = {
+  queued: '总结任务已排队…',
+  resolving: '正在读取媒体信息…',
+  downloading_subtitle: '正在下载字幕…',
+  generating: '正在调用 AI 生成总结…',
+};
+
+async function deliverAiSummaryResult(pendingItem, result) {
+  if (result.status === 'completed' && result.summary) {
+    try {
+      const tab = await chrome.tabs.get(pendingItem.tabId);
+      if (!tab || tab.url !== pendingItem.pageUrl) throw new Error('页面已经离开');
+      await sendSummaryOverlayMessage(pendingItem.tabId, {
+        type: 'completed',
+        summary: result.summary,
+        cached: Boolean(result.cached),
+      });
+    } catch (error) {
+      await showNotification('yter AI总结已完成', result.summary.title || pendingItem.pageUrl);
+    }
+    return true;
+  }
+  if (result.status === 'failed') {
+    const message = result.error?.message || '生成总结失败';
+    try {
+      await sendSummaryOverlayMessage(pendingItem.tabId, { type: 'error', text: message });
+    } catch (error) {
+      await showNotification('yter AI总结失败', message);
+    }
+    return true;
+  }
+  try {
+    await sendSummaryOverlayMessage(pendingItem.tabId, {
+      type: 'pending',
+      text: SUMMARY_STAGE_TEXT[result.status] || '正在生成总结…',
+      jobId: pendingItem.jobId,
+    });
+  } catch (error) {
+    // alarm 后续仍会继续跟踪。
+  }
+  return false;
+}
+
+async function pollAiSummary(jobId) {
+  const pending = await getPendingSummaries();
+  const item = pending[jobId];
+  if (!item) return { success: false, message: '任务不再跟踪' };
+  const token = await readAiSummaryToken();
+  if (!token) throw new Error('请先配置 AI总结访问令牌');
+  const { result } = await fetchAiSummaryJob(item.serverUrl, token, jobId);
+  if (await deliverAiSummaryResult(item, result)) {
+    delete pending[jobId];
+    await savePendingSummaries(pending);
+  }
+  return result;
+}
+
+async function pollAllAiSummaries() {
+  const pending = await getPendingSummaries();
+  for (const jobId of Object.keys(pending)) {
+    try {
+      await pollAiSummary(jobId);
+    } catch (error) {
+      console.warn(`无法轮询 AI 总结任务 ${jobId}`, error);
+    }
+  }
+}
+
+async function handleAiSummaryClick(targetUrl, tab) {
+  if (!tab || typeof tab.id !== 'number') return;
+  await injectSummaryOverlay(tab.id);
+  await sendSummaryOverlayMessage(tab.id, { type: 'pending', text: '正在查询已保存的总结…' });
+  const [serverUrl, token] = await Promise.all([readServerUrl(), readAiSummaryToken()]);
+  if (!token) {
+    await sendSummaryOverlayMessage(tab.id, {
+      type: 'error',
+      text: '请先在扩展设置中填写 AI总结访问令牌。',
+    });
+    return;
+  }
+  try {
+    const { result } = await submitAiSummary(serverUrl, token, targetUrl);
+    if (result.status === 'completed') {
+      await sendSummaryOverlayMessage(tab.id, {
+        type: 'completed',
+        summary: result.summary,
+        cached: Boolean(result.cached),
+      });
+      return;
+    }
+    await trackAiSummary(result.job_id, tab.id, tab.url, serverUrl);
+    await sendSummaryOverlayMessage(tab.id, {
+      type: 'pending',
+      text: SUMMARY_STAGE_TEXT[result.status] || '总结任务已提交…',
+      jobId: result.job_id,
+    });
+  } catch (error) {
+    await sendSummaryOverlayMessage(tab.id, { type: 'error', text: error.message });
+  }
 }
 
 async function showNotification(title, message, notificationId) {
@@ -264,6 +460,9 @@ chrome.runtime.onInstalled.addListener((details) => {
   ensureTaskPollingAlarm().catch((error) => {
     console.warn('恢复 yter 任务轮询失败', error);
   });
+  ensureSummaryPollingAlarm().catch((error) => {
+    console.warn('恢复 AI 总结任务轮询失败', error);
+  });
   if (details.reason === 'install') {
     chrome.runtime.openOptionsPage();
   }
@@ -274,6 +473,17 @@ chrome.runtime.onStartup.addListener(() => {
   ensureTaskPollingAlarm().catch((error) => {
     console.warn('恢复 yter 任务轮询失败', error);
   });
+  ensureSummaryPollingAlarm().catch((error) => {
+    console.warn('恢复 AI 总结任务轮询失败', error);
+  });
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== 'poll-yter-ai-summary' || !message.jobId) return undefined;
+  pollAiSummary(message.jobId)
+    .then((result) => sendResponse({ success: true, result }))
+    .catch((error) => sendResponse({ success: false, message: error.message }));
+  return true;
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -282,16 +492,24 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       console.warn('轮询 yter 任务失败', error);
     });
   }
+  if (alarm.name === SUMMARY_POLL_ALARM) {
+    return pollAllAiSummaries();
+  }
   return undefined;
 });
 
-chrome.contextMenus.onClicked.addListener(async (info) => {
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  const targetUrl = info.linkUrl || info.pageUrl;
+  if (info.menuItemId === MENU_AI_SUMMARY && targetUrl) {
+    return handleAiSummaryClick(targetUrl, tab).catch(async (error) => {
+      await showNotification('yter AI总结失败', error.message);
+    });
+  }
   const typeByMenuId = {
     [MENU_VIDEO]: 'video',
     [MENU_AUDIO]: 'audio',
   };
   const type = typeByMenuId[info.menuItemId];
-  const targetUrl = info.linkUrl || info.pageUrl;
   if (!type || !targetUrl) {
     return;
   }

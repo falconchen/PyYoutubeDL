@@ -18,6 +18,9 @@
   "BARK_DEVICE_TOKEN": "your_bark_device_token",
   "BARK_ICON_URL": "https://photo.cellmean.com/i/2025/05/22/jyxhwo-0.webp",
   "EXTENSION_LOG_TOKEN": "replace_with_a_long_random_token",
+  "AI_SUMMARY_DB_PATH": "./data/ai_summaries.sqlite3",
+  "AI_SUMMARY_ACCESS_TOKEN": "replace_with_a_different_long_random_token",
+  "AI_SUMMARY_JOB_RETENTION_DAYS": 30,
   "VIDEO_WEBDAV_OPTIONS": {
     "webdav_hostname": "https://your.webdav.host",
     "webdav_login": "your_login",
