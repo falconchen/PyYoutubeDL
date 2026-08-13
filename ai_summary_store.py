@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 PROMPT_VERSION = 1
 YOUTUBE_HOSTS = {
     'youtube.com',
@@ -26,6 +26,48 @@ YOUTUBE_HOSTS = {
 
 def now_ts():
     return int(time.time())
+
+
+def repair_utf8_mojibake(value):
+    """修复 UTF-8 字节被按 ISO-8859-1 解码的文本；其他文本保持原样。"""
+    if not isinstance(value, str) or not any('\x80' <= char <= '\x9f' for char in value):
+        return value
+    try:
+        repaired = value.encode('latin-1').decode('utf-8')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value
+    original_controls = sum('\x80' <= char <= '\x9f' for char in value)
+    repaired_controls = sum('\x80' <= char <= '\x9f' for char in repaired)
+    return repaired if repaired_controls < original_controls else value
+
+
+def _repair_stored_mojibake(db):
+    """迁移已保存的乱码总结和任务增量，返回修复字段数量。"""
+    repaired_count = 0
+    table_names = {
+        row['name'] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    targets = []
+    if 'ai_summaries' in table_names:
+        targets.append(('ai_summaries', 'id', 'summary_markdown'))
+    if 'ai_summary_jobs' in table_names:
+        columns = {row['name'] for row in db.execute('PRAGMA table_info(ai_summary_jobs)')}
+        if 'partial_markdown' in columns:
+            targets.append(('ai_summary_jobs', 'id', 'partial_markdown'))
+    for table_name, id_column, text_column in targets:
+        rows = db.execute(
+            f'SELECT {id_column}, {text_column} FROM {table_name} WHERE {text_column} != ?',
+            ('',),
+        ).fetchall()
+        for row in rows:
+            repaired = repair_utf8_mojibake(row[text_column])
+            if repaired != row[text_column]:
+                db.execute(
+                    f'UPDATE {table_name} SET {text_column} = ? WHERE {id_column} = ?',
+                    (repaired, row[id_column]),
+                )
+                repaired_count += 1
+    return repaired_count
 
 
 def summary_profile_key(runtime_config):
@@ -234,13 +276,17 @@ def init_db(db_path):
                 if statement.strip():
                     db.execute(statement)
             db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
-        elif version == 1:
+        if version == 1:
             db.execute(
                 "ALTER TABLE ai_summary_jobs ADD COLUMN partial_markdown TEXT NOT NULL DEFAULT ''"
             )
             db.execute(
                 'ALTER TABLE ai_summary_jobs ADD COLUMN stream_revision INTEGER NOT NULL DEFAULT 0'
             )
+            version = 2
+            db.execute('PRAGMA user_version = 2')
+        if version == 2:
+            _repair_stored_mojibake(db)
             db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
         db.commit()
 

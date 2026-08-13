@@ -20,9 +20,9 @@ class TestAiSummaryWorker(unittest.TestCase):
             def iter_lines(self, decode_unicode=False):
                 self.decode_unicode = decode_unicode
                 return iter([
-                    'data: {"choices":[{"delta":{"content":"## 概述"}}]}',
-                    'data: {"choices":[{"delta":{"content":"\\n要点"}}]}',
-                    'data: [DONE]',
+                    'data: {"choices":[{"delta":{"content":"## 概述"}}]}'.encode(),
+                    'data: {"choices":[{"delta":{"content":"\\n要点"}}]}'.encode(),
+                    b'data: [DONE]',
                 ])
 
         runtime = {
@@ -43,6 +43,7 @@ class TestAiSummaryWorker(unittest.TestCase):
         self.assertEqual(partials, ['## 概述', '## 概述\n要点'])
         self.assertTrue(post.call_args.kwargs['json']['stream'])
         self.assertTrue(post.call_args.kwargs['stream'])
+        self.assertFalse(post.return_value.decode_unicode)
 
     def test_prefers_configured_requested_subtitle(self):
         selected = worker.select_summary_subtitle({

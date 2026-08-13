@@ -700,7 +700,7 @@ def request_ai_summary(filename, subtitle_label, subtitle_text, on_delta=None):
             if on_delta:
                 on_delta(content)
     else:
-        for raw_line in response.iter_lines(decode_unicode=True):
+        for raw_line in response.iter_lines(decode_unicode=False):
             if isinstance(raw_line, bytes):
                 raw_line = raw_line.decode('utf-8', errors='replace')
             line = (raw_line or '').strip()
@@ -718,7 +718,7 @@ def request_ai_summary(filename, subtitle_label, subtitle_text, on_delta=None):
                 chunks.append(delta)
                 if on_delta:
                     on_delta(''.join(chunks))
-    content = ''.join(chunks).strip()
+    content = ai_summary_store.repair_utf8_mojibake(''.join(chunks)).strip()
     if not content:
         raise RuntimeError("AI 接口未返回总结内容")
     return content

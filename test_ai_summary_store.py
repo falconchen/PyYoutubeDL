@@ -17,7 +17,7 @@ class TestAiSummaryStore(unittest.TestCase):
 
     def test_initializes_wal_schema(self):
         with store.connect(self.db_path) as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 2)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 3)
             self.assertEqual(
                 db.execute('PRAGMA journal_mode').fetchone()[0].lower(),
                 'wal',
@@ -34,9 +34,37 @@ class TestAiSummaryStore(unittest.TestCase):
             columns = {
                 row[1] for row in db.execute('PRAGMA table_info(ai_summary_jobs)')
             }
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 2)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 3)
         self.assertIn('partial_markdown', columns)
         self.assertIn('stream_revision', columns)
+
+    def test_repairs_utf8_bytes_decoded_as_latin_one(self):
+        original = '简短概述：这是中文总结。'
+        mojibake = original.encode('utf-8').decode('latin-1')
+        self.assertEqual(store.repair_utf8_mojibake(mojibake), original)
+        self.assertEqual(store.repair_utf8_mojibake(original), original)
+
+    def test_version_two_migration_repairs_saved_summary(self):
+        url = 'https://video.example/mojibake'
+        job = store.create_url_job(self.db_path, url, url, self.profile)['job']
+        media_id = store.upsert_media(
+            self.db_path, 'test', 'mojibake', url, '标题', aliases=(url,),
+        )
+        original = '## 简短概述\n这是中文总结。'
+        mojibake = original.encode('utf-8').decode('latin-1')
+        store.save_summary_and_complete(
+            self.db_path, job['id'], media_id, self.profile, 'model',
+            'zh', 'manual', 'hash', mojibake,
+        )
+        with store.connect(self.db_path) as db:
+            db.execute('PRAGMA user_version = 2')
+            db.commit()
+
+        store.init_db(self.db_path)
+
+        summary = store.find_summary_for_url(self.db_path, url, self.profile)
+        self.assertEqual(summary['markdown'], original)
+        self.assertEqual(store.get_job(self.db_path, job['id'])['partial_markdown'], original)
 
     def test_normalizes_youtube_aliases(self):
         expected = 'https://www.youtube.com/watch?v=l38ceFOWOAE'

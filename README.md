@@ -165,6 +165,8 @@ AI 总结接口命中 SQLite 中当前接口、模型和提示词版本的记录
 
 总结永久保存在 `AI_SUMMARY_DB_PATH` 指定的 SQLite 数据库中。数据库使用 WAL、外键和任务租约；模型、接口地址或内部提示词版本变化时生成新版本。字幕只在 `TMP_DIR/ai-summary/` 临时存在并在任务结束后删除，完成和失败的任务记录默认保留 30 天。`ai_summary_worker.py` 独立处理 URL 字幕下载、本地视频内嵌字幕和 AI 请求；预检使用实际生效的 yt-dlp 视频配置，但只下载字幕，不下载视频。
 
+数据库迁移版本 3 会修复早期流式接口在缺少 charset 时将 UTF-8 中文误按 ISO-8859-1 解码而产生的典型乱码；新请求始终按 UTF-8 解码上游 SSE 字节。迁移只处理具有明确 C1 控制字符特征且可无损还原的文本。
+
 AI Worker 的运行日志写入 `LOG_DIR/ai-summary-worker.log`，正常任务会记录领取、媒体解析、字幕选择与获取、AI 调用、缓存命中和完成阶段。日志只记录任务标识及必要的阶段元数据，不记录访问令牌、字幕正文或总结正文。
 
 反向代理需要允许流接口保持长连接并禁用响应缓冲。应用已返回 `X-Accel-Buffering: no` 和 `Cache-Control: no-store, private`；如果代理未遵循该响应头，需要在 `/api/ai_summary/` 和 `/api/ai_summaries/` 对应位置显式设置 `proxy_buffering off`。
