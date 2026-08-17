@@ -369,7 +369,8 @@
             visualizerAnalyser.getByteFrequencyData(visualizerFrequencyData);
 
             var horizontalPadding = Math.max(14, width * 0.035);
-            var controlBarClearance = Math.max(48, height * 0.14);
+            // 将柱形基线固定在播放进度条上方的窄安全区内，避免底部留下大块空白。
+            var controlBarClearance = Math.max(46, Math.min(54, height * 0.1));
             var baseline = height - controlBarClearance;
             var maximumBarHeight = height * 0.3;
             var barCount = Math.max(24, Math.min(64, Math.floor(width / 14)));

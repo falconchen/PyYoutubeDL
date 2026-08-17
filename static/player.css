@@ -166,7 +166,7 @@
 
 .audio-player-page .vjs-poster img {
     object-fit: cover;
-    filter: blur(16px) saturate(0.82) brightness(0.82);
+    filter: blur(4px) saturate(0.82) brightness(0.82);
     transform: scale(1.08);
 }
 
