@@ -357,6 +357,17 @@ class TestDownloaderMove(unittest.TestCase):
 
         self.assertEqual(result, ('zh', '人工字幕'))
 
+    def test_subtitle_fallback_ignores_danmaku_and_live_chat(self):
+        result = downloader.select_subtitle_fallback({
+            'requested_subtitles': None,
+            'subtitles': {
+                'danmaku': [{'ext': 'xml'}],
+                'live_chat': [{'ext': 'json'}],
+            },
+        })
+
+        self.assertIsNone(result)
+
     def test_subtitle_fallback_prefers_any_manual_track_over_translation(self):
         result = downloader.select_subtitle_fallback({
             'requested_subtitles': None,

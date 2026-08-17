@@ -38,6 +38,10 @@ VIDEO_OUTPUT_EXTENSIONS = {'.avi', '.flv', '.mkv', '.mov', '.mp4', '.webm'}
 AUDIO_OUTPUT_EXTENSIONS = {'.aac', '.flac', '.m4a', '.mp3', '.ogg', '.opus', '.wav'}
 SUBTITLE_LANGUAGE_PREFERENCES = ('zh-Hans', 'zh-Hant', 'zh', 'en')
 SUBTITLE_TRANSLATION_PREFIXES = ('zh-Hans-', 'zh-Hant-', 'zh-', 'en-')
+NON_SUMMARY_SUBTITLE_LANGUAGES = {
+    'live_chat',
+    'danmaku',
+}
 SUBTITLE_PROBE_TIMEOUT_SECONDS = 120
 
 
@@ -51,7 +55,7 @@ def _available_subtitle_languages(subtitle_map):
         if (
             isinstance(language, str)
             and language
-            and language != 'live_chat'
+            and language.lower() not in NON_SUMMARY_SUBTITLE_LANGUAGES
             and isinstance(formats, list)
             and formats
         )
