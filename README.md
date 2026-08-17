@@ -73,7 +73,7 @@ journalctl -u pyyoutubedl -f    # 实时日志
 
 ### Web 界面
 
-启动后访问 `http://<host>:5001`，通过网页提交 YouTube/小红书/Bilibili 等链接，选择视频或音频模式即可下载。
+启动后访问 `http://<host>:5100`，通过网页提交 YouTube/小红书/Bilibili 等链接，选择视频或音频模式即可下载。
 
 站点提供以下公开信息页面，并在下载页、视频播放器和音频播放器页脚提供入口：
 
@@ -111,11 +111,13 @@ AI 返回的 Markdown 会在浏览器中转换为经过清洗的 HTML；为避�
 
 在播放列表中手动切换视频，或当前视频结束后自动播放下一条时，播放器会同步更新地址栏中的 `file` 参数，便于复制当前视频的播放链接。
 
-音频播放器使用 Video.js `audioPosterMode`，保留 16:9 封面并隐藏视频专用画面。页面会从音频 metadata 的 `purl` 或 `comment` 读取 YouTube 视频 ID，依次尝试 `maxresdefault.jpg`、`hqdefault.jpg`，失败时使用 `AUDIO_PLAYER_FALLBACK_COVER_URL`。封面由浏览器直接访问 `i.ytimg.com`，服务器不会额外保存图片文件。
+音频播放器使用 Video.js `audioPosterMode`，保留 16:9 封面并隐藏视频专用画面。页面会从音频 metadata 的 `purl` 或 `comment` 读取 YouTube 视频 ID，依次尝试 `maxresdefault.jpg`、`hqdefault.jpg`，失败时使用 `AUDIO_PLAYER_FALLBACK_COVER_URL`。视频播放器也会使用相同来源字段，在开始播放前显示可用的 YouTube 封面，并在切换视频时同步更新；没有可识别的 YouTube 来源时仍可正常播放，只是不显示封面。封面由浏览器直接访问 `i.ytimg.com`，服务器不会额外保存图片文件。
 
 下载器会在调用 yt-dlp 时为视频和音频统一追加 `--add-metadata`，不依赖 `yt-dlp.conf`、`yta-dlp.conf` 或对应的本机覆盖配置。新下载的媒体会尽可能写入标题、作者、来源页面 URL 等平台可提供的 metadata；具体字段仍取决于来源平台和输出容器支持。
 
-视频和音频播放器会读取媒体 metadata 中的 `purl` 或 `comment`，在当前媒体标题下方显示可点击的原始链接；切换播放列表条目时会同步更新。没有有效 `http/https` 来源链接时不显示该区域。
+视频和音频播放器会读取媒体 metadata 中的 `title`、`artist`、`album`、`date`、`genre`、`description`、`synopsis`、`purl` 和 `comment`。标题下方按实际存在的字段显示作者、专辑、日期、类型和可展开的简介；`YYYYMMDD` 日期会格式化为 `YYYY-MM-DD`。来源地址只以“原始链接”短文本显示并在新标签页打开，不直接展示长 URL。切换播放列表条目时，标题、metadata、来源链接和封面会同步更新；字段缺失时对应内容自动隐藏。
+
+视频和音频播放器的“返回下载页”及另一种播放器入口统一放在页面右上方，窄屏下保持可点击的紧凑导航，不再重复显示底部导航按钮。
 
 音频封面会从上方透明逐渐过渡到下方的半透明深色遮罩，确保底部频谱和控制栏在明暗不同的封面上都有足够对比度。播放音频时，封面底部会通过浏览器原生 Web Audio API 显示随声音频率变化的实时频谱柱。频谱会在暂停、播放结束或页面进入后台时停止并清空；系统启用“减少动态效果”时不会显示。该效果不依赖第三方库，初始化失败时会自动退化为带渐变封面的普通播放器，不影响播放、切歌或下载。
 
@@ -133,27 +135,27 @@ AI 返回的 Markdown 会在浏览器中转换为经过清洗的 HTML；为避�
 
 ```bash
 # 添加下载任务
-curl -X POST http://localhost:5001/api/add_task \
+curl -X POST http://localhost:5100/api/add_task \
   -H "Content-Type: application/json" \
   -d '{"url": "https://www.youtube.com/watch?v=xxx", "types": ["video"]}'
 
 # 查询任务状态
-curl -X POST http://localhost:5001/api/task_info \
+curl -X POST http://localhost:5100/api/task_info \
   -H "Content-Type: application/json" \
   -d '{"tasks": ["v20250601120000abc"]}'
 
 # 首次读取 downloader.log 末尾；后续请求传回响应中的 cursor 和 file_id
-curl "http://localhost:5001/api/downloader_log" \
+curl "http://localhost:5100/api/downloader_log" \
   -H "X-Yter-Log-Token: <EXTENSION_LOG_TOKEN>"
 
 # 按 URL 查询或创建 AI 总结任务
-curl -X POST http://localhost:5000/api/ai_summaries \
+curl -X POST http://localhost:5100/api/ai_summaries \
   -H "Content-Type: application/json" \
   -H "X-Yter-AI-Token: <AI_SUMMARY_ACCESS_TOKEN>" \
   -d '{"url":"https://www.youtube.com/watch?v=l38ceFOWOAE"}'
 
 # 查询异步 AI 总结任务
-curl http://localhost:5000/api/ai_summaries/jobs/<job_id> \
+curl http://localhost:5100/api/ai_summaries/jobs/<job_id> \
   -H "X-Yter-AI-Token: <AI_SUMMARY_ACCESS_TOKEN>"
 ```
 
@@ -225,6 +227,7 @@ video (2).mp4
 | `AI_SUMMARY_JOB_RETENTION_DAYS` | int | 已完成和失败的 AI 总结任务记录保留天数，默认 30；总结正文不随任务清理 |
 | `TIMEZONE` | string | 时区，如 `Asia/Shanghai` |
 | `FLASK_HOST` | string | Flask 监听地址，默认 `0.0.0.0` |
+| `FLASK_PORT` | int | Flask Web 应用监听端口，默认 `5100`；应避免与 YTC 的 `5001` 冲突 |
 | `FLASK_DEBUG` | bool | Flask 调试模式 |
 | `SCHEDULED_PLAYLISTS` | array | 定时下载的播放列表配置 |
 

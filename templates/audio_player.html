@@ -15,7 +15,15 @@
 
 <body class="player-page audio-player-page">
     <div class="container player-main-container">
-        <div class="header">
+        <div class="header player-header">
+            <nav class="player-nav" aria-label="播放器导航">
+                <a href="{{ url_for('index') }}" class="btn-secondary">
+                    <i class="fas fa-arrow-left" aria-hidden="true"></i> 返回下载页
+                </a>
+                <a href="{{ url_for('player') }}" class="btn-secondary">
+                    <i class="fas fa-video" aria-hidden="true"></i> 视频播放器
+                </a>
+            </nav>
             <h1><i class="fas fa-headphones"></i> 音频播放器</h1>
             <p class="subtitle">聆听已下载的音频内容</p>
         </div>
@@ -46,11 +54,24 @@
                     <h2 id="current-audio-title">{{ audio_items[0].title if audio_items else '暂无音频' }}</h2>
                     {% set initial_audio_source_url = audio_items[0].source_url if audio_items else '' %}
                     <p id="current-audio-source" class="media-source" {% if not initial_audio_source_url %}hidden{% endif %}>
-                        原始链接：<a href="{{ initial_audio_source_url }}" target="_blank" rel="noopener noreferrer">{{ initial_audio_source_url }}</a>
+                        <a href="{{ initial_audio_source_url }}" target="_blank" rel="noopener noreferrer">原始链接 <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
                     </p>
-                    <p id="current-audio-artist" class="audio-artist" {% if not audio_items or not audio_items[0].artist %}hidden{% endif %}>
-                        {{ audio_items[0].artist if audio_items else '' }}
-                    </p>
+                    {% set initial_audio_metadata = audio_items[0] if audio_items else {} %}
+                    <div id="current-audio-metadata" class="media-metadata"
+                        {% if not initial_audio_metadata.get('artist') and not initial_audio_metadata.get('album') and not initial_audio_metadata.get('date') and not initial_audio_metadata.get('genre') and not initial_audio_metadata.get('description') %}hidden{% endif %}>
+                        <dl class="media-metadata-list">
+                            {% for field, label in [('artist', '作者'), ('album', '专辑'), ('date', '日期'), ('genre', '类型')] %}
+                            <div class="media-metadata-item" data-meta-field="{{ field }}" {% if not initial_audio_metadata.get(field) %}hidden{% endif %}>
+                                <dt>{{ label }}</dt>
+                                <dd>{{ initial_audio_metadata.get(field, '') }}</dd>
+                            </div>
+                            {% endfor %}
+                        </dl>
+                        <details class="media-description" data-meta-description {% if not initial_audio_metadata.get('description') %}hidden{% endif %}>
+                            <summary>简介</summary>
+                            <p>{{ initial_audio_metadata.get('description', '') }}</p>
+                        </details>
+                    </div>
                     <div class="player-controls-hint">
                         <i class="fas fa-info-circle"></i> 音频播完后将自动播放下一首
                     </div>
@@ -93,14 +114,6 @@
             </div>
         {% endif %}
 
-        <div class="footer-actions player-footer-actions">
-            <a href="{{ url_for('index') }}" class="btn-secondary">
-                <i class="fas fa-arrow-left"></i> 返回下载页
-            </a>
-            <a href="{{ url_for('player') }}" class="btn-secondary">
-                <i class="fas fa-video"></i> 视频播放器
-            </a>
-        </div>
     </div>
 
     {% include '_site_footer.html' %}
@@ -531,11 +544,27 @@
             var sourceLink = source.querySelector('a');
             var sourceUrl = audioItem.source_url || '';
             sourceLink.href = sourceUrl;
-            sourceLink.textContent = sourceUrl;
             source.hidden = !sourceUrl;
-            var artist = document.getElementById('current-audio-artist');
-            artist.textContent = audioItem.artist || '';
-            artist.hidden = !audioItem.artist;
+            updateMediaMetadata('current-audio-metadata', audioItem);
+        }
+
+        function updateMediaMetadata(containerId, metadata) {
+            var container = document.getElementById(containerId);
+            var hasMetadata = false;
+            container.querySelectorAll('[data-meta-field]').forEach(function (row) {
+                var value = metadata[row.dataset.metaField] || '';
+                row.querySelector('dd').textContent = value;
+                row.hidden = !value;
+                hasMetadata = hasMetadata || Boolean(value);
+            });
+            var description = container.querySelector('[data-meta-description]');
+            var descriptionText = metadata.description || '';
+            description.querySelector('p').textContent = descriptionText;
+            description.hidden = !descriptionText;
+            if (!descriptionText) {
+                description.open = false;
+            }
+            container.hidden = !hasMetadata && !descriptionText;
         }
 
         function showLyricsStatus(message) {

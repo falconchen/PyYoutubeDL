@@ -54,7 +54,7 @@ python start.py
 python stop.py
 
 # 启动 Flask 开发服务器
-export FLASK_APP=app.py && export FLASK_DEBUG=1 && flask run --host=0.0.0.0
+export FLASK_APP=app.py && export FLASK_DEBUG=1 && flask run --host=0.0.0.0 --port=5100
 
 # 运行测试
 python -m pytest test_timezone.py test_video_info.py -v

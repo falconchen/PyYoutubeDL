@@ -14,6 +14,7 @@ class TestAudioPlayerPage(unittest.TestCase):
     def setUp(self):
         self.client = app.test_client()
         app.testing = True
+        app_module._probe_media_metadata.cache_clear()
         app_module._probe_audio_metadata.cache_clear()
         app_module._probe_media_source_url.cache_clear()
 
@@ -86,6 +87,10 @@ class TestAudioPlayerPage(unittest.TestCase):
                     'tags': {
                         'title': '测试标题',
                         'artist': '测试作者',
+                        'album': '测试专辑',
+                        'date': '20260817',
+                        'genre': '科技',
+                        'description': '测试简介',
                         'purl': 'https://www.youtube.com/watch?v=Hh3AmV46epI',
                     },
                 },
@@ -107,6 +112,10 @@ class TestAudioPlayerPage(unittest.TestCase):
 
         self.assertEqual(metadata['title'], '测试标题')
         self.assertEqual(metadata['artist'], '测试作者')
+        self.assertEqual(metadata['album'], '测试专辑')
+        self.assertEqual(metadata['date'], '2026-08-17')
+        self.assertEqual(metadata['genre'], '科技')
+        self.assertEqual(metadata['description'], '测试简介')
         self.assertEqual(
             metadata['source_url'],
             'https://www.youtube.com/watch?v=Hh3AmV46epI',
@@ -155,6 +164,10 @@ class TestAudioPlayerPage(unittest.TestCase):
                 return {
                     'title': Path(filename).stem,
                     'artist': 'Artist',
+                    'album': 'Album',
+                    'date': '2026-08-17',
+                    'genre': 'Music',
+                    'description': 'Description',
                     'source_url': 'https://example.com/original-audio',
                     'mime_type': 'audio/mp4' if extension == '.m4a' else 'audio/mpeg',
                     'cover_candidates': [fallback_url],
@@ -179,8 +192,14 @@ class TestAudioPlayerPage(unittest.TestCase):
         self.assertLess(html.index('requested song'), html.index('older.mp3'))
         self.assertNotIn('video.mp4', html)
         self.assertIn('href="https://example.com/original-audio"', html)
+        self.assertIn('>原始链接 <i', html)
         self.assertIn('id="current-audio-source"', html)
         self.assertIn('sourceLink.href = sourceUrl;', html)
+        self.assertIn('id="current-audio-metadata"', html)
+        self.assertIn('<dd>Album</dd>', html)
+        self.assertIn('href="/player"', html)
+        self.assertLess(html.index('class="player-nav"'), html.index('class="player-content"'))
+        self.assertNotIn('class="footer-actions', html)
         self.assertIn('aria-labelledby="lyrics-heading"\n                        hidden', html)
 
     def test_audio_page_matches_preferred_sidecar_lyrics(self):

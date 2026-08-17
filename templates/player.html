@@ -15,7 +15,15 @@
 
 <body class="player-page">
     <div class="container player-main-container">
-        <div class="header">
+        <div class="header player-header">
+            <nav class="player-nav" aria-label="播放器导航">
+                <a href="{{ url_for('index') }}" class="btn-secondary">
+                    <i class="fas fa-arrow-left" aria-hidden="true"></i> 返回下载页
+                </a>
+                <a href="{{ url_for('audio_player') }}" class="btn-secondary">
+                    <i class="fas fa-headphones" aria-hidden="true"></i> 音频播放器
+                </a>
+            </nav>
             <h1><i class="fab fa-youtube"></i> 视频播放器</h1>
             <p class="subtitle">播放已下载的精彩内容</p>
         </div>
@@ -23,7 +31,10 @@
         <div class="player-content">
             <div class="player-section">
                 <div class="video-wrapper">
-                    <video id="video-player" class="video-js vjs-big-play-centered vjs-16-9" controls preload="auto">
+                    {% set initial_video_metadata = video_metadata.get(video_files[0], {}) if video_files else {} %}
+                    {% set initial_video_covers = initial_video_metadata.get('cover_candidates', []) %}
+                    <video id="video-player" class="video-js vjs-big-play-centered vjs-16-9" controls preload="metadata"
+                        {% if initial_video_covers %}poster="{{ initial_video_covers[0] }}"{% endif %}>
                         {% if video_files %}
                         <source src="{{ url_for('serve_file', filename=video_files[0]) }}" type="video/mp4">
                         {% for track in subtitle_tracks.get(video_files[0], []) %}
@@ -33,11 +44,26 @@
                     </video>
                 </div>
                 <div class="video-info-panel">
-                    <h2 id="current-video-title">正在播放: {{ video_files[0] if video_files else '暂无视频' }}</h2>
-                    {% set initial_video_source_url = video_source_urls.get(video_files[0], '') if video_files else '' %}
+                    <h2 id="current-video-title">正在播放: {{ initial_video_metadata.get('title', '暂无视频') }}</h2>
+                    {% set initial_video_source_url = initial_video_metadata.get('source_url', '') %}
                     <p id="current-video-source" class="media-source" {% if not initial_video_source_url %}hidden{% endif %}>
-                        原始链接：<a href="{{ initial_video_source_url }}" target="_blank" rel="noopener noreferrer">{{ initial_video_source_url }}</a>
+                        <a href="{{ initial_video_source_url }}" target="_blank" rel="noopener noreferrer">原始链接 <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
                     </p>
+                    <div id="current-video-metadata" class="media-metadata"
+                        {% if not initial_video_metadata.get('artist') and not initial_video_metadata.get('album') and not initial_video_metadata.get('date') and not initial_video_metadata.get('genre') and not initial_video_metadata.get('description') %}hidden{% endif %}>
+                        <dl class="media-metadata-list">
+                            {% for field, label in [('artist', '作者'), ('album', '专辑'), ('date', '日期'), ('genre', '类型')] %}
+                            <div class="media-metadata-item" data-meta-field="{{ field }}" {% if not initial_video_metadata.get(field) %}hidden{% endif %}>
+                                <dt>{{ label }}</dt>
+                                <dd>{{ initial_video_metadata.get(field, '') }}</dd>
+                            </div>
+                            {% endfor %}
+                        </dl>
+                        <details class="media-description" data-meta-description {% if not initial_video_metadata.get('description') %}hidden{% endif %}>
+                            <summary>简介</summary>
+                            <p>{{ initial_video_metadata.get('description', '') }}</p>
+                        </details>
+                    </div>
                     <div class="player-controls-hint">
                         <i class="fas fa-info-circle"></i> 视频播完后将自动播放下一条
                     </div>
@@ -95,11 +121,6 @@
             </div>
         </div>
 
-        <div class="footer-actions">
-            <a href="{{ url_for('index') }}" class="btn-secondary">
-                <i class="fas fa-arrow-left"></i> 返回下载页
-            </a>
-        </div>
     </div>
 
     {% include '_site_footer.html' %}
@@ -127,7 +148,7 @@
 
         var player = videojs('video-player');
         var video_files = {{ video_files | tojson }};
-        var video_source_urls = {{ video_source_urls | tojson }};
+        var videoMetadata = {{ video_metadata | tojson }};
         var subtitle_tracks = {{ subtitle_tracks | tojson }};
         var browser_subtitle_languages = {{ browser_subtitle_languages | tojson }};
         var aiSummaryConfigured = {{ ai_summary_configured | tojson }};
@@ -140,6 +161,7 @@
         var lastProgressSaveAt = 0;
         var applyingSubtitlePreference = false;
         var subtitlePreferenceApplySerial = 0;
+        var videoPosterRequestSerial = 0;
 
         player.ready(function () {
             var controlBar = player.getChild('controlBar');
@@ -147,6 +169,7 @@
             player.textTracks().addEventListener('change', saveSubtitlePreference);
             applySubtitlePreference();
             updateAiSummaryPanel(currentFilename);
+            updateVideoPoster(currentFilename);
             if (player.readyState() >= 1) {
                 restoreCurrentVideoProgress();
             }
@@ -703,6 +726,7 @@
 
             // 更新播放源
             player.src({ type: "video/mp4", src: src });
+            updateVideoPoster(filename);
             updateSubtitleTracks(filename);
             player.play();
             currentFilename = filename;
@@ -710,8 +734,7 @@
             updateAiSummaryPanel(filename);
 
             // 更新标题
-            document.getElementById('current-video-title').textContent = '正在播放: ' + filename;
-            updateCurrentVideoSource(filename);
+            updateCurrentVideoInfo(filename);
 
             // 更新列表状态
             document.querySelectorAll('.playlist-item').forEach(function (item) {
@@ -726,13 +749,61 @@
             }
         }
 
-        function updateCurrentVideoSource(filename) {
+        function updateCurrentVideoInfo(filename) {
+            var metadata = videoMetadata[filename] || {};
+            document.getElementById('current-video-title').textContent = '正在播放: ' + (metadata.title || filename);
             var source = document.getElementById('current-video-source');
             var link = source.querySelector('a');
-            var sourceUrl = video_source_urls[filename] || '';
+            var sourceUrl = metadata.source_url || '';
             link.href = sourceUrl;
-            link.textContent = sourceUrl;
             source.hidden = !sourceUrl;
+            updateMediaMetadata('current-video-metadata', metadata);
+        }
+
+        function updateMediaMetadata(containerId, metadata) {
+            var container = document.getElementById(containerId);
+            var hasMetadata = false;
+            container.querySelectorAll('[data-meta-field]').forEach(function (row) {
+                var value = metadata[row.dataset.metaField] || '';
+                row.querySelector('dd').textContent = value;
+                row.hidden = !value;
+                hasMetadata = hasMetadata || Boolean(value);
+            });
+            var description = container.querySelector('[data-meta-description]');
+            var descriptionText = metadata.description || '';
+            description.querySelector('p').textContent = descriptionText;
+            description.hidden = !descriptionText;
+            if (!descriptionText) {
+                description.open = false;
+            }
+            container.hidden = !hasMetadata && !descriptionText;
+        }
+
+        function updateVideoPoster(filename) {
+            var requestSerial = ++videoPosterRequestSerial;
+            var candidates = (videoMetadata[filename] || {}).cover_candidates || [];
+            if (!candidates.length) {
+                player.poster('');
+                return;
+            }
+
+            function tryCandidate(index) {
+                if (requestSerial !== videoPosterRequestSerial || index >= candidates.length) {
+                    return;
+                }
+                var image = new Image();
+                image.onload = function () {
+                    if (requestSerial === videoPosterRequestSerial) {
+                        player.poster(candidates[index]);
+                    }
+                };
+                image.onerror = function () {
+                    tryCandidate(index + 1);
+                };
+                image.src = candidates[index];
+            }
+
+            tryCandidate(0);
         }
 
         function updateSubtitleTracks(filename) {

@@ -53,6 +53,7 @@
     "COOKIE_FILE": "/etc/youtube-cookie.txt"
   },
   "FLASK_HOST": "0.0.0.0",
+  "FLASK_PORT": 5100,
   "FLASK_DEBUG": true,
   "SCHEDULED_PLAYLISTS": [
     {

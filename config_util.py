@@ -42,7 +42,8 @@ DEFAULT_CONFIG = {
     "AUDIO_WEBDAV_KEEP_COUNT": 5,   # 音频 WebDAV 保留的日期目录数量
     
     # 通用配置
-    "TIMEZONE": "Asia/Shanghai"     # 系统使用的时区
+    "TIMEZONE": "Asia/Shanghai",    # 系统使用的时区
+    "FLASK_PORT": 5100,              # Flask Web 应用监听端口
 }
 
 # 需要转换为绝对路径的配置项

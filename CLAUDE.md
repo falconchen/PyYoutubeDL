@@ -20,7 +20,7 @@ python start.py
 python stop.py
 
 # Run Flask dev server with auto-reload
-export FLASK_APP=app.py && export FLASK_DEBUG=1 && flask run --host=0.0.0.0
+export FLASK_APP=app.py && export FLASK_DEBUG=1 && flask run --host=0.0.0.0 --port=5100
 
 # Run tests
 python -m pytest test_timezone.py test_video_info.py -v
