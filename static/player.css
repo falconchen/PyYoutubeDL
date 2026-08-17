@@ -15,27 +15,75 @@
 }
 
 .player-header {
-    position: relative;
+    margin-bottom: 1rem;
+}
+
+.player-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-width: 0;
+}
+
+.player-header-row h1 {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    text-align: left;
+    font-size: clamp(1.45rem, 3vw, 2rem);
+    line-height: 1.2;
+}
+
+.player-header .subtitle {
+    margin: 0.3rem 0 0;
+    text-align: left;
+    font-size: 0.95rem;
 }
 
 .player-nav {
     display: flex;
+    flex: 0 0 auto;
+    align-items: center;
     justify-content: flex-end;
-    gap: 0.65rem;
-    margin-bottom: 0.75rem;
+    gap: 0.4rem;
+    margin: 0;
 }
 
 .player-nav .btn-secondary {
-    min-height: 40px;
-    padding: 0.55rem 0.85rem;
+    min-height: 36px;
+    padding: 0.4rem 0.7rem;
+    border: 1px solid #e2e5e9;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.72);
+    color: #59616d;
     font-size: 0.9rem;
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(24, 32, 45, 0.05);
+    white-space: nowrap;
+}
+
+.player-nav .btn-secondary i {
+    color: #8b939e;
+    transition: color 0.2s ease;
+}
+
+.player-nav .btn-secondary:hover {
+    border-color: rgba(255, 0, 0, 0.28);
+    background: #fff7f7;
+    color: var(--primary-color);
+}
+
+.player-nav .btn-secondary:hover i,
+.player-nav .btn-secondary:focus-visible i {
+    color: var(--primary-color);
 }
 
 .player-content {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(280px, 350px);
     gap: 2rem;
-    margin-top: 1rem;
+    margin-top: 0;
     min-width: 0;
 }
 
@@ -791,8 +839,8 @@
         box-shadow: none;
     }
 
-    .player-main-container .header {
-        margin-bottom: 1rem;
+    .player-header {
+        margin-bottom: 0.75rem;
     }
 
     .player-main-container .header h1 {
@@ -851,14 +899,22 @@
         box-shadow: none;
     }
 
+    .player-header-row {
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+    }
+
     .player-nav {
-        gap: 0.5rem;
+        width: 100%;
+        justify-content: flex-end;
+        gap: 0.35rem;
     }
 
     .player-nav .btn-secondary {
         width: auto;
         min-height: 40px;
-        padding: 0.5rem 0.65rem;
+        padding: 0.45rem 0.65rem;
         font-size: 0.8rem;
     }
 

@@ -108,6 +108,26 @@ class TestPlayerPage(unittest.TestCase):
         self.assertLess(html.index('class="player-nav"'), html.index('class="player-content"'))
         self.assertNotIn('class="footer-actions"', html)
 
+    def test_player_header_aligns_title_and_navigation(self):
+        template = Path(app.template_folder, 'player.html').read_text(
+            encoding='utf-8',
+        )
+        audio_template = Path(app.template_folder, 'audio_player.html').read_text(
+            encoding='utf-8',
+        )
+        css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
+
+        for page_template in (template, audio_template):
+            self.assertIn('class="player-header-row"', page_template)
+            self.assertLess(
+                page_template.index('class="player-header-row"'),
+                page_template.index('class="player-nav"'),
+            )
+        self.assertIn('align-items: center;', css)
+        self.assertIn('margin-top: 0;', css)
+        self.assertIn('border-radius: 999px;', css)
+        self.assertIn('background: #fff7f7;', css)
+
     def test_download_control_is_rendered_for_current_video(self):
         with tempfile.TemporaryDirectory() as files_dir:
             filename = 'test video.mp4'

@@ -16,15 +16,17 @@
 <body class="player-page audio-player-page">
     <div class="container player-main-container">
         <div class="header player-header">
-            <nav class="player-nav" aria-label="播放器导航">
-                <a href="{{ url_for('index') }}" class="btn-secondary">
-                    <i class="fas fa-arrow-left" aria-hidden="true"></i> 返回下载页
-                </a>
-                <a href="{{ url_for('player') }}" class="btn-secondary">
-                    <i class="fas fa-video" aria-hidden="true"></i> 视频播放器
-                </a>
-            </nav>
-            <h1><i class="fas fa-headphones"></i> 音频播放器</h1>
+            <div class="player-header-row">
+                <h1><i class="fas fa-headphones"></i> 音频播放器</h1>
+                <nav class="player-nav" aria-label="播放器导航">
+                    <a href="{{ url_for('index') }}" class="btn-secondary">
+                        <i class="fas fa-arrow-left" aria-hidden="true"></i> 返回下载页
+                    </a>
+                    <a href="{{ url_for('player') }}" class="btn-secondary">
+                        <i class="fas fa-video" aria-hidden="true"></i> 视频播放器
+                    </a>
+                </nav>
+            </div>
             <p class="subtitle">聆听已下载的音频内容</p>
         </div>
 
