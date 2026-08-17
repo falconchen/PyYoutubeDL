@@ -282,6 +282,13 @@ class TestAudioPlayerPage(unittest.TestCase):
         self.assertIn('visualizerAnalyser.getByteFrequencyData(', template)
         self.assertIn('window.requestAnimationFrame(drawAudioVisualizer)', template)
         self.assertIn('window.cancelAnimationFrame(visualizerAnimationFrame)', template)
+        self.assertIn('function resetAudioVisualizer()', template)
+        self.assertIn('resetAudioVisualizer();', template)
+        stop_body = template.split('function stopAudioVisualizer()', 1)[1].split(
+            'function resetAudioVisualizer()',
+            1,
+        )[0]
+        self.assertNotIn('clearAudioVisualizer();', stop_body)
         self.assertIn("player.on('play', startAudioVisualizer);", template)
         self.assertIn("player.on('pause', stopAudioVisualizer);", template)
         self.assertIn("document.addEventListener('visibilitychange'", template)

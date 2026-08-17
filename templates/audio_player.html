@@ -300,6 +300,10 @@
                 window.cancelAnimationFrame(visualizerAnimationFrame);
                 visualizerAnimationFrame = null;
             }
+        }
+
+        function resetAudioVisualizer() {
+            stopAudioVisualizer();
             clearAudioVisualizer();
         }
 
@@ -779,6 +783,7 @@
                 saveCurrentAudioProgress();
             }
 
+            resetAudioVisualizer();
             currentFilename = filename;
             currentIndex = audioItems.indexOf(audioItem);
             player.src({ type: audioItem.mime_type, src: audioItem.url });
