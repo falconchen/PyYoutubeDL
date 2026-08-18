@@ -145,19 +145,41 @@
     z-index: 2;
 }
 
-.audio-player-page .video-js .vjs-big-play-button,
+.player-page .video-js .vjs-big-play-button,
 .audio-player-page .video-js .vjs-control-bar {
     z-index: 4;
 }
 
-.audio-player-page .video-js .vjs-big-play-button {
-    top: auto;
-    bottom: 2.5rem;
-    left: 1rem;
-    width: 3rem;
-    height: 2.5rem;
+.player-page .video-js .vjs-big-play-button {
+    top: 50%;
+    left: 50%;
+    width: 4rem;
+    height: 4rem;
     margin: 0;
-    line-height: 2.5rem;
+    border: 2px solid rgba(255, 255, 255, 0.82);
+    border-radius: 50%;
+    background: rgba(220, 20, 60, 0.84);
+    color: #fff;
+    line-height: 3.75rem;
+    font-size: 1.75rem;
+    box-shadow: 0 8px 24px rgba(112, 8, 30, 0.38);
+    transform: translate(-50%, -50%);
+    transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.player-page .video-js .vjs-big-play-button:hover,
+.player-page .video-js .vjs-big-play-button:focus-visible {
+    background: rgba(255, 48, 72, 0.94);
+    box-shadow: 0 10px 28px rgba(112, 8, 30, 0.5);
+    transform: translate(-50%, -50%) scale(1.05);
+}
+
+.player-page .video-js.vjs-paused .vjs-big-play-button {
+    display: block;
+}
+
+.player-page .video-js.vjs-playing .vjs-big-play-button {
+    display: none;
 }
 
 .audio-player-page .vjs-poster {
@@ -670,8 +692,7 @@
 }
 
 .playlist-header {
-    padding: 1.25rem;
-    border-bottom: 1px solid #eee;
+    display: none;
 }
 
 .playlist-header h3 {
@@ -864,10 +885,6 @@
         padding: 1rem;
     }
 
-    .playlist-header {
-        padding: 1rem;
-    }
-
     .playlist-section {
         max-height: min(360px, 45vh);
     }
@@ -916,10 +933,6 @@
         min-height: 40px;
         padding: 0.45rem 0.65rem;
         font-size: 0.8rem;
-    }
-
-    .audio-player-page .video-js .vjs-big-play-button {
-        display: none;
     }
 
     .lyrics-header {

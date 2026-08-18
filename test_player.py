@@ -154,6 +154,17 @@ class TestPlayerPage(unittest.TestCase):
         self.assertIn('font-size: 1.3em;', css)
         self.assertIn('line-height: 1;', css)
 
+    def test_video_player_uses_centered_theme_play_button(self):
+        css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
+
+        self.assertIn('.player-page .video-js .vjs-big-play-button {', css)
+        self.assertIn('top: 50%;', css)
+        self.assertIn('left: 50%;', css)
+        self.assertIn('border-radius: 50%;', css)
+        self.assertIn('background: rgba(220, 20, 60, 0.84);', css)
+        self.assertIn('.player-page .video-js.vjs-paused .vjs-big-play-button', css)
+        self.assertIn('.player-page .video-js.vjs-playing .vjs-big-play-button', css)
+
     def test_player_layout_prevents_mobile_horizontal_overflow(self):
         css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
 

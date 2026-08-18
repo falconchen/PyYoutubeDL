@@ -274,7 +274,17 @@ class TestAudioPlayerPage(unittest.TestCase):
         self.assertIn('player.el().appendChild(coverGradient);', template)
         self.assertIn('filter: blur(4px)', css)
         self.assertIn('transform: scale(1.08);', css)
-        self.assertIn('bottom: 2.5rem;', css)
+        self.assertIn('top: 50%;', css)
+        self.assertIn('left: 50%;', css)
+        self.assertIn('border-radius: 50%;', css)
+        self.assertIn('background: rgba(220, 20, 60, 0.84);', css)
+        self.assertIn('transform: translate(-50%, -50%);', css)
+        self.assertIn('.player-page .video-js.vjs-paused .vjs-big-play-button', css)
+        self.assertIn('.player-page .video-js.vjs-playing .vjs-big-play-button', css)
+        self.assertNotIn('display: none;', css.split(
+            '.player-page .video-js .vjs-big-play-button',
+            1,
+        )[1].split('}', 1)[0])
         self.assertIn("aria-hidden=\"true\"", template)
         self.assertIn('window.AudioContext || window.webkitAudioContext', template)
         self.assertIn('createMediaElementSource(', template)
@@ -299,6 +309,8 @@ class TestAudioPlayerPage(unittest.TestCase):
         self.assertIn('.audio-cover-gradient {', css)
         self.assertIn('rgba(10, 15, 28, 0.78) 100%', css)
         self.assertIn('@media (prefers-reduced-motion: reduce)', css)
+        playlist_header_rule = css.split('.playlist-header {', 1)[1].split('}', 1)[0]
+        self.assertIn('display: none;', playlist_header_rule)
 
     def test_audio_player_reuses_playback_download_and_auto_next_behaviors(self):
         template = Path(app.template_folder, 'audio_player.html').read_text(
