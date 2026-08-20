@@ -265,6 +265,14 @@ class TestAudioPlayerPage(unittest.TestCase):
         self.assertIn('tryCandidate(index + 1);', template)
         self.assertIn("player.poster(fallbackCoverUrl);", template)
 
+    def test_audio_player_uses_inline_playback_attributes(self):
+        template = Path(app.template_folder, 'audio_player.html').read_text(
+            encoding='utf-8',
+        )
+
+        self.assertIn('playsinline webkit-playsinline', template)
+        self.assertIn('playsinline: true', template)
+
     def test_audio_player_renders_real_audio_spectrum_visualizer(self):
         template = Path('templates/audio_player.html').read_text(encoding='utf-8')
         css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')

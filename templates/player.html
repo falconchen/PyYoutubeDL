@@ -35,7 +35,7 @@
                 <div class="video-wrapper">
                     {% set initial_video_metadata = video_metadata.get(video_files[0], {}) if video_files else {} %}
                     {% set initial_video_covers = initial_video_metadata.get('cover_candidates', []) %}
-                    <video id="video-player" class="video-js vjs-big-play-centered vjs-16-9" controls preload="metadata"
+                    <video id="video-player" class="video-js vjs-big-play-centered vjs-16-9" controls preload="metadata" playsinline webkit-playsinline
                         {% if initial_video_covers %}poster="{{ initial_video_covers[0] }}"{% endif %}>
                         {% if video_files %}
                         <source src="{{ url_for('serve_file', filename=video_files[0]) }}" type="video/mp4">
@@ -148,7 +148,9 @@
         }
         videojs.registerComponent('DownloadButton', DownloadButton);
 
-        var player = videojs('video-player');
+        var player = videojs('video-player', {
+            playsinline: true
+        });
         var video_files = {{ video_files | tojson }};
         var videoMetadata = {{ video_metadata | tojson }};
         var subtitle_tracks = {{ subtitle_tracks | tojson }};

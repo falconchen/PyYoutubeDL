@@ -33,7 +33,7 @@
         <div class="player-content">
             <div class="player-section">
                 <div class="video-wrapper audio-wrapper">
-                    <audio id="audio-player" class="video-js vjs-big-play-centered" controls preload="metadata">
+                    <audio id="audio-player" class="video-js vjs-big-play-centered" controls preload="metadata" playsinline webkit-playsinline>
                         {% if audio_items %}
                         <source src="{{ audio_items[0].url }}" type="{{ audio_items[0].mime_type }}">
                         {% endif %}
@@ -142,6 +142,7 @@
         var audioItems = {{ audio_items | tojson }};
         var fallbackCoverUrl = {{ fallback_cover_url | tojson }};
         var player = videojs('audio-player', {
+            playsinline: true,
             audioPosterMode: true,
             controlBar: {
                 pictureInPictureToggle: false,

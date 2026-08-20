@@ -165,6 +165,16 @@ class TestPlayerPage(unittest.TestCase):
         self.assertIn('.player-page .video-js.vjs-paused .vjs-big-play-button', css)
         self.assertIn('.player-page .video-js.vjs-playing .vjs-big-play-button', css)
 
+    def test_video_player_uses_inline_playback_on_ios(self):
+        template = Path(app.template_folder, 'player.html').read_text(
+            encoding='utf-8',
+        )
+
+        self.assertIn('playsinline webkit-playsinline', template)
+        self.assertIn("var player = videojs('video-player', {", template)
+        self.assertIn('playsinline: true', template)
+        self.assertNotIn('fullscreenToggle: false', template)
+
     def test_player_layout_prevents_mobile_horizontal_overflow(self):
         css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
 

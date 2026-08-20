@@ -111,6 +111,8 @@ AI 返回的 Markdown 会在浏览器中转换为经过清洗的 HTML；为避�
 
 在播放列表中手动切换视频，或当前视频结束后自动播放下一条时，播放器会同步更新地址栏中的 `file` 参数，便于复制当前视频的播放链接。
 
+视频和音频播放器均声明 iOS Safari 内联播放（`playsinline`），点击播放时保持在当前页面窗口内；视频仍保留 Video.js 全屏控件，只有用户主动点击全屏按钮时才进入全屏。
+
 音频播放器使用 Video.js `audioPosterMode`，保留 16:9 封面并隐藏视频专用画面。页面会从音频 metadata 的 `purl` 或 `comment` 读取 YouTube 视频 ID，依次尝试 `maxresdefault.jpg`、`hqdefault.jpg`，失败时使用 `AUDIO_PLAYER_FALLBACK_COVER_URL`。视频播放器也会使用相同来源字段，在开始播放前显示可用的 YouTube 封面，并在切换视频时同步更新；没有可识别的 YouTube 来源时仍可正常播放，只是不显示封面。封面由浏览器直接访问 `i.ytimg.com`，服务器不会额外保存图片文件。
 
 下载器会在调用 yt-dlp 时为视频和音频统一追加 `--add-metadata`，不依赖 `yt-dlp.conf`、`yta-dlp.conf` 或对应的本机覆盖配置。新下载的媒体会尽可能写入标题、作者、来源页面 URL 等平台可提供的 metadata；具体字段仍取决于来源平台和输出容器支持。
