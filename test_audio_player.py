@@ -325,6 +325,10 @@ class TestAudioPlayerPage(unittest.TestCase):
             encoding='utf-8',
         )
 
+        self.assertIn(
+            'playbackRates: [0.5, 0.75, 1, 1.5, 2, 3]',
+            template,
+        )
         self.assertIn("controlBar.addChild('DownloadButton'", template)
         self.assertIn('link.download = currentFilename;', template)
         self.assertIn("player.on('ended', function () {", template)

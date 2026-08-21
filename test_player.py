@@ -175,6 +175,16 @@ class TestPlayerPage(unittest.TestCase):
         self.assertIn('playsinline: true', template)
         self.assertNotIn('fullscreenToggle: false', template)
 
+    def test_video_player_supports_playback_rates(self):
+        template = Path(app.template_folder, 'player.html').read_text(
+            encoding='utf-8',
+        )
+
+        self.assertIn(
+            'playbackRates: [0.5, 0.75, 1, 1.5, 2, 3]',
+            template,
+        )
+
     def test_video_play_only_scrolls_inside_playlist(self):
         template = Path(app.template_folder, 'player.html').read_text(
             encoding='utf-8',

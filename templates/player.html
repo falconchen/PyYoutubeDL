@@ -149,7 +149,8 @@
         videojs.registerComponent('DownloadButton', DownloadButton);
 
         var player = videojs('video-player', {
-            playsinline: true
+            playsinline: true,
+            playbackRates: [0.5, 0.75, 1, 1.5, 2, 3]
         });
         var video_files = {{ video_files | tojson }};
         var videoMetadata = {{ video_metadata | tojson }};

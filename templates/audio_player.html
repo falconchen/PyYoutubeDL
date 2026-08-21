@@ -143,6 +143,7 @@
         var fallbackCoverUrl = {{ fallback_cover_url | tojson }};
         var player = videojs('audio-player', {
             playsinline: true,
+            playbackRates: [0.5, 0.75, 1, 1.5, 2, 3],
             audioPosterMode: true,
             controlBar: {
                 pictureInPictureToggle: false,
