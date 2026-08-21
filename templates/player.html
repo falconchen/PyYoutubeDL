@@ -147,6 +147,7 @@
         }
         videojs.registerComponent('DownloadButton', DownloadButton);
 
+        var nativeVideoElement = document.getElementById('video-player');
         var player = videojs('video-player', {
             playsinline: true,
             playbackRates: [0.5, 0.75, 1, 1.5, 2, 3]
@@ -166,6 +167,54 @@
         var applyingSubtitlePreference = false;
         var subtitlePreferenceApplySerial = 0;
         var videoPosterRequestSerial = 0;
+
+        function lockFullscreenLandscape() {
+            var orientation = window.screen && window.screen.orientation;
+            if (!orientation || typeof orientation.lock !== 'function') {
+                return;
+            }
+
+            try {
+                var lockResult = orientation.lock('landscape');
+                if (lockResult && typeof lockResult.catch === 'function') {
+                    lockResult.catch(function () {});
+                }
+            } catch (error) {
+                // iOS may reject orientation locking because of system settings.
+            }
+        }
+
+        function unlockFullscreenOrientation() {
+            var orientation = window.screen && window.screen.orientation;
+            if (!orientation || typeof orientation.unlock !== 'function') {
+                return;
+            }
+
+            try {
+                orientation.unlock();
+            } catch (error) {
+                // Ignore browsers that expose but do not allow orientation unlock.
+            }
+        }
+
+        player.on('fullscreenchange', function () {
+            if (player.isFullscreen()) {
+                lockFullscreenLandscape();
+            } else {
+                unlockFullscreenOrientation();
+            }
+        });
+
+        if (nativeVideoElement) {
+            nativeVideoElement.addEventListener(
+                'webkitbeginfullscreen',
+                lockFullscreenLandscape
+            );
+            nativeVideoElement.addEventListener(
+                'webkitendfullscreen',
+                unlockFullscreenOrientation
+            );
+        }
 
         player.ready(function () {
             var controlBar = player.getChild('controlBar');
