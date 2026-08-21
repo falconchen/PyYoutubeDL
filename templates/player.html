@@ -505,11 +505,11 @@
                 content.textContent = markdown;
             }
             content.hidden = false;
-            content.classList.toggle('is-collapsed', !streaming);
+            content.classList.remove('is-collapsed');
             copyButton.hidden = Boolean(streaming);
             toggleButton.hidden = Boolean(streaming);
-            toggleButton.textContent = '展开';
-            toggleButton.setAttribute('aria-expanded', 'false');
+            toggleButton.textContent = '收起';
+            toggleButton.setAttribute('aria-expanded', 'true');
         }
 
         async function consumeAiSummaryStream(jobId, onMessage) {

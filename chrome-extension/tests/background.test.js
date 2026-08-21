@@ -293,7 +293,7 @@ test('toolbar action opens the inline settings popup', () => {
     'utf8',
   );
 
-  assert.equal(manifest.version, '1.5.0');
+  assert.equal(manifest.version, '1.5.1');
   assert.equal(manifest.action.default_popup, 'popup.html');
   assert.match(popup, /<details class="settings-card">/);
   assert.doesNotMatch(popup, /<details class="settings-card" open>/);
@@ -356,6 +356,9 @@ test('AI summary menu injects a safe local overlay and returns cached content', 
   );
   assert.match(source, /DOMPurify\.sanitize/);
   assert.match(source, /FORBID_TAGS/);
+  assert.doesNotMatch(source, /content\.classList\.add\('collapsed'\)/);
+  assert.match(source, /toggle\.textContent = '收起'/);
+  assert.match(source, /toggle\.setAttribute\('aria-expanded', 'true'\)/);
 });
 
 test('AI summary menu forwards streamed markdown and final result', async () => {

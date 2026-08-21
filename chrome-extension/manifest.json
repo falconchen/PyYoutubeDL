@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "使用 yter 下载",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "通过右键菜单使用 yter 下载视频、音频或生成 AI 总结。",
   "minimum_chrome_version": "120",
   "permissions": [

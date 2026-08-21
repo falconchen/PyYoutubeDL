@@ -20,7 +20,7 @@
 
 令牌为空时，服务端 `/api/downloader_log` 返回 503 并保持禁用。扩展把令牌保存在 `chrome.storage.local`，不会随 Chrome 账号同步，也不会放入 URL。
 
-AI 总结使用独立令牌和 `X-Yter-AI-Token` 请求头。点击“AI总结”后会立即在当前页面显示 Shadow DOM 浮层；缓存未命中时扩展通过 NDJSON 流实时接收并安全渲染 Markdown，完成后提供复制、展开/收起和关闭按钮。流连接中断时会退回状态轮询并从 SQLite 已保存的增量继续，AI 令牌不会发送给当前网页。
+AI 总结使用独立令牌和 `X-Yter-AI-Token` 请求头。点击“AI总结”后会立即在当前页面显示 Shadow DOM 浮层；缓存未命中时扩展通过 NDJSON 流实时接收并安全渲染 Markdown，完成后默认保持展开，并提供复制、展开/收起和关闭按钮。流连接中断时会退回状态轮询并从 SQLite 已保存的增量继续，AI 令牌不会发送给当前网页。
 
 ## 使用与验证
 

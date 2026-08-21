@@ -2870,12 +2870,11 @@ Please report this to https://github.com/markedjs/marked.`, e) {
         }
       );
       content.dataset.markdown = markdown;
-      content.classList.remove("hidden");
-      content.classList.add("collapsed");
+      content.classList.remove("hidden", "collapsed");
       copy.classList.remove("hidden");
       toggle.classList.remove("hidden");
-      toggle.textContent = "\u5C55\u5F00";
-      toggle.setAttribute("aria-expanded", "false");
+      toggle.textContent = "\u6536\u8D77";
+      toggle.setAttribute("aria-expanded", "true");
       status.textContent = message.cached ? "\u5DF2\u8BFB\u53D6\u4FDD\u5B58\u7684\u603B\u7ED3\u3002" : "AI \u603B\u7ED3\u5DF2\u751F\u6210\u5E76\u4FDD\u5B58\u3002";
       return;
     }

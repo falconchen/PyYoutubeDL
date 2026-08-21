@@ -108,12 +108,11 @@ function renderMessage(message) {
       },
     );
     content.dataset.markdown = markdown;
-    content.classList.remove('hidden');
-    content.classList.add('collapsed');
+    content.classList.remove('hidden', 'collapsed');
     copy.classList.remove('hidden');
     toggle.classList.remove('hidden');
-    toggle.textContent = '展开';
-    toggle.setAttribute('aria-expanded', 'false');
+    toggle.textContent = '收起';
+    toggle.setAttribute('aria-expanded', 'true');
     status.textContent = message.cached ? '已读取保存的总结。' : 'AI 总结已生成并保存。';
     return;
   }
