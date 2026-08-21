@@ -175,6 +175,19 @@ class TestPlayerPage(unittest.TestCase):
         self.assertIn('playsinline: true', template)
         self.assertNotIn('fullscreenToggle: false', template)
 
+    def test_video_play_only_scrolls_inside_playlist(self):
+        template = Path(app.template_folder, 'player.html').read_text(
+            encoding='utf-8',
+        )
+        scroll_body = template.split('function scrollToActive()', 1)[1].split(
+            "player.on('play', scrollToActive);",
+            1,
+        )[0]
+
+        self.assertIn("document.getElementById('video-list')", scroll_body)
+        self.assertIn('playlist.scrollTop += scrollDelta;', scroll_body)
+        self.assertNotIn('scrollIntoView(', scroll_body)
+
     def test_player_layout_prevents_mobile_horizontal_overflow(self):
         css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
 

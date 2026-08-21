@@ -854,11 +854,26 @@
         player.on('pause', saveCurrentVideoProgress);
         window.addEventListener('beforeunload', saveCurrentVideoProgress);
 
-        // 辅助函数：自动滚动到当前播放项
+        // 辅助函数：仅在播放列表内部滚动，避免小屏播放时带动整个页面
         function scrollToActive() {
-            var activeItem = document.querySelector('.playlist-item.active');
-            if (activeItem) {
-                activeItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            var playlist = document.getElementById('video-list');
+            var activeItem = playlist && playlist.querySelector('.playlist-item.active');
+            if (!playlist || !activeItem) {
+                return;
+            }
+
+            var playlistRect = playlist.getBoundingClientRect();
+            var itemRect = activeItem.getBoundingClientRect();
+            var scrollDelta = 0;
+
+            if (itemRect.top < playlistRect.top) {
+                scrollDelta = itemRect.top - playlistRect.top;
+            } else if (itemRect.bottom > playlistRect.bottom) {
+                scrollDelta = itemRect.bottom - playlistRect.bottom;
+            }
+
+            if (scrollDelta) {
+                playlist.scrollTop += scrollDelta;
             }
         }
 
