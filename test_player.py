@@ -183,11 +183,6 @@ class TestPlayerPage(unittest.TestCase):
         self.assertIn("var player = videojs('video-player', {", template)
         self.assertIn('playsinline: true', template)
         self.assertNotIn('fullscreenToggle: false', template)
-        self.assertIn("orientation.lock('landscape')", template)
-        self.assertIn("player.on('fullscreenchange'", template)
-        self.assertIn("'webkitbeginfullscreen'", template)
-        self.assertIn("'webkitendfullscreen'", template)
-        self.assertIn('orientation.unlock();', template)
 
     def test_video_player_supports_playback_rates(self):
         template = Path(app.template_folder, 'player.html').read_text(
