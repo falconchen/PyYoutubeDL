@@ -123,10 +123,19 @@ class TestPlayerPage(unittest.TestCase):
                 page_template.index('class="player-header-row"'),
                 page_template.index('class="player-nav"'),
             )
+        self.assertNotIn('播放已下载的精彩内容', template)
+        self.assertNotIn('聆听已下载的音频内容', audio_template)
         self.assertIn('align-items: center;', css)
         self.assertIn('margin-top: 0;', css)
         self.assertIn('border-radius: 999px;', css)
         self.assertIn('background: #fff7f7;', css)
+
+        mobile_css = css.split('@media (max-width: 480px)', 1)[1]
+        self.assertIn('flex-wrap: nowrap;', mobile_css)
+        self.assertIn('font-size: clamp(1rem, 4.8vw, 1.2rem);', mobile_css)
+        self.assertIn('min-height: 32px;', mobile_css)
+        self.assertNotIn('flex-wrap: wrap;', mobile_css)
+        self.assertIn('@media (max-width: 360px)', mobile_css)
 
     def test_download_control_is_rendered_for_current_video(self):
         with tempfile.TemporaryDirectory() as files_dir:
