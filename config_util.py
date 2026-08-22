@@ -14,6 +14,8 @@ DEFAULT_CONFIG = {
     "FILES_DIR": "./files",         # 下载完成后的文件存放目录
     "LOG_DIR": "../logs",           # 日志存放目录
     "MAX_WORKERS": 4,               # 最大并行下载数
+    "PLAYLIST_MAX_ITEMS": 500,      # 单个播放列表最多展开的任务数，超出则拒绝
+    "DOWNLOAD_MIN_INTERVAL_SECONDS": 10, # 两次下载启动的最小间隔（秒），0 表示不限速
     "MAX_LOG_SIZE": 10 * 1024 * 1024, # 单个日志文件最大字节数
     "BACKUP_COUNT": 5,              # 日志备份保留数量
     "YT_DLP_OUTPUT_TEMPLATE": "%(title.0:20)s-%(id)s.%(ext)s", # yt-dlp 文件名输出模板

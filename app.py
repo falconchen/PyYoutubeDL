@@ -137,26 +137,177 @@ def get_current_time():
     timezone = pytz.timezone(config["TIMEZONE"])
     return datetime.now(timezone)
 
-def create_tasks(url, types):
-    """创建下载任务并返回任务ID列表
-    
+
+# 播放列表解析超时（秒）。解析依赖网络与 cookies，超时后明确报错而不是静默降级。
+PLAYLIST_RESOLVE_TIMEOUT_SECONDS = 60
+
+# 频道主页下被视为内容列表的标签页；community/about/search 等不算
+CHANNEL_CONTENT_TABS = {'videos', 'shorts', 'streams', 'podcasts', 'releases'}
+
+
+def _is_channel_content_path(path):
+    """判断 YouTube 路径是否为频道主页或内容标签页（可逐集解析的列表）。"""
+    path = (path or '').lower().rstrip('/')
+    segments = [segment for segment in path.split('/') if segment]
+    if not segments:
+        return False
+    if segments[0].startswith('@'):
+        # /@handle 频道主页，或 /@handle/<内容标签页>
+        if len(segments) == 1:
+            return True
+        return segments[1] in CHANNEL_CONTENT_TABS
+    # /channel/<id>、/c/<name>、/user/<name> 及其任意子路径
+    return segments[0] in {'channel', 'c', 'user'}
+
+
+def _pick_ytdlp_conf(mode='video'):
+    """选择 yt-dlp 配置文件，优先使用 .local.conf 本机覆盖版本。"""
+    default_conf_file = 'yt-dlp.conf' if mode == 'video' else 'yta-dlp.conf'
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    local_conf_path = os.path.join(
+        script_dir,
+        default_conf_file.replace('.conf', '.local.conf'),
+    )
+    default_conf_path = os.path.join(script_dir, default_conf_file)
+    if os.path.exists(local_conf_path):
+        return local_conf_path
+    return default_conf_path
+
+
+def looks_like_playlist(url):
+    """判断 URL 是否疑似播放列表，命中才执行 yt-dlp 解析，避免单视频提交变慢。"""
+    if not isinstance(url, str) or not url.strip():
+        return False
+    try:
+        parsed = urlparse(url.strip())
+    except ValueError:
+        return False
+    if not parsed.scheme or not parsed.hostname:
+        return False
+    host = parsed.hostname.lower().rstrip('.')
+    if host in {
+        'youtube.com', 'www.youtube.com', 'm.youtube.com',
+        'music.youtube.com', 'youtube-nocookie.com',
+    }:
+        query = parse_qs(parsed.query)
+        if query.get('list') and any(query['list']):
+            return True
+        path = parsed.path.lower()
+        if (
+            path.startswith('/playlist')
+            or path.startswith('/playlists')
+            or path.startswith('/mix')
+        ):
+            return True
+        # 频道主页或内容标签页（/@handle/videos、/channel/UCxxx/videos 等）
+        if _is_channel_content_path(path):
+            return True
+    return False
+
+
+def resolve_playlist_urls(url, conf_path):
+    """使用 yt-dlp flat-playlist 模式提取播放列表各条目 URL。
+
     Args:
-        url (str): 要下载的URL
+        url (str): 播放列表 URL。
+        conf_path (str): yt-dlp 配置文件路径（含 cookies 等）。
+
+    Returns:
+        tuple: (urls, error)。成功时 urls 为条目 URL 列表、error 为 None；
+        失败时 urls 为 None、error 为错误说明。
+    """
+    cmd = [
+        'yt-dlp',
+        '--config-location', conf_path,
+        '--flat-playlist',
+        '--print', '%(id)s|%(webpage_url)s',
+        '--no-warnings',
+        '--ignore-errors',
+        url,
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=PLAYLIST_RESOLVE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, f"解析播放列表失败: {exc}"
+
+    if result.returncode != 0:
+        stderr = (result.stderr or '').strip()
+        detail = stderr.splitlines()[-1] if stderr else ''
+        return None, f"解析播放列表失败 (yt-dlp 退出码 {result.returncode}): {detail}"
+
+    urls = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split('|', 1)
+        if len(parts) != 2:
+            continue
+        entry_url = parts[1].strip()
+        if entry_url and entry_url.lower() != 'na':
+            urls.append(entry_url)
+    return urls, None
+
+
+def expand_task_urls(url):
+    """将提交的 URL 展开为待下载的 URL 列表。
+
+    疑似播放列表的 URL 会被解析成逐集 URL；普通视频 URL 原样返回。
+    解析失败或超过上限时返回错误，由调用方提示用户。
+
+    Returns:
+        tuple: (urls, error)。成功时 urls 为 URL 列表、error 为 None。
+    """
+    if not looks_like_playlist(url):
+        return [url], None
+
+    urls, error = resolve_playlist_urls(url, _pick_ytdlp_conf('video'))
+    if error:
+        return None, error
+
+    max_items = config.get("PLAYLIST_MAX_ITEMS", 500)
+    if not isinstance(max_items, int) or max_items <= 0:
+        max_items = 500
+    if len(urls) > max_items:
+        return None, (
+            f"播放列表包含 {len(urls)} 个视频，超过上限 {max_items}"
+            f"（可在 config.json 中调整 PLAYLIST_MAX_ITEMS）"
+        )
+    if not urls:
+        return None, "播放列表解析结果为空，请检查链接是否为公开播放列表"
+    return urls, None
+
+
+def create_tasks(urls, types):
+    """创建下载任务并返回任务ID列表
+
+    Args:
+        urls (list): 要下载的 URL 列表（播放列表已展开为逐集 URL）。
         types (list): 下载类型列表，可以是 ['video'] 或 ['audio'] 或两者都有
-        
+
     Returns:
         list: 创建的任务ID列表
     """
     task_ids = []
     current_time = get_current_time()
-    for t in types:
-        timestamp = current_time.strftime('%Y%m%d%H%M%S') + random_str(3)
-        prefix = 'v' if t == 'video' else 'a'
-        task_id = f"{prefix}{timestamp}"
-        task_ids.append(task_id)
-        filename = os.path.join(URLS_DIR, f"{task_id}.txt")
-        with open(filename, 'w') as f:
-            f.write(url)
+    for url in urls:
+        for t in types:
+            # 同一秒内创建多个任务时保证 task_id 唯一，避免覆盖已有任务文件
+            while True:
+                timestamp = current_time.strftime('%Y%m%d%H%M%S') + random_str(3)
+                prefix = 'v' if t == 'video' else 'a'
+                task_id = f"{prefix}{timestamp}"
+                filename = os.path.join(URLS_DIR, f"{task_id}.txt")
+                if not os.path.exists(filename):
+                    break
+            task_ids.append(task_id)
+            with open(filename, 'w') as f:
+                f.write(url)
     return task_ids
 
 
@@ -1208,9 +1359,30 @@ def index():
         # 从分享文本中提取URL
         url = extract_url(url)
 
-        # 使用新的辅助函数创建任务
-        task_ids = create_tasks(url, types)
-        
+        if not url:
+            return render_template(
+                'index.html',
+                url='',
+                types=types,
+                tasks=[],
+                error='请输入有效的视频或播放列表链接',
+                show_waline=config.get("SHOW_WALINE_ON_INDEX", False),
+            ), 400
+
+        # 播放列表展开为逐集 URL，再逐个创建任务
+        urls, error = expand_task_urls(url)
+        if error:
+            return render_template(
+                'index.html',
+                url=url,
+                types=types,
+                tasks=[],
+                error=error,
+                show_waline=config.get("SHOW_WALINE_ON_INDEX", False),
+            ), 400
+
+        task_ids = create_tasks(urls, types)
+
         # 构建重定向URL，包含所有参数
         redirect_url = url_for('index', 
                              url=url,
@@ -1228,6 +1400,7 @@ def index():
                          url=url,
                          types=types,
                          tasks=tasks,
+                         error='',
                          show_waline=config.get("SHOW_WALINE_ON_INDEX", False))
 
 
@@ -1563,10 +1736,18 @@ def api_add_task():
         # 支持表单传递的字符串类型
         types = [types]
 
+    # 播放列表展开为逐集 URL，再逐个创建任务
+    urls, error = expand_task_urls(url)
+    if error:
+        return jsonify({"success": False, "msg": error}), 400
+
     # 使用新的辅助函数创建任务
-    tasks = create_tasks(url, types)
-    
-    msg = "Task added successfully" if len(tasks) == 1 else "Tasks added successfully"
+    tasks = create_tasks(urls, types)
+
+    if len(urls) > 1:
+        msg = f"播放列表已解析为 {len(urls)} 个视频，共创建 {len(tasks)} 个任务"
+    else:
+        msg = "Task added successfully" if len(tasks) == 1 else "Tasks added successfully"
     return jsonify({"success": True, "msg": msg, "tasks": tasks})
 
 @app.route('/api/task_info', methods=['POST'])

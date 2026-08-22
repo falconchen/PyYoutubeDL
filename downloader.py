@@ -8,6 +8,7 @@ import subprocess
 import json
 import logging
 import tempfile
+import threading
 from logging.handlers import RotatingFileHandler
 from concurrent.futures import ThreadPoolExecutor
 from watchdog.observers import Observer
@@ -343,6 +344,37 @@ def write_task_result(task_id, filenames, summary=None):
                 pass
 
 
+class DownloadRateGate:
+    """全局下载启动节流器：控制相邻两次下载启动的最小间隔。
+
+    所有 worker 共享同一实例：acquire() 会按配置等待，使相邻两次下载启动
+    间隔不小于 DOWNLOAD_MIN_INTERVAL_SECONDS。同时运行的下载数由
+    MAX_WORKERS 线程池大小限制。
+    """
+
+    def __init__(self, min_interval_seconds=0):
+        self._interval = max(0.0, float(min_interval_seconds or 0))
+        self._lock = threading.Lock()
+        self._next_start = 0.0
+
+    def acquire(self):
+        """获取一次下载启动许可，必要时等待节流间隔。"""
+        with self._lock:
+            now = time.monotonic()
+            wait = self._next_start - now
+            if wait > 0:
+                logger.info("等待下载节流，%.1f 秒后开始下一个下载", wait)
+                time.sleep(wait)
+                now = time.monotonic()
+            self._next_start = max(self._next_start, now) + self._interval
+
+
+# 全局下载节流实例（进程内所有 worker 共享）
+download_gate = DownloadRateGate(
+    min_interval_seconds=config.get("DOWNLOAD_MIN_INTERVAL_SECONDS", 0),
+)
+
+
 class DownloadHandler(FileSystemEventHandler):
     def __init__(self, executor):
         super().__init__()
@@ -493,6 +525,8 @@ class DownloadHandler(FileSystemEventHandler):
             logger.error(f"创建临时目录失败: {e}")
             return False
 
+        # 全局下载节流：控制播放列表/批量任务的启动节奏
+        download_gate.acquire()
         try:
             # buffering=1 开启行级缓存
             with open(log_path, 'w', encoding='utf-8', buffering=1) as log_file:

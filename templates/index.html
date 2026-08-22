@@ -18,7 +18,7 @@
         <form method="post" class="download-form">
             <div class="input-group">
                 <i class="fas fa-link"></i>
-                <input type="text" name="url" placeholder="请输入 YouTube 视频链接或ID" required class="input" value="">
+                <input type="text" name="url" placeholder="请输入 YouTube 视频、播放列表链接或分享文本" required class="input" value="{{ url }}">
             </div>
             <div class="checkbox-group">
                 <label class="checkbox-label">
@@ -33,6 +33,10 @@
             <button type="submit" class="btn">
                 <i class="fas fa-download"></i> 开始下载
             </button>
+            {% if error %}
+            <div class="error-message" role="alert">{{ error }}</div>
+            {% endif %}
+            <p class="form-hint">播放列表会解析为逐集独立任务，受下载节流控制，每下载完一集立即入库并上传。</p>
         </form>
         <div class="player-links">
             <a href="{{ url_for('player') }}" class="player-link">

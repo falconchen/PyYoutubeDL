@@ -317,6 +317,7 @@ class TestDownloaderMove(unittest.TestCase):
                             return_value=None,
                         ),
                         patch.object(self.handler, 'move_files', return_value=True),
+                        patch('downloader.download_gate', MagicMock()),
                     ):
                         result = self.handler.download(
                             'https://example.com/media',
@@ -428,6 +429,7 @@ class TestDownloaderMove(unittest.TestCase):
                     return_value=process,
                 ) as popen,
                 patch.object(self.handler, 'move_files', return_value=True),
+                patch('downloader.download_gate', MagicMock()),
             ):
                 result = self.handler.download(
                     'https://example.com/video',
