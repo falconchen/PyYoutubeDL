@@ -30,13 +30,13 @@
                     <i class="fas fa-music"></i> 音频
                 </label>
             </div>
+            <p class="form-hint"><span class="new-badge">NEW</span> 支持播放列表下载</p>
             <button type="submit" class="btn">
                 <i class="fas fa-download"></i> 开始下载
             </button>
             {% if error %}
             <div class="error-message" role="alert">{{ error }}</div>
             {% endif %}
-            <p class="form-hint">播放列表会解析为逐集独立任务，受下载节流控制，每下载完一集立即入库并上传。</p>
         </form>
         <div class="player-links">
             <a href="{{ url_for('player') }}" class="player-link">
