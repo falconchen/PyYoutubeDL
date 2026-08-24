@@ -44,6 +44,14 @@ vim config.json
 
 `start` 和 `restart` 会自动激活虚拟环境、更新 pip 与 yt-dlp，然后显式使用该虚拟环境的 Python 启动 Web 应用、下载器和上传器，不依赖各脚本的 shebang。`stop` 不更新依赖；在 Devil 环境中，单独执行 `stop` 不会重启 Devil 管理的 Web 应用，`restart` 则保持原有的 Devil 重启行为。
 
+使用 Supervisor 部署时，可运行专用维护脚本更新 pip 和 yt-dlp，并由 Supervisor 重启 Web 应用、下载器、AI 总结及 WebDAV 服务：
+
+```bash
+./runner-supervisor.sh
+```
+
+该脚本要求项目虚拟环境位于 `venv/`，并要求 `/usr/bin/supervisorctl` 可用。依赖更新失败时脚本会立即退出，不会继续重启服务。定时执行时建议使用 `flock` 防止任务重叠，并将输出重定向到日志文件。
+
 停止本项目通过 Python 启动的 Web 应用、下载器、上传器及其子进程：
 
 ```bash
@@ -362,6 +370,7 @@ PyYoutubeDL/
 ├── downloader.py         # 下载器（watchdog + yt-dlp）
 ├── webdav_uploader.py    # WebDAV 上传器
 ├── runner.sh             # 启动脚本
+├── runner-supervisor.sh  # Supervisor 部署维护脚本
 ├── stop.py               # 停止脚本
 ├── setup_pyyoutubedl_service.sh  # systemd 服务安装脚本
 ├── config.json           # 配置文件
