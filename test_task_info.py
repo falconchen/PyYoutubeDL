@@ -231,6 +231,18 @@ class TestTaskInfoAPI(unittest.TestCase):
         self.assertIn('progress.average_speed_bytes_per_second', template)
         self.assertIn('detailParts.push(`${finalSize} in ${elapsed}`);', template)
 
+    def test_video_duration_template_rounds_fractional_seconds(self):
+        template = Path(app.app.template_folder, 'index.html').read_text(
+            encoding='utf-8',
+        )
+
+        self.assertIn(
+            'const totalSeconds = Math.round(Number(data.duration) || 0);',
+            template,
+        )
+        self.assertIn('const minutes = Math.floor(totalSeconds / 60);', template)
+        self.assertIn('const seconds = totalSeconds % 60;', template)
+
     def test_completed_task_is_always_100_percent(self):
         task_id = 'v20260723120000QwE'
         self.write_task(task_id, '.ok')

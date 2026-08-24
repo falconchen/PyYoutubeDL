@@ -223,8 +223,9 @@
                     );
 
                     // 设置时长
-                    const minutes = Math.floor(data.duration / 60);
-                    const seconds = data.duration % 60;
+                    const totalSeconds = Math.round(Number(data.duration) || 0);
+                    const minutes = Math.floor(totalSeconds / 60);
+                    const seconds = totalSeconds % 60;
                     duration.innerHTML = `<i class="fas fa-clock"></i> ${minutes}:${seconds.toString().padStart(2, '0')}`;
 
                     // 隐藏骨架屏，显示视频信息
