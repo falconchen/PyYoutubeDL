@@ -336,6 +336,94 @@ class TestDownloaderMove(unittest.TestCase):
                         cmd.index('--add-metadata'),
                         cmd.index('https://example.com/media'),
                     )
+                    self.assertIn('--print', cmd)
+                    self.assertIn(
+                        f'after_move:{downloader.ITEM_COMPLETE_PREFIX}%(filepath)j',
+                        cmd,
+                    )
+                    self.assertGreater(
+                        cmd.index('--no-quiet'),
+                        cmd.index('--print'),
+                    )
+
+    def test_completed_playlist_item_is_moved_before_process_exits(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            log_dir = root_path / 'logs'
+            tmp_root = root_path / 'tmp'
+            files_dir = root_path / 'files'
+            urls_dir = root_path / 'urls'
+            for directory in (log_dir, tmp_root, files_dir, urls_dir):
+                directory.mkdir()
+
+            task_id = 'video-playlist-item'
+            task_tmp_dir = tmp_root / task_id
+            task_tmp_dir.mkdir()
+            media = task_tmp_dir / 'video.mp4'
+            subtitle = task_tmp_dir / 'video.zh-Hans.srt'
+            media.write_bytes(b'video')
+            subtitle.write_text('subtitle', encoding='utf-8')
+            marker = (
+                f'{downloader.ITEM_COMPLETE_PREFIX}'
+                f'{json.dumps(str(media), ensure_ascii=False)}\n'
+            )
+            process = MagicMock(stdout=[marker], returncode=0)
+
+            def assert_moved_before_wait():
+                self.assertTrue((files_dir / 'video.mp4').exists())
+                self.assertTrue((files_dir / 'video.zh-Hans.srt').exists())
+
+            process.wait.side_effect = assert_moved_before_wait
+
+            with (
+                patch.dict(
+                    downloader.config,
+                    {
+                        'LOG_DIR': str(log_dir),
+                        'TMP_DIR': str(tmp_root),
+                        'FILES_DIR': str(files_dir),
+                        'URLS_DIR': str(urls_dir),
+                    },
+                ),
+                patch('downloader.subprocess.Popen', return_value=process),
+                patch('downloader.probe_subtitle_fallback', return_value=None),
+                patch('downloader.download_gate', MagicMock()),
+            ):
+                result = self.handler.download(
+                    'https://example.com/playlist',
+                    task_id,
+                    'video',
+                    started_at=0,
+                )
+
+            self.assertTrue(result)
+            self.assertFalse(task_tmp_dir.exists())
+            result_data = json.loads(
+                (urls_dir / f'{task_id}.result.json').read_text(encoding='utf-8')
+            )
+            self.assertEqual(
+                set(result_data['files']),
+                {'video.mp4', 'video.zh-Hans.srt'},
+            )
+
+    def test_completed_item_outside_task_directory_is_rejected(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            tmp_dir = root_path / 'tmp' / 'task'
+            files_dir = root_path / 'files'
+            tmp_dir.mkdir(parents=True)
+            files_dir.mkdir()
+            outside = root_path / 'outside.mp4'
+            outside.write_bytes(b'video')
+
+            with patch.dict(downloader.config, {'FILES_DIR': str(files_dir)}):
+                result = self.handler.move_completed_item(
+                    str(tmp_dir),
+                    str(outside),
+                )
+
+            self.assertIsNone(result)
+            self.assertTrue(outside.exists())
 
     def test_subtitle_fallback_is_not_used_when_config_matched(self):
         result = downloader.select_subtitle_fallback({

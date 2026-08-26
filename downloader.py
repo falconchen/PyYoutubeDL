@@ -44,6 +44,8 @@ NON_SUMMARY_SUBTITLE_LANGUAGES = {
     'danmaku',
 }
 SUBTITLE_PROBE_TIMEOUT_SECONDS = 120
+ITEM_COMPLETE_PREFIX = 'PYDL_ITEM_COMPLETE|'
+SUBTITLE_OUTPUT_EXTENSIONS = {'.ass', '.lrc', '.srt', '.ssa', '.ttml', '.vtt'}
 
 
 def _available_subtitle_languages(subtitle_map):
@@ -344,6 +346,22 @@ def write_task_result(task_id, filenames, summary=None):
                 pass
 
 
+def parse_completed_item_path(line):
+    """从 yt-dlp 的 after_move 输出中解析单个条目的最终媒体路径。"""
+    if not line.startswith(ITEM_COMPLETE_PREFIX):
+        return None
+    payload = line[len(ITEM_COMPLETE_PREFIX):]
+    try:
+        filepath = json.loads(payload)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("无法解析条目完成标记: %s", line)
+        return None
+    if not isinstance(filepath, str) or not filepath:
+        logger.warning("条目完成标记未包含有效路径: %s", line)
+        return None
+    return filepath
+
+
 class DownloadRateGate:
     """全局下载启动节流器：控制相邻两次下载启动的最小间隔。
 
@@ -514,6 +532,9 @@ class DownloadHandler(FileSystemEventHandler):
                 '%(progress._eta_str)s|%(info.ext)s|%(info.format_id)s|'
                 '%(info.vcodec)s|%(info.acodec)s'
             ),
+            '--print',
+            f'after_move:{ITEM_COMPLETE_PREFIX}%(filepath)j',
+            '--no-quiet',          # --print 默认启用 quiet，保留原有详细下载日志
             *dynamic_subtitle_args,
             '-o', os.path.join(task_tmp_dir, output_template),
             url
@@ -527,6 +548,8 @@ class DownloadHandler(FileSystemEventHandler):
 
         # 全局下载节流：控制播放列表/批量任务的启动节奏
         download_gate.acquire()
+        moved_filepaths = []
+        moved_file_sizes = {}
         try:
             # buffering=1 开启行级缓存
             with open(log_path, 'w', encoding='utf-8', buffering=1) as log_file:
@@ -547,6 +570,16 @@ class DownloadHandler(FileSystemEventHandler):
                     log_file.flush()
                     # 3. 同时写入 logger（downloader.log），级别使用 info
                     logger.info(stripped)
+                    completed_filepath = parse_completed_item_path(stripped)
+                    if completed_filepath:
+                        moved = self.move_completed_item(
+                            task_tmp_dir,
+                            completed_filepath,
+                        )
+                        if moved is not None:
+                            item_filepaths, item_file_sizes = moved
+                            moved_filepaths.extend(item_filepaths)
+                            moved_file_sizes.update(item_file_sizes)
                 
                 process.wait()
                 if process.returncode != 0:
@@ -557,6 +590,8 @@ class DownloadHandler(FileSystemEventHandler):
                 task_id=base_name,
                 mode=mode,
                 started_at=started_at,
+                previous_moved_filepaths=moved_filepaths,
+                previous_moved_file_sizes=moved_file_sizes,
             ):
                 logger.error(f"下载产物移动失败，临时文件已保留: {task_tmp_dir}")
                 return False
@@ -579,7 +614,71 @@ class DownloadHandler(FileSystemEventHandler):
                         content=f"{url} 下载失败，错误信息: {e}")
             return False
 
-    def move_files(self, tmp_dir, task_id=None, mode=None, started_at=None):
+    def _move_paths(self, paths):
+        """移动给定产物并返回成功移动的路径、大小及整体结果。"""
+        move_succeeded = True
+        moved_filepaths = []
+        moved_file_sizes = {}
+        for src in paths:
+            if not os.path.exists(src):
+                logger.warning(f"源文件不存在，跳过处理: {src}")
+                continue
+            dst = os.path.join(config["FILES_DIR"], os.path.basename(src))
+            try:
+                source_size = os.path.getsize(src)
+                final_dst = move_without_overwrite(src, dst)
+                if final_dst != dst:
+                    logger.info(
+                        f"目标文件已存在，自动重命名为: {os.path.basename(final_dst)}"
+                    )
+                logger.info(f"已移动文件: {src} -> {final_dst}")
+                moved_filepaths.append(final_dst)
+                moved_file_sizes[final_dst] = source_size
+            except Exception as e:
+                logger.error(f"移动文件失败: {src}, 错误信息: {e}")
+                move_succeeded = False
+        return move_succeeded, moved_filepaths, moved_file_sizes
+
+    def move_completed_item(self, tmp_dir, completed_filepath):
+        """立即移动一个完成的媒体条目及其外挂字幕。"""
+        tmp_dir_realpath = os.path.realpath(tmp_dir)
+        completed_realpath = os.path.realpath(completed_filepath)
+        try:
+            is_in_tmp_dir = os.path.commonpath(
+                [tmp_dir_realpath, completed_realpath]
+            ) == tmp_dir_realpath
+        except ValueError:
+            is_in_tmp_dir = False
+        if not is_in_tmp_dir:
+            logger.error("拒绝移动任务临时目录外的条目: %s", completed_filepath)
+            return None
+        if not os.path.isfile(completed_filepath):
+            logger.error("条目完成标记对应的媒体文件不存在: %s", completed_filepath)
+            return None
+
+        media_basename = os.path.basename(completed_filepath)
+        media_stem = os.path.splitext(media_basename)[0]
+        paths = [completed_filepath]
+        for filename in os.listdir(tmp_dir):
+            if filename == media_basename or not filename.startswith(f'{media_stem}.'):
+                continue
+            if os.path.splitext(filename)[1].lower() in SUBTITLE_OUTPUT_EXTENSIONS:
+                paths.append(os.path.join(tmp_dir, filename))
+
+        move_succeeded, moved_filepaths, moved_file_sizes = self._move_paths(paths)
+        if not move_succeeded:
+            logger.error("条目产物移动不完整，将在任务结束时重试: %s", media_basename)
+        return moved_filepaths, moved_file_sizes
+
+    def move_files(
+        self,
+        tmp_dir,
+        task_id=None,
+        mode=None,
+        started_at=None,
+        previous_moved_filepaths=None,
+        previous_moved_file_sizes=None,
+    ):
         """
         将下载完成的文件从临时目录移动到正式的文件输出目录。
 
@@ -589,28 +688,17 @@ class DownloadHandler(FileSystemEventHandler):
             mode (str | None): video 或 audio，用于选择最终主媒体。
             started_at (float | None): 完整处理计时起点。
         """
-        move_succeeded = True
-        moved_filenames = []
-        moved_filepaths = []
-        moved_file_sizes = {}
-        for filename in os.listdir(tmp_dir):
-            src = os.path.join(tmp_dir, filename)
-            dst = os.path.join(config["FILES_DIR"], filename)
-            if not os.path.exists(src):
-                logger.warning(f"源文件不存在，跳过处理: {src}")
-                continue
-            try:
-                source_size = os.path.getsize(src)
-                final_dst = move_without_overwrite(src, dst)
-                if final_dst != dst:
-                    logger.info(f"目标文件已存在，自动重命名为: {os.path.basename(final_dst)}")
-                logger.info(f"已移动文件: {src} -> {final_dst}")
-                moved_filenames.append(os.path.basename(final_dst))
-                moved_filepaths.append(final_dst)
-                moved_file_sizes[final_dst] = source_size
-            except Exception as e:
-                logger.error(f"移动文件失败: {src}, 错误信息: {e}")
-                move_succeeded = False
+        moved_filepaths = list(previous_moved_filepaths or [])
+        moved_file_sizes = dict(previous_moved_file_sizes or {})
+        remaining_paths = [
+            os.path.join(tmp_dir, filename) for filename in os.listdir(tmp_dir)
+        ]
+        move_succeeded, final_filepaths, final_file_sizes = self._move_paths(
+            remaining_paths
+        )
+        moved_filepaths.extend(final_filepaths)
+        moved_file_sizes.update(final_file_sizes)
+        moved_filenames = [os.path.basename(path) for path in moved_filepaths]
         if move_succeeded and os.path.exists(tmp_dir):
             try:
                 shutil.rmtree(tmp_dir)
