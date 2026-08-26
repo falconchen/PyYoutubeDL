@@ -36,6 +36,11 @@ audio_webdav = None
 video_webdav_host = None
 audio_webdav_host = None
 
+# OpenList 等 WebDAV 服务可能在系统启动时晚于上传器就绪。连接失败期间收到的
+# 文件事件先保存在内存队列中，连接恢复后再处理，避免静默丢失上传任务。
+pending_files = set()
+pending_files_lock = threading.Lock()
+
 def get_webdav_methods(url, username, password):
     """
     获取 WebDAV 服务器支持的所有 HTTP 方法。
@@ -100,63 +105,71 @@ def initialize_webdav_clients():
     global video_webdav, audio_webdav
     global video_webdav_host, audio_webdav_host
 
-    try:
-        video_webdav = Client(config["VIDEO_WEBDAV_OPTIONS"])
+    if video_webdav is None:
         video_webdav_host = config["VIDEO_WEBDAV_OPTIONS"]["webdav_hostname"].split("//")[-1]
-        # list() 成功返回即表示目录可访问；空列表只代表当前没有子目录或文件。
-        video_webdav.list("/")
-        logger.info(f"视频WebDAV连接成功，主机: {video_webdav_host}")
-        allow_methods = get_webdav_methods(
-            config["VIDEO_WEBDAV_OPTIONS"]["webdav_hostname"],
-            config["VIDEO_WEBDAV_OPTIONS"]["webdav_login"],
-            config["VIDEO_WEBDAV_OPTIONS"]["webdav_password"]
-        )
-        if allow_methods:
-            logger.info(f"视频WebDAV服务器支持的方法: {allow_methods}")
-        else:
-            logger.warning("无法获取视频服务器支持的方法")
+        try:
+            candidate = Client(config["VIDEO_WEBDAV_OPTIONS"])
+            # list() 成功返回即表示目录可访问；空列表只代表当前没有子目录或文件。
+            candidate.list("/")
+            video_webdav = candidate
+            logger.info(f"视频WebDAV连接成功，主机: {video_webdav_host}")
+            allow_methods = get_webdav_methods(
+                config["VIDEO_WEBDAV_OPTIONS"]["webdav_hostname"],
+                config["VIDEO_WEBDAV_OPTIONS"]["webdav_login"],
+                config["VIDEO_WEBDAV_OPTIONS"]["webdav_password"]
+            )
+            if allow_methods:
+                logger.info(f"视频WebDAV服务器支持的方法: {allow_methods}")
+            else:
+                logger.warning("无法获取视频服务器支持的方法")
 
-        video_keep = config.get("VIDEO_WEBDAV_KEEP_COUNT", 3)
-        cleanup_webdav_directories(
-            video_webdav,
-            video_keep,
-            video_webdav_host,
-            "Video",
-        )
-    except Exception as e:
-        logger.error(f"视频WebDAV连接失败: {e}")
-        video_webdav = None
+            video_keep = config.get("VIDEO_WEBDAV_KEEP_COUNT", 3)
+            cleanup_webdav_directories(
+                video_webdav,
+                video_keep,
+                video_webdav_host,
+                "Video",
+            )
+        except Exception as e:
+            logger.error(f"视频WebDAV连接失败: {e}")
+            video_webdav = None
 
-    try:
-        audio_webdav = Client(config["AUDIO_WEBDAV_OPTIONS"])
+    if audio_webdav is None:
         audio_webdav_host = config["AUDIO_WEBDAV_OPTIONS"]["webdav_hostname"].split("//")[-1]
-        # 与视频目录一致，空目录不能作为连接失败的依据。
-        audio_webdav.list("/")
-        logger.info(f"音频WebDAV连接成功，主机: {audio_webdav_host}")
-        allow_methods = get_webdav_methods(
-            config["AUDIO_WEBDAV_OPTIONS"]["webdav_hostname"],
-            config["AUDIO_WEBDAV_OPTIONS"]["webdav_login"],
-            config["AUDIO_WEBDAV_OPTIONS"]["webdav_password"]
-        )
-        if allow_methods:
-            logger.info(f"音频WebDAV服务器支持的方法: {allow_methods}")
-        else:
-            logger.warning("无法获取音频服务器支持的方法")
+        try:
+            candidate = Client(config["AUDIO_WEBDAV_OPTIONS"])
+            # 与视频目录一致，空目录不能作为连接失败的依据。
+            candidate.list("/")
+            audio_webdav = candidate
+            logger.info(f"音频WebDAV连接成功，主机: {audio_webdav_host}")
+            allow_methods = get_webdav_methods(
+                config["AUDIO_WEBDAV_OPTIONS"]["webdav_hostname"],
+                config["AUDIO_WEBDAV_OPTIONS"]["webdav_login"],
+                config["AUDIO_WEBDAV_OPTIONS"]["webdav_password"]
+            )
+            if allow_methods:
+                logger.info(f"音频WebDAV服务器支持的方法: {allow_methods}")
+            else:
+                logger.warning("无法获取音频服务器支持的方法")
 
-        audio_keep = config.get("AUDIO_WEBDAV_KEEP_COUNT", 5)
-        cleanup_webdav_directories(
-            audio_webdav,
-            audio_keep,
-            audio_webdav_host,
-            "Audio",
-        )
-    except Exception as e:
-        logger.error(f"音频WebDAV连接失败: {e}")
-        audio_webdav = None
+            audio_keep = config.get("AUDIO_WEBDAV_KEEP_COUNT", 5)
+            cleanup_webdav_directories(
+                audio_webdav,
+                audio_keep,
+                audio_webdav_host,
+                "Audio",
+            )
+        except Exception as e:
+            logger.error(f"音频WebDAV连接失败: {e}")
+            audio_webdav = None
 
 # 读取最大重试次数
 UPLOAD_MAX_RETRIES = config.get("UPLOAD_MAX_RETRIES", 3)
 UPLOAD_RETRY_DELAY = config.get("UPLOAD_RETRY_DELAY", 60)
+WEBDAV_RECONNECT_INTERVAL = max(
+    1,
+    int(config.get("WEBDAV_RECONNECT_INTERVAL", 30)),
+)
 
 # 记录每个文件的重试次数
 retry_count = {}
@@ -242,6 +255,20 @@ class WebDAVUploadHandler(FileSystemEventHandler):
             logger.info(f"检测到文件重命名: {event.src_path} -> {event.dest_path}")
             self.process_file(event.dest_path)
 
+    def process_pending_files(self):
+        """处理 WebDAV 不可用期间积压且仍然存在的文件。"""
+        with pending_files_lock:
+            queued_paths = sorted(pending_files)
+            pending_files.clear()
+
+        if not queued_paths:
+            return
+
+        logger.info(f"WebDAV连接恢复，开始处理 {len(queued_paths)} 个待上传文件")
+        for file_path in queued_paths:
+            if os.path.isfile(file_path):
+                self.process_file(file_path)
+
     def process_file(self, file_path):
         """
         处理文件上传流程：判断分类、连接WebDAV、执行上传、清理本地文件
@@ -291,7 +318,12 @@ class WebDAVUploadHandler(FileSystemEventHandler):
             return
 
         if not webdav_client:
-            logger.warning(f"{category} WebDAV未连接，跳过上传 (host: {webdav_host})")
+            with pending_files_lock:
+                pending_files.add(file_path)
+            logger.warning(
+                f"{category} WebDAV未连接，文件已加入等待队列 "
+                f"(host: {webdav_host}): {file_path}"
+            )
             return
 
         timezone_str = config.get('TIMEZONE', 'UTC')
@@ -400,6 +432,28 @@ class WebDAVUploadHandler(FileSystemEventHandler):
                     f"{file_path} | 类型: {category} | 服务器: {webdav_host}"
                 )
 
+
+def reconnect_webdav_clients(event_handler, stop_event):
+    """定期重连启动时尚未就绪的 WebDAV，并处理等待队列。"""
+    while not stop_event.wait(WEBDAV_RECONNECT_INTERVAL):
+        video_was_connected = video_webdav is not None
+        audio_was_connected = audio_webdav is not None
+        if video_was_connected and audio_was_connected:
+            continue
+
+        logger.info(
+            f"WebDAV尚未全部连接，将尝试重连 "
+            f"(间隔: {WEBDAV_RECONNECT_INTERVAL}秒)"
+        )
+        initialize_webdav_clients()
+
+        connection_restored = (
+            (not video_was_connected and video_webdav is not None)
+            or (not audio_was_connected and audio_webdav is not None)
+        )
+        if connection_restored:
+            event_handler.process_pending_files()
+
 def cleanup_expired_files(directory, days):
     """
     扫描并清理超过指定天数的文件
@@ -460,14 +514,26 @@ def main():
     observer.start()
     logger.info(f"开始监控目录: {config['FILES_DIR']}")
 
+    reconnect_stop_event = threading.Event()
+    reconnect_thread = threading.Thread(
+        target=reconnect_webdav_clients,
+        args=(event_handler, reconnect_stop_event),
+        name="webdav-reconnect",
+        daemon=True,
+    )
+    reconnect_thread.start()
+
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         observer.stop()
         logger.info("监控已停止")
+    finally:
+        reconnect_stop_event.set()
 
     observer.join()
+    reconnect_thread.join(timeout=1)
 
 if __name__ == '__main__':
     main() 

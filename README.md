@@ -238,6 +238,7 @@ video (2).mp4
 | `AUDIO_WEBDAV_OPTIONS` | object | 音频 WebDAV 远程存储配置 |
 | `UPLOAD_MAX_RETRIES` | int | 首次上传失败后的最大重试次数，默认 1；每次失败都会立即发送 Bark 通知 |
 | `UPLOAD_RETRY_DELAY` | int | WebDAV 上传重试间隔（秒），默认 60 |
+| `WEBDAV_RECONNECT_INTERVAL` | int | 上传器启动时 WebDAV 不可用的重连间隔（秒），默认 30；等待期间发现的媒体文件会排队并在连接恢复后上传 |
 | `BARK_DEVICE_TOKEN` | string | Bark 推送通知 Token |
 | `EXTENSION_LOG_TOKEN` | string | Chrome 扩展读取 `downloader.log` 的访问令牌；为空时禁用日志接口 |
 | `AI_SUMMARY_DB_PATH` | string | AI 总结 SQLite 数据库路径，默认 `./data/ai_summaries.sqlite3` |

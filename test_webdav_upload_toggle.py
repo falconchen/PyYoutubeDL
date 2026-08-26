@@ -10,9 +10,18 @@ from config_util import DEFAULT_CONFIG, is_webdav_upload_enabled
 
 
 class TestWebDAVUploadToggle(unittest.TestCase):
+    def setUp(self):
+        webdav_uploader.retry_count.clear()
+        webdav_uploader.pending_files.clear()
+
+    def tearDown(self):
+        webdav_uploader.retry_count.clear()
+        webdav_uploader.pending_files.clear()
+
     def test_upload_is_enabled_by_default(self):
         self.assertIs(DEFAULT_CONFIG['ENABLE_WEBDAV_UPLOAD'], True)
         self.assertEqual(DEFAULT_CONFIG['WEBDAV_UPLOAD_EXCLUDE_KEYWORDS'], [])
+        self.assertEqual(DEFAULT_CONFIG['WEBDAV_RECONNECT_INTERVAL'], 30)
         self.assertTrue(is_webdav_upload_enabled({}))
 
     def test_excluded_keyword_matching_ignores_empty_and_invalid_values(self):
@@ -197,6 +206,55 @@ start_services
                 self.assertIn('字幕文件', log_message)
                 self.assertIn('保留本地文件', log_message)
                 self.assertIn(str(subtitle_file), log_message)
+
+    def test_disconnected_webdav_queues_file_instead_of_dropping_it(self):
+        handler = webdav_uploader.WebDAVUploadHandler()
+
+        with tempfile.TemporaryDirectory() as root:
+            media_file = Path(root) / 'video.mp4'
+            media_file.write_bytes(b'video')
+            file_path = str(media_file)
+
+            with (
+                patch.dict(
+                    webdav_uploader.config,
+                    {
+                        'ENABLE_WEBDAV_UPLOAD': True,
+                        'WEBDAV_UPLOAD_EXCLUDE_KEYWORDS': [],
+                    },
+                ),
+                patch.object(webdav_uploader, 'video_webdav', None),
+                patch.object(webdav_uploader.logger, 'warning') as log_warning,
+            ):
+                handler.process_file(file_path)
+
+            self.assertIn(file_path, webdav_uploader.pending_files)
+            self.assertIn('等待队列', log_warning.call_args.args[0])
+
+    def test_reconnect_processes_queued_files_after_connection_recovers(self):
+        handler = webdav_uploader.WebDAVUploadHandler()
+        stop_event = MagicMock()
+        stop_event.wait.side_effect = [False, True]
+
+        def restore_clients():
+            webdav_uploader.video_webdav = MagicMock()
+            webdav_uploader.audio_webdav = MagicMock()
+
+        with (
+            patch.object(webdav_uploader, 'video_webdav', None),
+            patch.object(webdav_uploader, 'audio_webdav', None),
+            patch.object(
+                webdav_uploader,
+                'initialize_webdav_clients',
+                side_effect=restore_clients,
+            ) as initialize,
+            patch.object(handler, 'process_pending_files') as process_pending,
+            patch.object(webdav_uploader.logger, 'info'),
+        ):
+            webdav_uploader.reconnect_webdav_clients(handler, stop_event)
+
+        initialize.assert_called_once()
+        process_pending.assert_called_once()
 
     def test_upload_failure_notifies_immediately_and_retries_once(self):
         handler = webdav_uploader.WebDAVUploadHandler()
