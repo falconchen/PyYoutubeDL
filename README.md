@@ -236,6 +236,8 @@ video (2).mp4
 | `FILES_EXPIRE_DAYS` | int | 启动时清理超过 N 天的旧文件，0 表示不清理 |
 | `VIDEO_WEBDAV_OPTIONS` | object | 视频 WebDAV 远程存储配置 |
 | `AUDIO_WEBDAV_OPTIONS` | object | 音频 WebDAV 远程存储配置 |
+| `UPLOAD_MAX_RETRIES` | int | 首次上传失败后的最大重试次数，默认 1；每次失败都会立即发送 Bark 通知 |
+| `UPLOAD_RETRY_DELAY` | int | WebDAV 上传重试间隔（秒），默认 60 |
 | `BARK_DEVICE_TOKEN` | string | Bark 推送通知 Token |
 | `EXTENSION_LOG_TOKEN` | string | Chrome 扩展读取 `downloader.log` 的访问令牌；为空时禁用日志接口 |
 | `AI_SUMMARY_DB_PATH` | string | AI 总结 SQLite 数据库路径，默认 `./data/ai_summaries.sqlite3` |

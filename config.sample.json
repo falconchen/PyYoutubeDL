@@ -39,7 +39,7 @@
     "webdav_timeout": 30,
     "webdav_verbose": true
   },
-  "UPLOAD_MAX_RETRIES": 3,
+  "UPLOAD_MAX_RETRIES": 1,
   "UPLOAD_RETRY_DELAY": 60,
   "ENABLE_WEBDAV_UPLOAD": true,
   "WEBDAV_UPLOAD_EXCLUDE_KEYWORDS": [],

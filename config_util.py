@@ -36,7 +36,7 @@ DEFAULT_CONFIG = {
     "ENABLE_WEBDAV_UPLOAD": True,  # 是否将下载完成的文件上传到 WebDAV
     "WEBDAV_UPLOAD_EXCLUDE_KEYWORDS": [], # WebDAV 上传排除的文件名关键词
     "WEBDAV_OPTIONS": {},           # WebDAV 连接选项 (hostname, login, password 等)
-    "UPLOAD_MAX_RETRIES": 3,        # 上传失败最大重试次数
+    "UPLOAD_MAX_RETRIES": 1,        # 首次上传失败后的最大重试次数
     "UPLOAD_RETRY_DELAY": 60,       # 上传失败重试间隔（秒）
     "DELETE_AFTER_UPLOAD": True,    # 上传成功后是否删除本地文件
     "FILES_EXPIRE_DAYS": 1,         # 本地文件过期时间（天），超过此时间将被清理，0表示不清理

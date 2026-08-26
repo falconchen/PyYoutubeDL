@@ -334,17 +334,7 @@ class WebDAVUploadHandler(FileSystemEventHandler):
             logger.info(f"开始上传: {file_path} -> {remote_path}，文件大小: {file_size_mb:.2f} MB | 类型: {category} | 服务器: {webdav_host}")
 
             start_time = time.time()
-            try:
-                # 尝试使用不同的上传方法
-                webdav_client.upload_sync(remote_path=remote_path, local_path=file_path)
-            except Exception as upload_error:
-                logger.error(f"标准上传方法失败，尝试备用方法: {upload_error} | 类型: {category} | 服务器: {webdav_host}")
-                try:
-                    # 尝试使用PUT方法直接上传
-                    with open(file_path, 'rb') as f:
-                        webdav_client.put(remote_path, f.read())
-                except Exception as put_error:
-                    raise Exception(f"所有上传方法都失败: {put_error}")
+            webdav_client.upload_sync(remote_path=remote_path, local_path=file_path)
 
             elapsed = time.time() - start_time
             speed = file_size_mb / elapsed if elapsed > 0 else 0
@@ -368,19 +358,47 @@ class WebDAVUploadHandler(FileSystemEventHandler):
         except Exception as e:
             logger.error(f"上传到WebDAV失败: {file_path}，错误: {e} | 类型: {category} | 服务器: {webdav_host}")
             with retry_lock:
-                count = retry_count.get(file_path, 0) + 1
-                if count < UPLOAD_MAX_RETRIES:
-                    retry_count[file_path] = count
-                    logger.info(f"将在{UPLOAD_RETRY_DELAY}秒后重试（第{count}次）: {file_path} | 类型: {category} | 服务器: {webdav_host}")
-                    threading.Timer(UPLOAD_RETRY_DELAY, self.process_file, args=[file_path]).start()
+                completed_retries = retry_count.get(file_path, 0)
+                if completed_retries < UPLOAD_MAX_RETRIES:
+                    next_retry = completed_retries + 1
+                    retry_count[file_path] = next_retry
                 else:
-                    logger.error(f"文件已达到最大重试次数({UPLOAD_MAX_RETRIES})，放弃上传: {file_path} | 类型: {category} | 服务器: {webdav_host}")
-                    bark_notify(
-                        config['BARK_DEVICE_TOKEN'],
-                        title=f"上传失败 [{category}] [{webdav_host}]",
-                        content=f"文件 {os.path.basename(file_path)} 上传失败，已达到最大重试次数"
-                    )
+                    next_retry = None
                     retry_count.pop(file_path, None)
+
+            if next_retry is not None:
+                retry_status = (
+                    f"将在{UPLOAD_RETRY_DELAY}秒后进行第"
+                    f"{next_retry}/{UPLOAD_MAX_RETRIES}次重试"
+                )
+            else:
+                retry_status = f"已完成最大重试次数({UPLOAD_MAX_RETRIES})，不再重试"
+
+            bark_notify(
+                config['BARK_DEVICE_TOKEN'],
+                title=f"上传失败 [{category}] [{webdav_host}]",
+                content=(
+                    f"文件 {os.path.basename(file_path)} 上传失败：{e}；"
+                    f"{retry_status}"
+                ),
+            )
+
+            if next_retry is not None:
+                logger.info(
+                    f"将在{UPLOAD_RETRY_DELAY}秒后重试（第{next_retry}/"
+                    f"{UPLOAD_MAX_RETRIES}次）: {file_path} | 类型: {category} | "
+                    f"服务器: {webdav_host}"
+                )
+                threading.Timer(
+                    UPLOAD_RETRY_DELAY,
+                    self.process_file,
+                    args=[file_path],
+                ).start()
+            else:
+                logger.error(
+                    f"文件已完成最大重试次数({UPLOAD_MAX_RETRIES})，放弃上传: "
+                    f"{file_path} | 类型: {category} | 服务器: {webdav_host}"
+                )
 
 def cleanup_expired_files(directory, days):
     """

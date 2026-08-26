@@ -2,7 +2,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import webdav_uploader
 import start
@@ -197,6 +197,55 @@ start_services
                 self.assertIn('字幕文件', log_message)
                 self.assertIn('保留本地文件', log_message)
                 self.assertIn(str(subtitle_file), log_message)
+
+    def test_upload_failure_notifies_immediately_and_retries_once(self):
+        handler = webdav_uploader.WebDAVUploadHandler()
+
+        with tempfile.TemporaryDirectory() as root:
+            media_file = Path(root) / 'video.mp4'
+            media_file.write_bytes(b'video')
+            file_path = str(media_file)
+            client = MagicMock()
+            client.check.side_effect = [True, False, True, False]
+            client.upload_sync.side_effect = RuntimeError('upload failed')
+
+            with (
+                patch.dict(
+                    webdav_uploader.config,
+                    {
+                        'ENABLE_WEBDAV_UPLOAD': True,
+                        'WEBDAV_UPLOAD_EXCLUDE_KEYWORDS': [],
+                    },
+                ),
+                patch.object(webdav_uploader, 'video_webdav', client),
+                patch.object(
+                    webdav_uploader,
+                    'video_webdav_host',
+                    'dav.example.test',
+                ),
+                patch.object(webdav_uploader, 'UPLOAD_MAX_RETRIES', 1),
+                patch.object(webdav_uploader, 'UPLOAD_RETRY_DELAY', 60),
+                patch.object(webdav_uploader, 'bark_notify') as notify,
+                patch.object(webdav_uploader.threading, 'Timer') as timer,
+                patch.object(webdav_uploader.logger, 'error'),
+                patch.object(webdav_uploader.logger, 'info'),
+            ):
+                handler.process_file(file_path)
+
+                self.assertEqual(notify.call_count, 1)
+                self.assertIn('第1/1次重试', notify.call_args.kwargs['content'])
+                timer.assert_called_once()
+                timer.return_value.start.assert_called_once()
+                self.assertEqual(webdav_uploader.retry_count[file_path], 1)
+
+                handler.process_file(file_path)
+
+            self.assertEqual(client.upload_sync.call_count, 2)
+            client.put.assert_not_called()
+            self.assertEqual(notify.call_count, 2)
+            self.assertIn('不再重试', notify.call_args.kwargs['content'])
+            timer.assert_called_once()
+            self.assertNotIn(file_path, webdav_uploader.retry_count)
 
 
 if __name__ == '__main__':
