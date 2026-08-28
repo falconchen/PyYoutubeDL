@@ -99,7 +99,21 @@ class TestResolvePlaylistUrls(unittest.TestCase):
         cmd = run.call_args.args[0]
         self.assertIn('--flat-playlist', cmd)
         self.assertIn('%(id)s|%(webpage_url)s', cmd)
+        self.assertNotIn('--playlist-end', cmd)
         self.assertEqual(cmd[cmd.index('--config-location') + 1], '/x/yt-dlp.conf')
+
+    def test_limits_playlist_extraction_at_yt_dlp(self):
+        completed = MagicMock(returncode=0, stdout=(
+            'vid1|https://example.com/v1\n'
+            'vid2|https://example.com/v2\n'
+        ), stderr='')
+        with patch('app.subprocess.run', return_value=completed) as run:
+            urls, error = app.resolve_playlist_urls('url', 'conf', max_items=20)
+
+        self.assertIsNone(error)
+        self.assertEqual(len(urls), 2)
+        cmd = run.call_args.args[0]
+        self.assertEqual(cmd[cmd.index('--playlist-end') + 1], '20')
 
     def test_skips_na_urls_and_blank_lines(self):
         completed = MagicMock(returncode=0, stdout=(
@@ -154,17 +168,38 @@ class TestExpandTaskUrls(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(urls, entries)
 
-    def test_playlist_exceeds_max_items(self):
+    def test_playlist_is_truncated_to_configured_item_count(self):
         many = [f'https://www.youtube.com/watch?v=vid{i}' for i in range(501)]
         with (
             patch('app.looks_like_playlist', return_value=True),
-            patch('app.resolve_playlist_urls', return_value=(many, None)),
-            patch.dict(app.config, {'PLAYLIST_MAX_ITEMS': 500}),
+            patch(
+                'app.resolve_playlist_urls',
+                return_value=(many, None),
+            ) as resolve,
+            patch.dict(app.config, {'PLAYLIST_MAX_ITEMS': 20}),
         ):
             urls, error = app.expand_task_urls('playlist')
 
-        self.assertIsNone(urls)
-        self.assertIn('上限', error)
+        self.assertIsNone(error)
+        self.assertEqual(urls, many[:20])
+        resolve.assert_called_once_with(
+            'playlist',
+            app._pick_ytdlp_conf('video'),
+            max_items=20,
+        )
+
+    def test_invalid_playlist_limit_falls_back_to_twenty(self):
+        many = [f'https://www.youtube.com/watch?v=vid{i}' for i in range(25)]
+        with (
+            patch('app.looks_like_playlist', return_value=True),
+            patch('app.resolve_playlist_urls', return_value=(many, None)) as resolve,
+            patch.dict(app.config, {'PLAYLIST_MAX_ITEMS': 0}),
+        ):
+            urls, error = app.expand_task_urls('playlist')
+
+        self.assertIsNone(error)
+        self.assertEqual(urls, many[:20])
+        self.assertEqual(resolve.call_args.kwargs['max_items'], 20)
 
     def test_playlist_resolve_failure_returns_error(self):
         with (

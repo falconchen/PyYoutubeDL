@@ -15,7 +15,12 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from datetime import datetime
 from bark_util import bark_notify
-from config_util import MOVE_STAGING_PREFIX, build_dated_output_template, load_config
+from config_util import (
+    MOVE_STAGING_PREFIX,
+    build_dated_output_template,
+    get_playlist_max_items,
+    load_config,
+)
 from log_util import setup_logger
 
 # 加载配置
@@ -535,6 +540,7 @@ class DownloadHandler(FileSystemEventHandler):
             '--print',
             f'after_move:{ITEM_COMPLETE_PREFIX}%(filepath)j',
             '--no-quiet',          # --print 默认启用 quiet，保留原有详细下载日志
+            '--playlist-end', str(get_playlist_max_items(config)),
             *dynamic_subtitle_args,
             '-o', os.path.join(task_tmp_dir, output_template),
             url

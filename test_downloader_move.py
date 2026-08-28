@@ -345,6 +345,10 @@ class TestDownloaderMove(unittest.TestCase):
                         cmd.index('--no-quiet'),
                         cmd.index('--print'),
                     )
+                    self.assertEqual(
+                        cmd[cmd.index('--playlist-end') + 1],
+                        '20',
+                    )
 
     def test_completed_playlist_item_is_moved_before_process_exits(self):
         with tempfile.TemporaryDirectory() as root:

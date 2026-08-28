@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import hashlib
 import hmac
 from werkzeug.utils import safe_join
-from config_util import load_config
+from config_util import get_playlist_max_items, load_config
 import random
 import string
 import pytz
@@ -205,12 +205,13 @@ def looks_like_playlist(url):
     return False
 
 
-def resolve_playlist_urls(url, conf_path):
+def resolve_playlist_urls(url, conf_path, max_items=None):
     """使用 yt-dlp flat-playlist 模式提取播放列表各条目 URL。
 
     Args:
         url (str): 播放列表 URL。
         conf_path (str): yt-dlp 配置文件路径（含 cookies 等）。
+        max_items (int | None): 只解析前 N 个条目；None 表示不额外限制。
 
     Returns:
         tuple: (urls, error)。成功时 urls 为条目 URL 列表、error 为 None；
@@ -220,11 +221,15 @@ def resolve_playlist_urls(url, conf_path):
         'yt-dlp',
         '--config-location', conf_path,
         '--flat-playlist',
+    ]
+    if isinstance(max_items, int) and not isinstance(max_items, bool) and max_items > 0:
+        cmd.extend(['--playlist-end', str(max_items)])
+    cmd.extend([
         '--print', '%(id)s|%(webpage_url)s',
         '--no-warnings',
         '--ignore-errors',
         url,
-    ]
+    ])
     try:
         result = subprocess.run(
             cmd,
@@ -257,8 +262,8 @@ def resolve_playlist_urls(url, conf_path):
 def expand_task_urls(url):
     """将提交的 URL 展开为待下载的 URL 列表。
 
-    疑似播放列表的 URL 会被解析成逐集 URL；普通视频 URL 原样返回。
-    解析失败或超过上限时返回错误，由调用方提示用户。
+    疑似播放列表的 URL 会被解析成逐集 URL，并只返回配置数量的前几个
+    条目；普通视频 URL 原样返回。解析失败时返回错误，由调用方提示用户。
 
     Returns:
         tuple: (urls, error)。成功时 urls 为 URL 列表、error 为 None。
@@ -266,21 +271,19 @@ def expand_task_urls(url):
     if not looks_like_playlist(url):
         return [url], None
 
-    urls, error = resolve_playlist_urls(url, _pick_ytdlp_conf('video'))
+    max_items = get_playlist_max_items(config)
+
+    urls, error = resolve_playlist_urls(
+        url,
+        _pick_ytdlp_conf('video'),
+        max_items=max_items,
+    )
     if error:
         return None, error
 
-    max_items = config.get("PLAYLIST_MAX_ITEMS", 500)
-    if not isinstance(max_items, int) or max_items <= 0:
-        max_items = 500
-    if len(urls) > max_items:
-        return None, (
-            f"播放列表包含 {len(urls)} 个视频，超过上限 {max_items}"
-            f"（可在 config.json 中调整 PLAYLIST_MAX_ITEMS）"
-        )
     if not urls:
         return None, "播放列表解析结果为空，请检查链接是否为公开播放列表"
-    return urls, None
+    return urls[:max_items], None
 
 
 def create_tasks(urls, types):

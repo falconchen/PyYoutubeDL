@@ -5,6 +5,7 @@ from datetime import datetime
 import pytz
 
 MOVE_STAGING_PREFIX = '.pyyoutubedl-moving-'
+DEFAULT_PLAYLIST_MAX_ITEMS = 20
 
 # 默认配置
 DEFAULT_CONFIG = {
@@ -14,7 +15,7 @@ DEFAULT_CONFIG = {
     "FILES_DIR": "./files",         # 下载完成后的文件存放目录
     "LOG_DIR": "../logs",           # 日志存放目录
     "MAX_WORKERS": 4,               # 最大并行下载数
-    "PLAYLIST_MAX_ITEMS": 500,      # 单个播放列表最多展开的任务数，超出则拒绝
+    "PLAYLIST_MAX_ITEMS": DEFAULT_PLAYLIST_MAX_ITEMS, # 单个播放列表只下载前 N 个条目
     "DOWNLOAD_MIN_INTERVAL_SECONDS": 10, # 两次下载启动的最小间隔（秒），0 表示不限速
     "MAX_LOG_SIZE": 10 * 1024 * 1024, # 单个日志文件最大字节数
     "BACKUP_COUNT": 5,              # 日志备份保留数量
@@ -75,6 +76,21 @@ def is_ai_summary_enabled(runtime_config):
         and runtime_config.get(key).strip()
         for key in ('AI_API_BASE_URL', 'AI_API_MODEL', 'AI_API_TOKEN')
     )
+
+
+def get_playlist_max_items(runtime_config):
+    """返回有效的播放列表下载条目数，无效配置回退为默认值。"""
+    max_items = runtime_config.get(
+        "PLAYLIST_MAX_ITEMS",
+        DEFAULT_PLAYLIST_MAX_ITEMS,
+    )
+    if (
+        not isinstance(max_items, int)
+        or isinstance(max_items, bool)
+        or max_items <= 0
+    ):
+        return DEFAULT_PLAYLIST_MAX_ITEMS
+    return max_items
 
 
 def load_config(default_config=None, config_keys=None):
