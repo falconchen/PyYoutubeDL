@@ -36,7 +36,7 @@ function setActionsDisabled(disabled) {
 async function loadActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || typeof tab.id !== 'number' || !isSupportedPageUrl(tab.url)) {
-    pageLabel.textContent = '此页面不支持下载或 AI 总结';
+    pageLabel.textContent = '此页面不支持下载';
     setActionsDisabled(true);
     return;
   }
@@ -52,7 +52,7 @@ async function runPageAction(button) {
   const actionLabel = {
     video: '视频下载',
     audio: '音频下载',
-    'ai-summary': 'AI总结',
+    'video-audio': '视频+音频下载',
   }[action];
   setActionsDisabled(true);
   setActionStatus(`正在提交${actionLabel}…`);
@@ -67,7 +67,6 @@ async function runPageAction(button) {
       throw new Error(response?.message || '后台未返回结果');
     }
     setActionStatus(response.message || `${actionLabel}已提交。`, 'success');
-    if (action === 'ai-summary') window.close();
   } catch (error) {
     setActionStatus(`${actionLabel}失败：${error.message}`, 'error');
   } finally {

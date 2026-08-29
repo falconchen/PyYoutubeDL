@@ -19,6 +19,7 @@ function createHarness(harnessOptions = {}) {
   const notifications = [];
   const overlayMessages = [];
   const injectedScripts = [];
+  const addTaskRequests = [];
   const taskStates = new Map();
   let nextTaskNumber = 1;
   let pollError = null;
@@ -105,18 +106,20 @@ function createHarness(harnessOptions = {}) {
 
   async function fetch(url, options) {
     if (url.endsWith('/api/add_task')) {
-      const task = `v2026072312000${nextTaskNumber}abc`;
-      nextTaskNumber += 1;
-      taskStates.set(task, {
-        task,
-        state: 'queued',
-        type: JSON.parse(options.body).types[0],
+      const request = JSON.parse(options.body);
+      addTaskRequests.push(request);
+      const tasks = request.types.map((type) => {
+        const prefix = type === 'video' ? 'v' : 'a';
+        const task = `${prefix}2026072312000${nextTaskNumber}abc`;
+        nextTaskNumber += 1;
+        taskStates.set(task, { task, state: 'queued', type });
+        return task;
       });
       return {
         ok: true,
         status: 200,
         async json() {
-          return { success: true, tasks: [task] };
+          return { success: true, tasks };
         },
       };
     }
@@ -201,6 +204,7 @@ function createHarness(harnessOptions = {}) {
   vm.runInContext(source, context);
 
   return {
+    addTaskRequests,
     alarms,
     events,
     localStorage,
@@ -292,8 +296,12 @@ test('toolbar action opens the inline settings popup', () => {
     path.join(extensionRoot, 'popup.css'),
     'utf8',
   );
+  const background = fs.readFileSync(
+    path.join(extensionRoot, 'background.js'),
+    'utf8',
+  );
 
-  assert.equal(manifest.version, '1.5.1');
+  assert.equal(manifest.version, '1.5.2');
   assert.equal(manifest.action.default_popup, 'popup.html');
   assert.match(popup, /<details class="settings-card">/);
   assert.doesNotMatch(popup, /<details class="settings-card" open>/);
@@ -303,7 +311,10 @@ test('toolbar action opens the inline settings popup', () => {
   assert.match(popup, /id="ai-summary-token"/);
   assert.match(popup, /data-page-action="video"/);
   assert.match(popup, /data-page-action="audio"/);
-  assert.match(popup, /data-page-action="ai-summary"/);
+  assert.match(popup, /data-page-action="video-audio"/);
+  assert.match(popup, /视频\+音频/);
+  assert.doesNotMatch(popup, /data-page-action="ai-summary"/);
+  assert.match(background, /id: MENU_VIDEO_AUDIO,[\s\S]*?title: '视频\+音频'/);
   assert.match(popup, /src="options\.js"/);
   assert.match(popup, /src="popup\.js"/);
   assert.match(popupStyles, /html,\s*body\s*\{[^}]*width:\s*360px;/s);
@@ -334,17 +345,59 @@ test('toolbar page action submits the active page as a video task', async () => 
   assert.match(harness.notifications.at(-1).title, /视频下载已加入队列/);
 });
 
-test('AI summary menu injects a safe local overlay and returns cached content', async () => {
+test('toolbar combined action submits video and audio in one request', async () => {
+  const harness = createHarness();
+  const response = await new Promise((resolve) => {
+    const keepChannelOpen = harness.events.runtimeMessage.listener({
+      type: 'run-yter-page-action',
+      action: 'video-audio',
+      tabId: 7,
+      pageUrl: 'https://video.example/watch/1',
+    }, {}, resolve);
+    assert.equal(keepChannelOpen, true);
+  });
+
+  assert.equal(response.success, true);
+  assert.equal(harness.addTaskRequests.length, 1);
+  assert.deepEqual(harness.addTaskRequests[0].types, ['video', 'audio']);
+  assert.equal(Object.keys(harness.localStorage.pendingTasks).length, 2);
+});
+
+test('combined context-menu action submits video and audio in one request', async () => {
+  const harness = createHarness();
+
+  await harness.events.contextClicked.listener({
+    menuItemId: 'yter-download-video-audio',
+    pageUrl: 'https://video.example/watch/1',
+  });
+
+  assert.equal(harness.addTaskRequests.length, 1);
+  assert.deepEqual(harness.addTaskRequests[0].types, ['video', 'audio']);
+  const pendingTypes = Object.values(harness.localStorage.pendingTasks)
+    .map((task) => task.type);
+  assert.deepEqual(pendingTypes, ['video', 'audio']);
+  assert.match(harness.notifications.at(-1).title, /视频\+音频下载已加入队列/);
+});
+
+async function runAiSummaryCompatibilityAction(harness) {
+  const response = await new Promise((resolve) => {
+    const keepChannelOpen = harness.events.runtimeMessage.listener({
+      type: 'run-yter-page-action',
+      action: 'ai-summary',
+      tabId: 7,
+      pageUrl: 'https://video.example/watch/1',
+    }, {}, resolve);
+    assert.equal(keepChannelOpen, true);
+  });
+  assert.equal(response.success, true);
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
+test('legacy AI summary runtime action still returns cached content', async () => {
   const harness = createHarness();
   harness.localStorage.aiSummaryToken = 'ai-token';
 
-  await harness.events.contextClicked.listener(
-    {
-      menuItemId: 'yter-ai-summary',
-      pageUrl: 'https://video.example/watch/1',
-    },
-    { id: 7, url: 'https://video.example/watch/1' },
-  );
+  await runAiSummaryCompatibilityAction(harness);
 
   assert.equal(harness.injectedScripts.length, 1);
   assert.equal(harness.injectedScripts[0].files[0], 'summary-overlay.bundle.js');
@@ -361,14 +414,11 @@ test('AI summary menu injects a safe local overlay and returns cached content', 
   assert.match(source, /toggle\.setAttribute\('aria-expanded', 'true'\)/);
 });
 
-test('AI summary menu forwards streamed markdown and final result', async () => {
+test('legacy AI summary runtime action forwards streamed markdown and final result', async () => {
   const harness = createHarness({ streamAiSummary: true });
   harness.localStorage.aiSummaryToken = 'extension-ai-token';
 
-  await harness.events.contextClicked.listener({
-    menuItemId: 'yter-ai-summary',
-    pageUrl: 'https://video.example/watch/1',
-  }, { id: 7, url: 'https://video.example/watch/1' });
+  await runAiSummaryCompatibilityAction(harness);
 
   const messages = harness.overlayMessages.map((entry) => entry.message);
   assert.ok(messages.some(

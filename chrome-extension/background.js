@@ -2,7 +2,7 @@ const DEFAULT_SERVER_URL = 'https://yter.cellmean.com';
 const MENU_PARENT = 'yter-download';
 const MENU_VIDEO = 'yter-download-video';
 const MENU_AUDIO = 'yter-download-audio';
-const MENU_AI_SUMMARY = 'yter-ai-summary';
+const MENU_VIDEO_AUDIO = 'yter-download-video-audio';
 const PENDING_TASKS_KEY = 'pendingTasks';
 const PENDING_SUMMARIES_KEY = 'pendingAiSummaries';
 const TASK_POLL_ALARM = 'yter-task-poll';
@@ -36,9 +36,9 @@ function createContextMenus() {
       documentUrlPatterns: ['http://*/*', 'https://*/*'],
     });
     chrome.contextMenus.create({
-      id: MENU_AI_SUMMARY,
+      id: MENU_VIDEO_AUDIO,
       parentId: MENU_PARENT,
-      title: 'AI总结',
+      title: '视频+音频',
       contexts: ['link', 'page'],
       documentUrlPatterns: ['http://*/*', 'https://*/*'],
     });
@@ -341,14 +341,17 @@ async function ensureTaskPollingAlarm() {
   }
 }
 
-async function trackPendingTasks(tasks, type, serverUrl, sourceUrl) {
-  const validTasks = tasks.filter((task) => typeof task === 'string' && task);
+async function trackPendingTasks(tasks, types, serverUrl, sourceUrl) {
+  const taskTypes = Array.isArray(types) ? types : [types];
+  const validTasks = tasks
+    .map((task, index) => ({ task, type: taskTypes[index % taskTypes.length] }))
+    .filter(({ task }) => typeof task === 'string' && task);
   if (validTasks.length === 0) {
     return;
   }
 
   await updatePendingTasks((pendingTasks) => {
-    for (const task of validTasks) {
+    for (const { task, type } of validTasks) {
       pendingTasks[task] = {
         task,
         type,
@@ -472,9 +475,10 @@ function pollPendingTasks() {
   return activePoll;
 }
 
-async function addDownloadTask(linkUrl, type) {
+async function addDownloadTask(linkUrl, types) {
   const serverUrl = await readServerUrl();
   const endpoint = `${serverUrl}/api/add_task`;
+  const taskTypes = Array.isArray(types) ? types : [types];
 
   let response;
   try {
@@ -485,7 +489,7 @@ async function addDownloadTask(linkUrl, type) {
       },
       body: JSON.stringify({
         url: linkUrl,
-        types: [type],
+        types: taskTypes,
       }),
     });
   } catch (error) {
@@ -510,14 +514,19 @@ async function addDownloadTask(linkUrl, type) {
   };
 }
 
-async function handleDownloadAction(targetUrl, type) {
-  const typeLabel = type === 'video' ? '视频' : '音频';
-  const result = await addDownloadTask(targetUrl, type);
+function downloadTypeLabel(types) {
+  const taskTypes = Array.isArray(types) ? types : [types];
+  return taskTypes.length > 1 ? '视频+音频' : (taskTypes[0] === 'video' ? '视频' : '音频');
+}
+
+async function handleDownloadAction(targetUrl, types) {
+  const typeLabel = downloadTypeLabel(types);
+  const result = await addDownloadTask(targetUrl, types);
   const taskText = result.tasks.length
     ? `任务：${result.tasks.join(', ')}`
     : '任务已提交';
   try {
-    await trackPendingTasks(result.tasks, type, result.serverUrl, targetUrl);
+    await trackPendingTasks(result.tasks, types, result.serverUrl, targetUrl);
   } catch (error) {
     await showNotification(
       `yter ${typeLabel}任务已提交，但无法跟踪`,
@@ -562,7 +571,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type !== 'run-yter-page-action') return undefined;
   const { action, pageUrl, tabId } = message;
-  if (!['video', 'audio', 'ai-summary'].includes(action)
+  if (!['video', 'audio', 'video-audio', 'ai-summary'].includes(action)
       || typeof tabId !== 'number'
       || typeof pageUrl !== 'string'
       || !/^https?:\/\//i.test(pageUrl)) {
@@ -579,10 +588,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       return;
     }
-    handleDownloadAction(pageUrl, action)
+    const types = action === 'video-audio' ? ['video', 'audio'] : action;
+    handleDownloadAction(pageUrl, types)
       .then((taskText) => sendResponse({ success: true, message: taskText }))
       .catch(async (error) => {
-        const typeLabel = action === 'video' ? '视频' : '音频';
+        const typeLabel = downloadTypeLabel(types);
         await showNotification(`yter ${typeLabel}下载失败`, error.message);
         sendResponse({ success: false, message: error.message });
       });
@@ -604,24 +614,20 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const targetUrl = info.linkUrl || info.pageUrl;
-  if (info.menuItemId === MENU_AI_SUMMARY && targetUrl) {
-    return handleAiSummaryClick(targetUrl, tab).catch(async (error) => {
-      await showNotification('yter AI总结失败', error.message);
-    });
-  }
-  const typeByMenuId = {
+  const typesByMenuId = {
     [MENU_VIDEO]: 'video',
     [MENU_AUDIO]: 'audio',
+    [MENU_VIDEO_AUDIO]: ['video', 'audio'],
   };
-  const type = typeByMenuId[info.menuItemId];
-  if (!type || !targetUrl) {
+  const types = typesByMenuId[info.menuItemId];
+  if (!types || !targetUrl) {
     return;
   }
 
   try {
-    await handleDownloadAction(targetUrl, type);
+    await handleDownloadAction(targetUrl, types);
   } catch (error) {
-    const typeLabel = type === 'video' ? '视频' : '音频';
+    const typeLabel = downloadTypeLabel(types);
     await showNotification(`yter ${typeLabel}下载失败`, error.message);
   }
 });
