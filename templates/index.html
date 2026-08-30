@@ -192,12 +192,6 @@
         const uploader = videoInfo ? videoInfo.querySelector('.uploader') : null;
         const duration = videoInfo ? videoInfo.querySelector('.duration') : null;
 
-        if (taskItems.length > 1 && title && uploader) {
-            title.textContent = `已创建 ${taskItems.length} 个任务`;
-            uploader.textContent = '各任务将分别下载';
-            uploader.classList.remove('metadata-pending');
-        }
-
         function renderPreview(task) {
             if (!task || !videoInfo) return;
             if (task.thumbnail && thumbnail) {
@@ -244,7 +238,7 @@
         const METADATA_RETRY_DELAY_MS = 1500;
 
         function updateMetadata(url, attempt = 1) {
-            if (!url || !videoInfo || taskItems.length !== 1) return;
+            if (!url || !videoInfo) return;
             const controller = new AbortController();
             const timeout = window.setTimeout(() => controller.abort(), METADATA_TIMEOUT_MS);
             fetch('/api/video_info_basic', {
@@ -449,7 +443,20 @@
                         renderTask(task);
                         if (index === 0) renderPreview(task);
                     });
-                    if (!metadataStarted && data.tasks.length === 1 && data.tasks[0].source_url) {
+                    const sourceUrls = data.tasks
+                        .map(task => task.source_url)
+                        .filter(Boolean);
+                    const hasSharedSource = sourceUrls.length === data.tasks.length
+                        && sourceUrls.length > 0
+                        && sourceUrls.every(url => url === sourceUrls[0]);
+                    if (data.tasks.length > 1 && !hasSharedSource && title && uploader) {
+                        title.textContent = `已创建 ${data.tasks.length} 个任务`;
+                        uploader.textContent = '各任务将分别下载';
+                        uploader.classList.remove('metadata-pending');
+                    }
+                    if (!metadataStarted
+                        && data.tasks[0].source_url
+                        && (data.tasks.length === 1 || hasSharedSource)) {
                         metadataStarted = true;
                         updateMetadata(data.tasks[0].source_url);
                     }
