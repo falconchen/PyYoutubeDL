@@ -271,6 +271,17 @@ class TestTaskInfoAPI(unittest.TestCase):
         self.assertIn('const minutes = Math.floor(totalSeconds / 60);', template)
         self.assertIn('const seconds = totalSeconds % 60;', template)
 
+    def test_video_metadata_template_retries_slow_requests(self):
+        template = Path(app.app.template_folder, 'index.html').read_text(
+            encoding='utf-8',
+        )
+
+        self.assertIn('const METADATA_TIMEOUT_MS = 30000;', template)
+        self.assertIn('const METADATA_MAX_ATTEMPTS = 2;', template)
+        self.assertIn('error.name === \'AbortError\'', template)
+        self.assertIn('正在重试获取标题…', template)
+        self.assertIn('updateMetadata(url, attempt + 1)', template)
+
     def test_completed_task_is_always_100_percent(self):
         task_id = 'v20260723120000QwE'
         self.write_task(task_id, '.ok')

@@ -239,10 +239,14 @@
             missing: '未找到'
         };
 
-        function updateMetadata(url) {
+        const METADATA_TIMEOUT_MS = 30000;
+        const METADATA_MAX_ATTEMPTS = 2;
+        const METADATA_RETRY_DELAY_MS = 1500;
+
+        function updateMetadata(url, attempt = 1) {
             if (!url || !videoInfo || taskItems.length !== 1) return;
             const controller = new AbortController();
-            const timeout = window.setTimeout(() => controller.abort(), 9000);
+            const timeout = window.setTimeout(() => controller.abort(), METADATA_TIMEOUT_MS);
             fetch('/api/video_info', {
                 method: 'POST',
                 headers: {
@@ -279,8 +283,24 @@
                 }
             })
             .catch(error => {
-                console.error('获取视频信息失败:', error);
-                if (title && title.textContent === '正在获取标题…') title.textContent = '标题稍后显示';
+                const isServerError = /^HTTP 5\d\d$/.test(error.message || '');
+                const isRetryable = error.name === 'AbortError'
+                    || error.name === 'TypeError'
+                    || isServerError;
+                if (isRetryable && attempt < METADATA_MAX_ATTEMPTS) {
+                    if (title) title.textContent = '正在重试获取标题…';
+                    if (uploader) uploader.textContent = '元数据加载较慢，正在重试';
+                    window.setTimeout(
+                        () => updateMetadata(url, attempt + 1),
+                        METADATA_RETRY_DELAY_MS
+                    );
+                    return;
+                }
+                console.warn('获取视频信息失败:', error);
+                if (title && (
+                    title.textContent === '正在获取标题…'
+                    || title.textContent === '正在重试获取标题…'
+                )) title.textContent = '标题稍后显示';
                 if (uploader && uploader.classList.contains('metadata-pending')) uploader.textContent = '元数据暂时不可用';
             })
             .finally(() => {
