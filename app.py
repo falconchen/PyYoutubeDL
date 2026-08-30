@@ -663,6 +663,10 @@ def get_task_info(task):
                 'audio_player' if task_type == 'audio' else 'player',
                 file=player_filename,
             )
+            task_info["download_url"] = url_for(
+                'download_file',
+                filename=player_filename,
+            )
 
     return task_info
 
@@ -1535,6 +1539,17 @@ def audio_player():
 def serve_file(filename):
     decoded_filename = unquote(filename)  
     return send_from_directory(FILES_DIR, decoded_filename)
+
+
+@app.route('/downloads/<path:filename>')
+def download_file(filename):
+    """以附件方式下载 FILES_DIR 中的媒体文件。"""
+    decoded_filename = unquote(filename)
+    return send_from_directory(
+        FILES_DIR,
+        decoded_filename,
+        as_attachment=True,
+    )
 
 
 @app.route('/subtitles/<path:filename>/<int:stream_index>.vtt')

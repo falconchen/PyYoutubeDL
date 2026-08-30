@@ -305,6 +305,10 @@ class TestTaskInfoAPI(unittest.TestCase):
             task['player_url'],
             '/player?file=%E8%A7%86%E9%A2%91+file.mp4',
         )
+        self.assertEqual(
+            task['download_url'],
+            '/downloads/%E8%A7%86%E9%A2%91%20file.mp4',
+        )
 
     def test_completed_audio_task_returns_audio_player_url(self):
         task_id = 'a20260804120000AuD'
@@ -329,6 +333,10 @@ class TestTaskInfoAPI(unittest.TestCase):
         self.assertEqual(
             task['player_url'],
             '/audio-player?file=%E9%9F%B3%E9%A2%91+file.mp3',
+        )
+        self.assertEqual(
+            task['download_url'],
+            '/downloads/%E9%9F%B3%E9%A2%91%20file.mp3',
         )
 
     def test_completed_legacy_task_recovers_player_url_from_move_log(self):

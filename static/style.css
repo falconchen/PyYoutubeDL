@@ -467,6 +467,17 @@ body {
     color: #d93025;
 }
 
+.task-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
+.task-actions[hidden] {
+    display: none;
+}
+
 .progress-row {
     display: flex;
     align-items: center;
@@ -533,6 +544,30 @@ body {
 }
 
 .task-player-link[hidden] {
+    display: none;
+}
+
+.task-download-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-shrink: 0;
+    padding: 0.3rem 0.65rem;
+    border-radius: 999px;
+    background: #1a73e8;
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-decoration: none;
+    line-height: 1;
+    transition: background-color 0.2s ease;
+}
+
+.task-download-link:hover {
+    background: #1557b0;
+}
+
+.task-download-link[hidden] {
     display: none;
 }
 
