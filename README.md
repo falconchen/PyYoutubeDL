@@ -43,6 +43,17 @@ cp config.sample.json config.json
 vim config.json
 ```
 
+`config.json` 和 `config.sample.json` 保留 `.json` 文件名，但项目使用 JSON5 解析器读取运行配置，可使用 JSONC 风格的 `//` 单行注释、`/* ... */` 块注释和尾逗号。现有严格 JSON 配置无需迁移。项目只约定使用这些 JSONC 语法，不建议使用 JSON5 额外支持的单引号或无引号键名。
+
+```jsonc
+{
+  // 下载器启动时恢复异常中断任务
+  "RESUME_INTERRUPTED_DOWNLOADS": false,
+}
+```
+
+带注释的配置不能再用 `python -m json.tool` 或 `jq` 这类严格 JSON 工具验证，应使用项目虚拟环境运行配置测试。VS Code 如果仍把文件识别为普通 JSON，可将当前文件的语言模式切换为“JSON with Comments”。
+
 主要配置项参见下方[配置说明](#配置说明)。
 
 ### 3. 启动

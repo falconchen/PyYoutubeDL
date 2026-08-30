@@ -32,6 +32,8 @@
 - `yt-dlp.conf` / `yta-dlp.conf`：视频和音频下载配置。
 - `*.local.conf`：本机覆盖配置，通常不应提交。
 
+`config.json` 和 `config.sample.json` 虽保留 `.json` 后缀，但运行配置使用 JSON5 解析器，可写 `//`、`/* ... */` 注释和尾逗号；其他 API、日志和结果 JSON 仍使用严格 JSON。
+
 任务文件生命周期：
 
 ```text
@@ -73,6 +75,7 @@ flask get-cookie
 - `tests/test_video_info.py` 中的部分测试可能访问 YouTube，需要网络环境支持。
 - 不要把真实 cookie、密钥、Token、服务器密码等敏感信息写入文档、日志或测试数据。
 - 修改配置时优先更新 `config.sample.json` 或文档说明，不要把本地私有配置当作默认值。
+- 带注释的配置不能使用 `python -m json.tool` 或 `jq` 验证；应运行 `tests/test_config_util.py`。项目只约定 JSONC 风格注释和尾逗号，不推广其他 JSON5 扩展语法。
 - 首页 `templates/index.html` 和播放页 `templates/player.html` 已接入 Waline 评论，服务地址是 `https://waline.v2ai.eu.cc`。
 - 评论区默认不显示，由 `config.json` 中的 `SHOW_WALINE_ON_INDEX` 和 `SHOW_WALINE_ON_PLAYER` 分别控制。
 - Waline 客户端 `path` 使用 `window.location.hostname + window.location.pathname`，按域名和路径隔离评论，避免多个站点的 `/` 共享评论。

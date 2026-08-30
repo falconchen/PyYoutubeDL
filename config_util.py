@@ -1,7 +1,7 @@
 import os
-import json
 from datetime import datetime
 
+import json5
 import pytz
 
 MOVE_STAGING_PREFIX = '.pyyoutubedl-moving-'
@@ -115,8 +115,8 @@ def load_config(default_config=None, config_keys=None):
 
     if os.path.exists(config_path):
         try:
-            with open(config_path, 'r') as f:
-                user_config = json.load(f)
+            with open(config_path, 'r', encoding='utf-8') as f:
+                user_config = json5.load(f)
             default_config.update(user_config)
         except Exception as e:
             print(f"加载配置文件失败，使用默认配置: {e}")

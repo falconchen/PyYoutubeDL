@@ -48,7 +48,7 @@ When `RESUME_INTERRUPTED_DOWNLOADS` is `true`, downloader startup queues existin
 
 **Alternative downloader (`downloader-opt.py`):** A variant that uses the `yt_dlp` Python library directly instead of subprocess. Not used by default; kept as an alternative implementation.
 
-**Configuration (`config_util.py`):** Loads `config.json` with a `DEFAULT_CONFIG` fallback. Path-based config keys (`URLS_DIR`, `TMP_DIR`, `FILES_DIR`, `LOG_DIR`) are resolved relative to the script directory.
+**Configuration (`config_util.py`):** Loads `config.json` with a `DEFAULT_CONFIG` fallback. Although the configuration files keep the `.json` suffix, runtime configuration uses the JSON5 parser and supports the JSONC subset (`//`, `/* ... */`, and trailing commas). Other API, log, and result JSON remains strict JSON. Path-based config keys (`URLS_DIR`, `TMP_DIR`, `FILES_DIR`, `LOG_DIR`) are resolved relative to the script directory.
 
 **yt-dlp config:** `yt-dlp.conf` for video, `yta-dlp.conf` for audio. If a `.local.conf` variant exists (e.g., `yt-dlp.local.conf`), it takes precedence — these are gitignored for machine-specific overrides.
 
