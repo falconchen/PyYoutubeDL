@@ -16,11 +16,10 @@ if [ ! -x "$SUPERVISORCTL_BIN" ]; then
     exit 1
 fi
 
-echo "正在更新 pip..."
-"$PYTHON_BIN" -m pip install --upgrade pip
-
-echo "正在更新 yt-dlp..."
-"$PYTHON_BIN" -m pip install --upgrade yt-dlp
+if [ "${PYTUBEDL_UPDATE_DEPS:-0}" = "1" ]; then
+    echo "正在按 requirements.txt 安装依赖..."
+    "$PYTHON_BIN" -m pip install -r "$SCRIPT_DIR/requirements.txt"
+fi
 
 echo "正在通过 Supervisor 重启 PyYoutubeDL 服务..."
 "$SUPERVISORCTL_BIN" restart \

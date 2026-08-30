@@ -25,6 +25,23 @@ import click
 from flask.cli import with_appcontext
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def get_release_commit():
+    """返回当前部署版本；Git 不可用时返回 unknown。"""
+    release = os.environ.get('PYTUBEDL_RELEASE', '').strip()
+    if release:
+        return release
+    try:
+        return subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'],
+            cwd=PROJECT_DIR,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return 'unknown'
 
 # 加载配置
 config = load_config()
@@ -85,6 +102,12 @@ AI_SUMMARY_MAX_SUBTITLE_CHARS = 120000
 os.makedirs(URLS_DIR, exist_ok=True)
 os.makedirs(FILES_DIR, exist_ok=True)
 ai_summary_store.init_db(config["AI_SUMMARY_DB_PATH"])
+
+
+@app.route('/healthz', methods=['GET'])
+def healthz():
+    """供部署和反向代理使用的轻量应用健康检查。"""
+    return jsonify({'status': 'ok', 'commit': get_release_commit()})
 
 def get_file_hash(filepath):
     """获取文件的MD5哈希值"""

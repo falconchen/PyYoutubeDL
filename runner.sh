@@ -16,7 +16,8 @@ start_service() {
         return 1
     }
 
-    python_bin=$(command -v python) || {
+    python_bin="$PYTHON_BIN"
+    [ -x "$python_bin" ] || python_bin=$(command -v python) || {
         echo "正在启动${service_name}...（启动失败，原因: 找不到Python解释器）"
         rm -f "$startup_log"
         return 1
@@ -52,15 +53,13 @@ show_usage() {
 }
 
 update_dependencies() {
-    echo "正在更新pip..."
-    if ! pip install --upgrade pip; then
-        echo "更新pip失败，已中止启动。"
-        return 1
+    if [ "${PYTUBEDL_UPDATE_DEPS:-0}" != "1" ]; then
+        return 0
     fi
 
-    echo "正在更新yt-dlp..."
-    if ! pip install --upgrade yt-dlp; then
-        echo "更新yt-dlp失败，已中止启动。"
+    echo "正在按 requirements.txt 安装依赖..."
+    if ! "$PYTHON_BIN" -m pip install -r "$SCRIPT_DIR/requirements.txt"; then
+        echo "安装依赖失败，已中止启动。"
         return 1
     fi
 }
@@ -74,14 +73,14 @@ stop_services() {
     fi
 
     echo "正在停止已有进程..."
-    if ! python ./stop.py "${stop_args[@]}"; then
+    if ! "$PYTHON_BIN" ./stop.py "${stop_args[@]}"; then
         echo "停止已有进程失败。"
         return 1
     fi
 }
 
 webdav_upload_status() {
-    python -c '
+    "$PYTHON_BIN" -c '
 import sys
 from config_util import is_webdav_upload_enabled, load_config
 
@@ -90,7 +89,7 @@ sys.exit(0 if is_webdav_upload_enabled(load_config()) else 10)
 }
 
 ai_summary_status() {
-    python -c '
+    "$PYTHON_BIN" -c '
 import sys
 from config_util import is_ai_summary_enabled, load_config
 
@@ -164,11 +163,15 @@ main() {
             ;;
     esac
 
-    # 检查并激活虚拟环境
+    # 优先固定使用项目虚拟环境，避免依赖远程机器 PATH。
+    PYTHON_BIN="$SCRIPT_DIR/venv/bin/python"
     if [ -d "$SCRIPT_DIR/venv" ]; then
-        # shellcheck disable=SC1091
-        source "$SCRIPT_DIR/venv/bin/activate"
-        echo "已激活虚拟环境"
+        echo "使用项目虚拟环境: $PYTHON_BIN"
+    else
+        PYTHON_BIN=$(command -v python) || {
+            echo "错误: 未找到项目虚拟环境或 Python 解释器。" >&2
+            return 1
+        }
     fi
 
     cd "$SCRIPT_DIR" || return 1

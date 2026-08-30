@@ -1,0 +1,6 @@
+# 复制为 targets.conf 后按实际环境填写。不要提交 targets.conf。
+# 每行格式：名称|SSH alias|远程项目目录|systemd 或 supervisor|健康检查 URL
+DEPLOY_TARGETS=(
+    "vps-1|pyyoutubedl-vps-1|/srv/PyYoutubeDL|systemd|http://127.0.0.1:5100/healthz"
+    "vps-2|pyyoutubedl-vps-2|/srv/PyYoutubeDL|supervisor|http://127.0.0.1:5100/healthz"
+)

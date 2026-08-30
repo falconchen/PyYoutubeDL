@@ -366,7 +366,21 @@ class WebDAVUploadHandler(FileSystemEventHandler):
             logger.info(f"开始上传: {file_path} -> {remote_path}，文件大小: {file_size_mb:.2f} MB | 类型: {category} | 服务器: {webdav_host}")
 
             start_time = time.time()
-            webdav_client.upload_sync(remote_path=remote_path, local_path=file_path)
+            upload_marker = f"{file_path}.uploading"
+            try:
+                with open(upload_marker, 'x', encoding='utf-8'):
+                    pass
+            except FileExistsError:
+                logger.info(f"文件已有上传任务，跳过重复处理: {file_path}")
+                return
+
+            try:
+                webdav_client.upload_sync(remote_path=remote_path, local_path=file_path)
+            finally:
+                try:
+                    os.remove(upload_marker)
+                except FileNotFoundError:
+                    pass
 
             elapsed = time.time() - start_time
             speed = file_size_mb / elapsed if elapsed > 0 else 0

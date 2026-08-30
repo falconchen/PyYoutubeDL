@@ -65,15 +65,55 @@ vim config.json
 ./runner.sh          # 默认执行 restart
 ```
 
-`start` 和 `restart` 会自动激活虚拟环境、更新 pip 与 yt-dlp，然后显式使用该虚拟环境的 Python 启动 Web 应用、下载器和上传器，不依赖各脚本的 shebang。`stop` 不更新依赖；在 Devil 环境中，单独执行 `stop` 不会重启 Devil 管理的 Web 应用，`restart` 则保持原有的 Devil 重启行为。
+`start` 和 `restart` 会使用项目虚拟环境中的 Python 启动 Web 应用、下载器和上传器，不依赖各脚本的 shebang。`stop` 不更新依赖；在 Devil 环境中，单独执行 `stop` 不会重启 Devil 管理的 Web 应用，`restart` 则保持原有的 Devil 重启行为。
 
-使用 Supervisor 部署时，可运行专用维护脚本更新 pip 和 yt-dlp，并由 Supervisor 重启 Web 应用、下载器、AI 总结及 WebDAV 服务：
+现在 `runner.sh` 默认只负责启动、停止和重启服务，不会隐式升级依赖。需要明确更新依赖时执行：
 
 ```bash
-./runner-supervisor.sh
+PYTUBEDL_UPDATE_DEPS=1 ./runner.sh restart
 ```
 
-该脚本要求项目虚拟环境位于 `venv/`，并要求 `/usr/bin/supervisorctl` 可用。依赖更新失败时脚本会立即退出，不会继续重启服务。定时执行时建议使用 `flock` 防止任务重叠，并将输出重定向到日志文件。
+使用 Supervisor 部署时，可运行专用维护脚本重启 Web 应用、下载器、AI 总结及 WebDAV 服务：
+
+```bash
+./supervisor-runner.sh
+```
+
+该脚本要求项目虚拟环境位于 `venv/`，并要求 `/usr/bin/supervisorctl` 可用。需要同时按 `requirements.txt` 更新依赖时执行 `PYTUBEDL_UPDATE_DEPS=1 ./supervisor-runner.sh`。定时执行时建议使用 `flock` 防止任务重叠，并将输出重定向到日志文件。
+
+### 5. 两台 VPS 一键发布
+
+开发机完成测试、提交并推送 `master` 后，可通过 SSH 串行发布两台 VPS。第一台发布或健康检查失败时立即停止，不会继续发布第二台。
+
+首次配置：
+
+```bash
+cp deploy/targets.conf.example deploy/targets.conf
+vim deploy/targets.conf
+chmod 700 deploy/deploy.sh deploy/remote-deploy.sh
+```
+
+每个目标按 `名称|SSH alias|远程项目目录|服务管理器|健康检查 URL` 配置。SSH alias 应写在开发机的 `~/.ssh/config` 中；不要在配置文件中写密码、私钥或 Token。服务管理器填写 `systemd` 或 `supervisor`。
+
+发布命令：
+
+```bash
+./deploy/deploy.sh
+```
+
+发布前必须满足：开发机位于干净的 `master`，远端 checkout 也必须干净，且 VPS 上不能有 `.downloading` 或 `.uploading` 标记。发布脚本会把 VPS 精确 fast-forward 到开发机当前 commit，按 `requirements.txt` 安装依赖，重启对应服务，并检查 `/healthz`、服务状态和下载器进程。
+
+如果发布后的健康检查失败，远端脚本会自动恢复发布前的 commit 并重启服务。也可以在目标 VPS 上手工回滚：
+
+```bash
+cd /path/to/PyYoutubeDL
+git log --oneline -5
+git reset --hard <已确认的旧 commit>
+systemctl restart pyyoutubedl
+# Supervisor 环境改用 ./supervisor-runner.sh
+```
+
+`/healthz` 只返回 `status` 和当前 Git commit，供部署检查和反向代理探活使用，不包含配置、令牌或任务数据。
 
 停止本项目通过 Python 启动的 Web 应用、下载器、上传器及其子进程：
 
@@ -406,7 +446,8 @@ PyYoutubeDL/
 ├── downloader.py         # 下载器（watchdog + yt-dlp）
 ├── webdav_uploader.py    # WebDAV 上传器
 ├── runner.sh             # 启动脚本
-├── runner-supervisor.sh  # Supervisor 部署维护脚本
+├── supervisor-runner.sh  # Supervisor 部署维护脚本
+├── deploy/               # 开发机与远端发布脚本
 ├── stop.py               # 停止脚本
 ├── setup_pyyoutubedl_service.sh  # systemd 服务安装脚本
 ├── config.json           # 配置文件
