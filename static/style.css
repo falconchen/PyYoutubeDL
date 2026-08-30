@@ -456,6 +456,10 @@ body {
     font-weight: 600;
 }
 
+.task-status .fa-spin {
+    margin-right: 0.35rem;
+}
+
 .task-status.completed {
     background: #e6f4ea;
     color: #188038;

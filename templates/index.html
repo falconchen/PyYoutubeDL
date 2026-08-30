@@ -365,7 +365,14 @@
                 const taskActions = item.querySelector('.task-actions');
 
                 status.className = `task-status ${state}`;
-                status.textContent = stateLabels[state] || state;
+                status.replaceChildren();
+                if (state === 'downloading') {
+                    const spinner = document.createElement('i');
+                    spinner.className = 'fas fa-spinner fa-spin';
+                    spinner.setAttribute('aria-hidden', 'true');
+                    status.append(spinner);
+                }
+                status.append(document.createTextNode(stateLabels[state] || state));
                 status.hidden = state === 'completed';
                 track.setAttribute('aria-valuenow', percent.toFixed(1));
                 fill.style.width = `${percent}%`;

@@ -258,6 +258,8 @@ class TestTaskInfoAPI(unittest.TestCase):
         self.assertIn('progress.elapsed_seconds', template)
         self.assertIn('progress.average_speed_bytes_per_second', template)
         self.assertIn('detailParts.push(`${finalSize} in ${elapsed}`);', template)
+        self.assertIn('fas fa-spinner fa-spin', template)
+        self.assertIn("state === 'downloading'", template)
 
     def test_video_duration_template_rounds_fractional_seconds(self):
         template = Path(app.app.template_folder, 'index.html').read_text(
