@@ -34,8 +34,9 @@
                 <div class="video-wrapper">
                     {% set initial_video_metadata = video_metadata.get(video_files[0], {}) if video_files else {} %}
                     {% set initial_video_covers = initial_video_metadata.get('cover_candidates', []) %}
+                    {% set initial_video_cover = initial_video_covers[1] if initial_video_covers|length > 1 else (initial_video_covers[0] if initial_video_covers else '') %}
                     <video id="video-player" class="video-js vjs-big-play-centered vjs-16-9" controls preload="metadata" playsinline webkit-playsinline
-                        {% if initial_video_covers %}poster="{{ initial_video_covers[0] }}"{% endif %}>
+                        {% if initial_video_cover %}poster="{{ initial_video_cover }}"{% endif %}>
                         {% if video_files %}
                         <source src="{{ url_for('serve_file', filename=video_files[0]) }}" type="video/mp4">
                         {% for track in subtitle_tracks.get(video_files[0], []) %}
@@ -101,6 +102,7 @@
                 </div>
                 <div class="playlist-items scrollbar-custom" id="video-list">
                     {% for file in video_files %}
+                    {% set display_file = file[9:] if file|length > 9 and file[:8].isdigit() and file[8] == '-' else file %}
                     <button type="button" class="playlist-item {% if loop.first %}active{% endif %}"
                         data-filename="{{ file }}" {% if loop.first %}aria-current="true"{% endif %}
                         onclick="switchVideo('{{ url_for('serve_file', filename=file) }}', '{{ file }}', this)">
@@ -108,7 +110,7 @@
                             <i class="fas fa-play"></i>
                         </div>
                         <div class="item-details">
-                            <span class="item-name" title="{{ file }}">{{ file }}</span>
+                            <span class="item-name" title="{{ display_file }}">{{ display_file }}</span>
                         </div>
                     </button>
                     {% endfor %}
@@ -797,6 +799,10 @@
                 }
                 var image = new Image();
                 image.onload = function () {
+                    if (image.naturalWidth <= 120 && image.naturalHeight <= 90) {
+                        tryCandidate(index + 1);
+                        return;
+                    }
                     if (requestSerial === videoPosterRequestSerial) {
                         player.poster(candidates[index]);
                     }

@@ -102,8 +102,13 @@ class TestPlayerPage(unittest.TestCase):
         self.assertIn('<dt>作者</dt>', html)
         self.assertIn('<dd>测试作者</dd>', html)
         self.assertIn('<summary>简介</summary>', html)
-        self.assertIn('poster="https://i.ytimg.com/vi/Hh3AmV46epI/maxresdefault.jpg"', html)
+        self.assertIn('poster="https://i.ytimg.com/vi/Hh3AmV46epI/hqdefault.jpg"', html)
         self.assertIn('updateVideoPoster(filename);', html)
+        self.assertIn(
+            'image.naturalWidth <= 120 && image.naturalHeight <= 90',
+            html,
+        )
+        self.assertIn('tryCandidate(index + 1);', html)
         self.assertIn('href="/audio-player"', html)
         self.assertLess(html.index('class="player-nav"'), html.index('class="player-content"'))
         self.assertNotIn('class="footer-actions"', html)
@@ -233,6 +238,31 @@ class TestPlayerPage(unittest.TestCase):
         self.assertIn('type="button" class="playlist-item active"', html)
         self.assertIn('aria-current="true"', html)
         self.assertIn("element.setAttribute('aria-current', 'true');", html)
+
+    def test_playlist_item_name_hides_numeric_datetime_prefix(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            prefixed_filename = '08221544-example-720.mp4'
+            unprefixed_filename = 'abcdefgh-example-720.mp4'
+            Path(files_dir, prefixed_filename).touch()
+            Path(files_dir, unprefixed_filename).touch()
+
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch('app.get_embedded_subtitles', return_value=[]),
+            ):
+                response = self.client.get('/player')
+
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            '<span class="item-name" title="example-720.mp4">example-720.mp4</span>',
+            html,
+        )
+        self.assertNotIn(f'class="item-name" title="{prefixed_filename}"', html)
+        self.assertIn(
+            f'<span class="item-name" title="{unprefixed_filename}">{unprefixed_filename}</span>',
+            html,
+        )
 
     def test_file_parameter_selects_requested_video(self):
         with tempfile.TemporaryDirectory() as files_dir:
