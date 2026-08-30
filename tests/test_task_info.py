@@ -278,6 +278,8 @@ class TestTaskInfoAPI(unittest.TestCase):
 
         self.assertIn('const METADATA_TIMEOUT_MS = 30000;', template)
         self.assertIn('const METADATA_MAX_ATTEMPTS = 2;', template)
+        self.assertIn("fetch('/api/video_info_basic'", template)
+        self.assertNotIn("fetch('/api/video_info',", template)
         self.assertIn('error.name === \'AbortError\'', template)
         self.assertIn('正在重试获取标题…', template)
         self.assertIn('updateMetadata(url, attempt + 1)', template)

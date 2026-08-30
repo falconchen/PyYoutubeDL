@@ -99,6 +99,37 @@ class TestVideoInfoAPI(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(data['uploader'], expected)
 
+    @patch('app.subprocess.run')
+    def test_basic_video_info_returns_only_preview_fields(self, run):
+        run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout='"测试标题"\t"测试作者"\t607\t"https://img.example/thumb.jpg"\n',
+            stderr='',
+        )
+
+        response = self.app.post(
+            '/api/video_info_basic',
+            json={'url': 'https://www.youtube.com/watch?v=test'},
+        )
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data, {
+            'success': True,
+            'title': '测试标题',
+            'uploader': '测试作者',
+            'duration': 607,
+            'thumbnail': 'https://img.example/thumb.jpg',
+        })
+        cmd = run.call_args.args[0]
+        self.assertIn('--print', cmd)
+        self.assertIn('%(title)j\t%(uploader)j\t%(duration)j\t%(thumbnail)j', cmd)
+        self.assertIn('--no-write-subs', cmd)
+        self.assertIn('--no-write-auto-subs', cmd)
+        self.assertIn('--no-playlist', cmd)
+        self.assertNotIn('--dump-single-json', cmd)
+
     def test_valid_video(self):
         """测试有效的视频URL"""
         # 使用一个已知存在的视频

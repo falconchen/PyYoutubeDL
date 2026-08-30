@@ -247,7 +247,7 @@
             if (!url || !videoInfo || taskItems.length !== 1) return;
             const controller = new AbortController();
             const timeout = window.setTimeout(() => controller.abort(), METADATA_TIMEOUT_MS);
-            fetch('/api/video_info', {
+            fetch('/api/video_info_basic', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

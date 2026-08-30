@@ -1991,6 +1991,78 @@ def api_video_info():
             "msg": f"Failed to get video info: {detail}"
         }), 500
 
+
+@app.route('/api/video_info_basic', methods=['POST'])
+def api_video_info_basic():
+    """只提取首页预览所需的标题、作者、时长和缩略图。"""
+    data = request.get_json() if request.is_json else request.form
+    url = extract_url(data.get('url'))
+
+    if not url:
+        return jsonify({"success": False, "msg": "Missing required parameter: url"}), 400
+
+    try:
+        conf_path = _pick_ytdlp_conf('video')
+        cmd = [
+            'yt-dlp',
+            '--config-location', conf_path,
+            '--sleep-requests', '0',
+            '--sleep-interval', '0',
+            '--max-sleep-interval', '0',
+            '--sleep-subtitles', '0',
+            '--no-progress',
+            '--no-write-subs',
+            '--no-write-auto-subs',
+            '--no-playlist',
+            '--no-warnings',
+            '--print', '%(title)j\t%(uploader)j\t%(duration)j\t%(thumbnail)j',
+            url,
+        ]
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        output_line = next(
+            (line.strip() for line in reversed(result.stdout.splitlines()) if line.strip()),
+            '',
+        )
+        values = output_line.split('\t', 3)
+        if len(values) != 4:
+            raise ValueError('yt-dlp returned incomplete basic video info')
+
+        def parse_printed_value(value):
+            if value in {'NA', 'N/A', 'null', 'None', ''}:
+                return None
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return value
+
+        title, uploader, duration, thumbnail = (
+            parse_printed_value(value) for value in values
+        )
+        return jsonify({
+            'success': True,
+            'title': title,
+            'uploader': uploader,
+            'duration': duration,
+            'thumbnail': thumbnail,
+        })
+    except Exception as e:
+        if isinstance(e, subprocess.CalledProcessError):
+            stderr = (e.stderr or '').strip()
+            stdout = (e.stdout or '').strip()
+            detail = stderr or stdout or str(e)
+        else:
+            detail = str(e)
+        return jsonify({
+            'success': False,
+            'msg': f'Failed to get basic video info: {detail}',
+        }), 500
+
 def get_youtube_cookie():
     """从API获取YouTube cookie并保存到文件"""
     try:

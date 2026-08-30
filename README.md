@@ -185,6 +185,11 @@ curl -X POST http://localhost:5100/api/task_info \
   -H "Content-Type: application/json" \
   -d '{"tasks": ["v20250601120000abc"]}'
 
+# 查询轻量视频预览信息（标题、作者、时长、缩略图）
+curl -X POST http://localhost:5100/api/video_info_basic \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.youtube.com/watch?v=xxx"}'
+
 # 首次读取 downloader.log 末尾；后续请求传回响应中的 cursor 和 file_id
 curl "http://localhost:5100/api/downloader_log" \
   -H "X-Yter-Log-Token: <EXTENSION_LOG_TOKEN>"
