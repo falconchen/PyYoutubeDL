@@ -282,6 +282,8 @@ class TestTaskInfoAPI(unittest.TestCase):
         self.assertIn('const METADATA_MAX_ATTEMPTS = 2;', template)
         self.assertIn("fetch('/api/video_info_basic'", template)
         self.assertNotIn("fetch('/api/video_info',", template)
+        self.assertIn('setThumbnail(data.thumbnail, data.title || \'视频缩略图\')', template)
+        self.assertIn('thumbnail.hidden = false;', template)
         self.assertIn('const sourceUrls = data.tasks', template)
         self.assertIn('sourceUrls.every(url => url === sourceUrls[0])', template)
         self.assertIn('(data.tasks.length === 1 || hasSharedSource)', template)

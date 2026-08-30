@@ -192,18 +192,21 @@
         const uploader = videoInfo ? videoInfo.querySelector('.uploader') : null;
         const duration = videoInfo ? videoInfo.querySelector('.duration') : null;
 
+        function setThumbnail(url, alt = '视频缩略图') {
+            if (!url || !thumbnail || !videoThumbnail) return;
+            thumbnail.src = url;
+            thumbnail.alt = alt;
+            thumbnail.hidden = false;
+            videoThumbnail.classList.remove('is-placeholder');
+            thumbnail.addEventListener('error', () => {
+                thumbnail.hidden = true;
+                videoThumbnail.classList.add('is-placeholder');
+            }, {once: true});
+        }
+
         function renderPreview(task) {
             if (!task || !videoInfo) return;
-            if (task.thumbnail && thumbnail) {
-                thumbnail.src = task.thumbnail;
-                thumbnail.alt = '视频缩略图';
-                thumbnail.hidden = false;
-                videoThumbnail.classList.remove('is-placeholder');
-                thumbnail.addEventListener('error', () => {
-                    thumbnail.hidden = true;
-                    videoThumbnail.classList.add('is-placeholder');
-                }, {once: true});
-            }
+            setThumbnail(task.thumbnail);
         }
 
         // 任务状态先于元数据请求更新，保证用户能立即确认任务已入队。
@@ -257,7 +260,7 @@
             })
             .then(data => {
                 if (!data.success) throw new Error(data.msg || '元数据查询失败');
-                if (data.thumbnail && thumbnail && !thumbnail.getAttribute('src')) thumbnail.src = data.thumbnail;
+                setThumbnail(data.thumbnail, data.title || '视频缩略图');
                 title.textContent = data.title || '标题未知';
 
                 const uploaderName = data.uploader || data.platform || '未知平台';
