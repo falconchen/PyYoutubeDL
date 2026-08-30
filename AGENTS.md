@@ -57,7 +57,7 @@ python stop.py
 export FLASK_APP=app.py && export FLASK_DEBUG=1 && flask run --host=0.0.0.0 --port=5100
 
 # 运行测试
-python -m pytest test_timezone.py test_video_info.py -v
+python -m pytest tests/test_timezone.py tests/test_video_info.py -v
 
 # 获取 YouTube cookies
 flask get-cookie
@@ -68,7 +68,7 @@ flask get-cookie
 - Shell 命令应尽量兼容 Linux、FreeBSD 和 macOS。
 - Python 代码应遵循现有文件风格，不引入不必要的新框架。
 - 与下载、上传、删除、cookie、WebDAV、日志清理相关的改动要特别谨慎。
-- `test_video_info.py` 中的部分测试可能访问 YouTube，需要网络环境支持。
+- `tests/test_video_info.py` 中的部分测试可能访问 YouTube，需要网络环境支持。
 - 不要把真实 cookie、密钥、Token、服务器密码等敏感信息写入文档、日志或测试数据。
 - 修改配置时优先更新 `config.sample.json` 或文档说明，不要把本地私有配置当作默认值。
 - 首页 `templates/index.html` 和播放页 `templates/player.html` 已接入 Waline 评论，服务地址是 `https://waline.v2ai.eu.cc`。

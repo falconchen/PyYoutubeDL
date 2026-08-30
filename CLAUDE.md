@@ -23,7 +23,7 @@ python stop.py
 export FLASK_APP=app.py && export FLASK_DEBUG=1 && flask run --host=0.0.0.0 --port=5100
 
 # Run tests
-python -m pytest test_timezone.py test_video_info.py -v
+python -m pytest tests/test_timezone.py tests/test_video_info.py -v
 
 # Flask CLI: fetch YouTube cookies from the configured YTC API
 flask get-cookie
@@ -56,4 +56,4 @@ The system has three persistent processes that communicate through the filesyste
 
 ## Testing
 
-Tests use `unittest` with Flask's test client. `test_video_info.py` tests the `/api/video_info` endpoint — note that valid video tests hit YouTube directly and need network access. Run individually with `python -m pytest test_video_info.py -v`.
+Tests are stored in `tests/` and use `unittest` with Flask's test client. `tests/test_video_info.py` tests the `/api/video_info` endpoint — note that valid video tests hit YouTube directly and need network access. Run individually with `python -m pytest tests/test_video_info.py -v`.
