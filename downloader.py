@@ -425,12 +425,33 @@ class DownloadHandler(FileSystemEventHandler):
             logger.info(f"检测到文件重命名为txt: {event.src_path} -> {event.dest_path}")
             self.executor.submit(self.process_file, event.dest_path)
 
-    def process_file(self, filepath):
+    def resume_interrupted_downloads(self, folder):
+        """按配置恢复下载器启动前遗留的 .downloading 任务。"""
+        if not config.get('RESUME_INTERRUPTED_DOWNLOADS', False):
+            logger.info("异常中断任务自动恢复已关闭")
+            return 0
+
+        interrupted_paths = sorted(
+            os.path.join(folder, filename)
+            for filename in os.listdir(folder)
+            if filename.endswith('.downloading')
+            and os.path.isfile(os.path.join(folder, filename))
+        )
+        for filepath in interrupted_paths:
+            logger.info(f"发现异常中断任务，准备恢复: {filepath}")
+            self.executor.submit(self.process_file, filepath, True)
+
+        if not interrupted_paths:
+            logger.info("未发现需要恢复的异常中断任务")
+        return len(interrupted_paths)
+
+    def process_file(self, filepath, resume=False):
         """
-        处理 .txt 任务文件：解析 URL、重命名任务状态、发起下载并根据结果更新状态。
+        处理新建或恢复的任务文件，发起下载并根据结果更新状态。
 
         Args:
-            filepath (str): 任务文件的本地路径。
+            filepath (str): .txt 或 .downloading 任务文件的本地路径。
+            resume (bool): 是否恢复已经处于 .downloading 状态的任务。
         """
         time.sleep(0.5)
         if not os.path.exists(filepath):
@@ -444,15 +465,20 @@ class DownloadHandler(FileSystemEventHandler):
                     return
 
             base_name = os.path.splitext(os.path.basename(filepath))[0]
-            # 下载前先重命名为.downloading
-            downloading_path = filepath.rsplit('.', 1)[0] + '.downloading'
-            try:
-                os.rename(filepath, downloading_path)
+            if resume:
+                downloading_path = filepath
                 started_at = time.monotonic()
-                logger.info(f"任务开始，文件重命名为: {downloading_path}")
-            except Exception as e:
-                logger.error(f"重命名为.downloading失败: {e}")
-                return
+                logger.info(f"恢复异常中断任务: {downloading_path}")
+            else:
+                # 下载前先重命名为.downloading
+                downloading_path = filepath.rsplit('.', 1)[0] + '.downloading'
+                try:
+                    os.rename(filepath, downloading_path)
+                    started_at = time.monotonic()
+                    logger.info(f"任务开始，文件重命名为: {downloading_path}")
+                except Exception as e:
+                    logger.error(f"重命名为.downloading失败: {e}")
+                    return
             # 根据首字母判断模式
             mode = 'audio' if base_name[0] == 'a' else 'video'
             result = self.download(
@@ -740,6 +766,7 @@ def start_monitor(folder):
     observer.schedule(event_handler, folder, recursive=False)
     observer.start()
     logger.info(f"开始监控目录: {folder}")
+    event_handler.resume_interrupted_downloads(folder)
     return observer
 
 def main():

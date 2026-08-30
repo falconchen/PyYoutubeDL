@@ -44,6 +44,8 @@ The system has three persistent processes that communicate through the filesyste
 
 **Task file lifecycle:** `.txt` (queued) → `.downloading` (in progress) → `.ok` / `.fail` (completed).
 
+When `RESUME_INTERRUPTED_DOWNLOADS` is `true`, downloader startup queues existing `.downloading` tasks with their original task IDs so yt-dlp can reuse partial files. The default is `false` to avoid automatically running stale tasks.
+
 **Alternative downloader (`downloader-opt.py`):** A variant that uses the `yt_dlp` Python library directly instead of subprocess. Not used by default; kept as an alternative implementation.
 
 **Configuration (`config_util.py`):** Loads `config.json` with a `DEFAULT_CONFIG` fallback. Path-based config keys (`URLS_DIR`, `TMP_DIR`, `FILES_DIR`, `LOG_DIR`) are resolved relative to the script directory.

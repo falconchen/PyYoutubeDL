@@ -16,10 +16,22 @@
 
 ### 1. 安装依赖
 
+仅部署和运行服务时安装生产依赖：
+
 ```bash
 python -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+```
+
+在其他机器上开发或运行测试时，改为安装开发依赖。`requirements-dev.txt` 会同时安装 `requirements.txt` 中的运行依赖和 pytest：
+
+```bash
+python -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-dev.txt
+python -m pytest tests/ -v
 ```
 
 ### 2. 配置
@@ -98,6 +110,8 @@ journalctl -u pyyoutubedl -f    # 实时日志
 如果任务绕过 Web 应用的播放列表展开逻辑，而由 yt-dlp 在单个任务内识别出多个条目，实际下载命令仍会应用 `PLAYLIST_MAX_ITEMS`，并在每个条目的合并、字幕嵌入和元数据处理完成后，立即把该媒体及其外挂字幕移入 `FILES_DIR`。任务不再等整个列表结束后才统一移动产物；列表后续条目失败不会删除已经移出的文件。
 
 批量提交（尤其是大播放列表展开出的数百个任务）时，下载器默认每 10 秒最多启动一个新下载（`DOWNLOAD_MIN_INTERVAL_SECONDS`），避免短时间连续请求 YouTube 触发风控；同时运行的下载数由 `MAX_WORKERS` 线程池控制。节流等待期间任务显示为“准备下载”。该节流全局生效，若希望关闭可把 `DOWNLOAD_MIN_INTERVAL_SECONDS` 设为 `0`。
+
+下载器异常退出时，正在处理的任务可能遗留为 `.downloading`。将 `RESUME_INTERRUPTED_DOWNLOADS` 设为 `true` 后，下载器每次启动都会扫描这些任务，并沿用原任务 ID 和 `TMP_DIR` 中的临时目录重新调用 yt-dlp；仍存在的 `.part` 文件通常可由 yt-dlp 断点续传，临时文件已经丢失时则会重新下载。该配置默认是 `false`，避免升级或重启后自动执行历史遗留任务；启用前应先检查 `URLS_DIR` 中的 `.downloading` 文件。恢复逻辑不会重新执行 `.ok` 或 `.fail` 任务。
 
 播放器会使用 `ffprobe` 识别 MP4 内嵌字幕，并在浏览器请求字幕时通过 `ffmpeg` 转换为 WebVTT，Video.js 控制栏会显示可用的字幕选项。该功能不修改原视频，但运行环境必须能够直接执行 `ffprobe` 和 `ffmpeg`；无法识别或转换字幕时，视频仍可正常播放，只是不显示字幕选项。
 
@@ -226,6 +240,7 @@ video (2).mp4
 | `MAX_WORKERS` | int | 下载线程池大小，默认 4 |
 | `PLAYLIST_MAX_ITEMS` | int | 单个播放列表只解析并下载前 N 个条目，默认 20；无效值回退为 20 |
 | `DOWNLOAD_MIN_INTERVAL_SECONDS` | int | 两次下载启动的最小间隔（秒），0 表示不限速，默认 10 |
+| `RESUME_INTERRUPTED_DOWNLOADS` | bool | 下载器启动时是否恢复遗留的 `.downloading` 任务，默认 `false` |
 | `MAX_LOG_SIZE` | int | 单个日志文件最大字节数，默认 10MB |
 | `BACKUP_COUNT` | int | 日志文件保留数量，默认 5 |
 | `YT_DLP_OUTPUT_TEMPLATE` | string | 视频文件名主体模板；下载时自动添加 `MMDDHHmm-` 前缀 |
@@ -384,6 +399,7 @@ PyYoutubeDL/
 ├── log_util.py           # 日志工具
 ├── bark_util.py          # Bark 通知工具
 ├── requirements.txt      # Python 依赖
+├── requirements-dev.txt  # 开发和测试依赖（包含运行依赖）
 ├── urls/                 # 任务文件目录
 ├── tmp/                  # 临时下载目录
 ├── files/                # 完成文件目录

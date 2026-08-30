@@ -17,6 +17,7 @@ DEFAULT_CONFIG = {
     "MAX_WORKERS": 4,               # 最大并行下载数
     "PLAYLIST_MAX_ITEMS": DEFAULT_PLAYLIST_MAX_ITEMS, # 单个播放列表只下载前 N 个条目
     "DOWNLOAD_MIN_INTERVAL_SECONDS": 10, # 两次下载启动的最小间隔（秒），0 表示不限速
+    "RESUME_INTERRUPTED_DOWNLOADS": False, # 下载器启动时是否恢复遗留的 .downloading 任务
     "MAX_LOG_SIZE": 10 * 1024 * 1024, # 单个日志文件最大字节数
     "BACKUP_COUNT": 5,              # 日志备份保留数量
     "YT_DLP_OUTPUT_TEMPLATE": "%(title.0:20)s-%(id)s.%(ext)s", # yt-dlp 文件名输出模板

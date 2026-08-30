@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import downloader
 
@@ -285,6 +285,92 @@ class TestDownloaderMove(unittest.TestCase):
                 started_at=123.5,
             )
             self.assertTrue((Path(root) / 'v20260804120000Tim.ok').exists())
+
+    def test_resume_interrupted_task_keeps_task_id_and_completes(self):
+        with tempfile.TemporaryDirectory() as root:
+            task_path = Path(root) / 'v20260830120000Res.downloading'
+            task_path.write_text('https://example.com/video', encoding='utf-8')
+
+            with (
+                patch('downloader.time.sleep'),
+                patch('downloader.time.monotonic', return_value=456.5),
+                patch.object(self.handler, 'download', return_value=True) as download,
+            ):
+                self.handler.process_file(str(task_path), resume=True)
+
+            download.assert_called_once_with(
+                'https://example.com/video',
+                'v20260830120000Res',
+                'video',
+                started_at=456.5,
+            )
+            self.assertFalse(task_path.exists())
+            self.assertTrue((Path(root) / 'v20260830120000Res.ok').exists())
+
+    def test_interrupted_tasks_are_not_queued_when_resume_is_disabled(self):
+        with tempfile.TemporaryDirectory() as root:
+            task_path = Path(root) / 'v20260830120000Off.downloading'
+            task_path.write_text('https://example.com/video', encoding='utf-8')
+            executor = MagicMock()
+            handler = downloader.DownloadHandler(executor)
+
+            with patch.dict(
+                downloader.config,
+                {'RESUME_INTERRUPTED_DOWNLOADS': False},
+            ):
+                queued = handler.resume_interrupted_downloads(root)
+
+            self.assertEqual(queued, 0)
+            executor.submit.assert_not_called()
+
+    def test_interrupted_tasks_are_queued_in_name_order_when_enabled(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            first = root_path / 'a20260830120000One.downloading'
+            second = root_path / 'v20260830120000Two.downloading'
+            first.write_text('https://example.com/audio', encoding='utf-8')
+            second.write_text('https://example.com/video', encoding='utf-8')
+            (root_path / 'v20260830120000New.txt').write_text(
+                'https://example.com/new',
+                encoding='utf-8',
+            )
+            executor = MagicMock()
+            handler = downloader.DownloadHandler(executor)
+
+            with patch.dict(
+                downloader.config,
+                {'RESUME_INTERRUPTED_DOWNLOADS': True},
+            ):
+                queued = handler.resume_interrupted_downloads(root)
+
+            self.assertEqual(queued, 2)
+            self.assertEqual(
+                executor.submit.call_args_list,
+                [
+                    call(handler.process_file, str(first), True),
+                    call(handler.process_file, str(second), True),
+                ],
+            )
+
+    def test_start_monitor_checks_for_interrupted_tasks(self):
+        observer = MagicMock()
+        executor = MagicMock()
+
+        with (
+            patch('downloader.Observer', return_value=observer),
+            patch('downloader.ThreadPoolExecutor', return_value=executor),
+            patch.object(
+                downloader.DownloadHandler,
+                'resume_interrupted_downloads',
+                return_value=0,
+            ) as resume_interrupted,
+        ):
+            result = downloader.start_monitor('/project/urls')
+
+        self.assertIs(result, observer)
+        observer.schedule.assert_called_once()
+        observer.start.assert_called_once_with()
+        resume_interrupted.assert_called_once_with('/project/urls')
 
     def test_runtime_command_adds_metadata_for_video_and_audio(self):
         with tempfile.TemporaryDirectory() as root:

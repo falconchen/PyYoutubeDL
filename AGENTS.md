@@ -38,6 +38,8 @@
 .txt -> .downloading -> .ok / .fail
 ```
 
+`RESUME_INTERRUPTED_DOWNLOADS` 为 `true` 时，下载器启动后会恢复遗留的 `.downloading` 任务；默认关闭，避免历史任务在重启后被自动执行。
+
 ## 常用命令
 
 ```bash
