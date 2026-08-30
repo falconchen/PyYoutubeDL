@@ -48,6 +48,34 @@ class TestTaskInfoAPI(unittest.TestCase):
         self.assertEqual(task['state'], 'queued')
         self.assertEqual(task['progress']['percent'], 0)
 
+    def test_reports_lightweight_youtube_preview_for_queued_task(self):
+        task_id = 'v20260723120000YtP'
+        (self.urls_dir / f'{task_id}.txt').write_text(
+            'https://youtu.be/dQw4w9WgXcQ?t=12',
+            encoding='utf-8',
+        )
+
+        response = self.client.post('/api/task_info', json={'tasks': [task_id]})
+        task = response.get_json()['tasks'][0]
+
+        self.assertEqual(task['source_url'], 'https://youtu.be/dQw4w9WgXcQ?t=12')
+        self.assertEqual(
+            task['thumbnail'],
+            'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+        )
+        self.assertEqual(task['metadata_state'], 'preview')
+
+    def test_non_youtube_task_has_no_derived_preview(self):
+        task_id = 'a20260723120000NoP'
+        self.write_task(task_id, '.txt')
+
+        response = self.client.post('/api/task_info', json={'tasks': [task_id]})
+        task = response.get_json()['tasks'][0]
+
+        self.assertEqual(task['source_url'], 'https://example.com/video')
+        self.assertIsNone(task['thumbnail'])
+        self.assertEqual(task['metadata_state'], 'pending')
+
     def test_reports_structured_download_progress(self):
         task_id = 'a20260723120000XyZ'
         self.write_task(task_id, '.downloading')

@@ -582,6 +582,19 @@ def get_task_info(task):
         "state": state,
         "progress": progress,
     }
+
+    # 预览信息必须保持轻量，不能为了封面或标题再次调用 yt-dlp。
+    # YouTube 单视频的缩略图地址可以从 URL 直接推导，标题等元数据由前端
+    # 另行异步获取；这样任务状态不会被慢速元数据请求阻塞。
+    youtube_video_id = extract_youtube_video_id(url)
+    task_info["source_url"] = url
+    task_info["thumbnail"] = (
+        f"https://i.ytimg.com/vi/{youtube_video_id}/hqdefault.jpg"
+        if youtube_video_id
+        else None
+    )
+    task_info["metadata_state"] = "preview" if youtube_video_id else "pending"
+
     if state == 'completed':
         result_path = os.path.join(URLS_DIR, f"{task}.result.json")
         try:

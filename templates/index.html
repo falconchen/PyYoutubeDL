@@ -53,25 +53,16 @@
         <h3><i class="fas fa-tasks"></i> 任务已创建</h3>
         <div class="task-info">
             
-            <div class="video-info" style="display: none;">
-                <div class="video-thumbnail">
-                    <img src="" alt="视频缩略图" referrerpolicy="no-referrer">
+            <div class="video-info">
+                <div class="video-thumbnail is-placeholder">
+                    <span class="thumbnail-placeholder">预览</span>
+                    <img src="" alt="视频缩略图" referrerpolicy="no-referrer" hidden>
                 </div>
                 <div class="video-details">
-                    <h4 class="video-title"></h4>
+                    <h4 class="video-title">正在获取标题…</h4>
                     <div class="video-meta">
-                        <span class="uploader"></span>
+                        <span class="uploader metadata-pending">元数据加载中</span>
                         <span class="duration"></span>
-                    </div>
-                </div>
-            </div>
-            <div class="video-info-skeleton" style="display: none;">
-                <div class="skeleton-thumbnail"></div>
-                <div class="skeleton-details">
-                    <div class="skeleton-title"></div>
-                    <div class="skeleton-meta">
-                        <div class="skeleton-text"></div>
-                        <div class="skeleton-text"></div>
                     </div>
                 </div>
             </div>
@@ -146,6 +137,11 @@
         document.querySelector('.download-form').addEventListener('submit', function() {
             const selected = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
             localStorage.setItem('selectedTypes', JSON.stringify(selected));
+            const submitButton = this.querySelector('button[type="submit"]');
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 正在创建任务…';
+            }
         });
 
         // 获取 URL 元素
@@ -182,91 +178,112 @@
             urlDisplay.textContent = urlText.textContent.trim();
         }
 
-        // 获取视频信息
-        if (urlText && urlText.textContent) {
-            // 显示骨架屏
-            const skeleton = document.querySelector('.video-info-skeleton');
-            skeleton.style.display = 'flex';
+        const taskItems = Array.from(document.querySelectorAll('.task-item'));
+        const videoInfo = document.querySelector('.video-info');
+        const videoThumbnail = videoInfo ? videoInfo.querySelector('.video-thumbnail') : null;
+        const thumbnail = videoInfo ? videoInfo.querySelector('img') : null;
+        const title = videoInfo ? videoInfo.querySelector('.video-title') : null;
+        const uploader = videoInfo ? videoInfo.querySelector('.uploader') : null;
+        const duration = videoInfo ? videoInfo.querySelector('.duration') : null;
 
+        if (taskItems.length > 1 && title && uploader) {
+            title.textContent = `已创建 ${taskItems.length} 个任务`;
+            uploader.textContent = '各任务将分别下载';
+            uploader.classList.remove('metadata-pending');
+        }
+
+        function renderPreview(task) {
+            if (!task || !videoInfo) return;
+            if (task.thumbnail && thumbnail) {
+                thumbnail.src = task.thumbnail;
+                thumbnail.alt = '视频缩略图';
+                thumbnail.hidden = false;
+                videoThumbnail.classList.remove('is-placeholder');
+                thumbnail.addEventListener('error', () => {
+                    thumbnail.hidden = true;
+                    videoThumbnail.classList.add('is-placeholder');
+                }, {once: true});
+            }
+        }
+
+        // 任务状态先于元数据请求更新，保证用户能立即确认任务已入队。
+        let pollingStopped = false;
+        const stateLabels = {
+            queued: '已入队',
+            downloading: '下载中',
+            completed: '已完成',
+            failed: '失败',
+            missing: '未找到'
+        };
+        const stageLabels = {
+            queued: '已入队',
+            starting: '准备下载',
+            downloading: '下载文件',
+            download_subtitles: '下载字幕',
+            download_video: '下载视频',
+            download_audio: '下载音频',
+            download_media: '下载音视频',
+            merge_media: '合并音视频',
+            embed_subtitles: '嵌入字幕',
+            extract_audio: '转换音频',
+            write_metadata: '写入信息',
+            postprocessing: '处理文件',
+            completed: '下载完成',
+            failed: '下载失败',
+            missing: '未找到'
+        };
+
+        function updateMetadata(url) {
+            if (!url || !videoInfo || taskItems.length !== 1) return;
+            const controller = new AbortController();
+            const timeout = window.setTimeout(() => controller.abort(), 9000);
             fetch('/api/video_info', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    url: urlText.textContent.trim()
-                })
+                    url: url
+                }),
+                signal: controller.signal
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.json();
+            })
             .then(data => {
-                if (data.success) {
-                    const videoInfo = document.querySelector('.video-info');
-                    const thumbnail = videoInfo.querySelector('img');
-                    const title = videoInfo.querySelector('.video-title');
-                    const uploader = videoInfo.querySelector('.uploader');
-                    const duration = videoInfo.querySelector('.duration');
+                if (!data.success) throw new Error(data.msg || '元数据查询失败');
+                if (data.thumbnail && thumbnail && !thumbnail.getAttribute('src')) thumbnail.src = data.thumbnail;
+                title.textContent = data.title || '标题未知';
 
-                    // 设置缩略图
-                    thumbnail.src = data.thumbnail;
-                    thumbnail.alt = data.title;
+                const uploaderName = data.uploader || data.platform || '未知平台';
+                const uploaderIcon = document.createElement('i');
+                uploaderIcon.className = 'fas fa-user';
+                uploader.replaceChildren(
+                    uploaderIcon,
+                    document.createTextNode(` ${uploaderName}`)
+                );
+                uploader.classList.remove('metadata-pending');
 
-                    // 设置标题
-                    title.textContent = data.title;
-
-                    // 设置上传者
-                    const uploaderName = data.uploader || data.platform || '未知平台';
-                    const uploaderIcon = document.createElement('i');
-                    uploaderIcon.className = 'fas fa-user';
-                    uploader.replaceChildren(
-                        uploaderIcon,
-                        document.createTextNode(` ${uploaderName}`)
-                    );
-
-                    // 设置时长
-                    const totalSeconds = Math.round(Number(data.duration) || 0);
-                    const minutes = Math.floor(totalSeconds / 60);
-                    const seconds = totalSeconds % 60;
+                const totalSeconds = Math.round(Number(data.duration) || 0);
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = totalSeconds % 60;
+                if (totalSeconds > 0) {
                     duration.innerHTML = `<i class="fas fa-clock"></i> ${minutes}:${seconds.toString().padStart(2, '0')}`;
-
-                    // 隐藏骨架屏，显示视频信息
-                    skeleton.style.display = 'none';
-                    videoInfo.style.display = 'flex';
                 }
             })
             .catch(error => {
                 console.error('获取视频信息失败:', error);
-                // 发生错误时也隐藏骨架屏
-                skeleton.style.display = 'none';
+                if (title && title.textContent === '正在获取标题…') title.textContent = '标题稍后显示';
+                if (uploader && uploader.classList.contains('metadata-pending')) uploader.textContent = '元数据暂时不可用';
+            })
+            .finally(() => {
+                window.clearTimeout(timeout);
             });
         }
 
-        const taskItems = Array.from(document.querySelectorAll('.task-item'));
         if (taskItems.length > 0) {
-            const stateLabels = {
-                queued: '排队中',
-                downloading: '下载中',
-                completed: '已完成',
-                failed: '失败',
-                missing: '未找到'
-            };
-            const stageLabels = {
-                queued: '排队中',
-                starting: '准备下载',
-                downloading: '下载文件',
-                download_subtitles: '下载字幕',
-                download_video: '下载视频',
-                download_audio: '下载音频',
-                download_media: '下载音视频',
-                merge_media: '合并音视频',
-                embed_subtitles: '嵌入字幕',
-                extract_audio: '转换音频',
-                write_metadata: '写入信息',
-                postprocessing: '处理文件',
-                completed: '下载完成',
-                failed: '下载失败',
-                missing: '未找到'
-            };
-
+            let metadataStarted = false;
             function formatByteUnits(value) {
                 return String(value || '')
                     .replace(/GiB\b/gi, 'G')
@@ -342,8 +359,8 @@
                     if (averageSpeed) detailParts.push(`${averageSpeed}/s`);
                     detailParts.push('下载完成');
                 } else {
-                    if (state === 'queued') detailParts.push('等待下载器处理');
-                    if (state === 'downloading' && progress.phase === 'starting') detailParts.push('正在准备下载');
+                    if (state === 'queued') detailParts.push('任务已入队，等待下载器接收');
+                    if (state === 'downloading' && progress.phase === 'starting') detailParts.push('下载器已接收，正在准备下载');
                     if (hasProgressValue(progress.downloaded) && hasProgressValue(progress.total)) {
                         detailParts.push(
                             `${formatByteUnits(progress.downloaded)} / ${formatByteUnits(progress.total)}`
@@ -369,7 +386,6 @@
                 }
             }
 
-            let pollingStopped = false;
             async function updateTaskProgress() {
                 try {
                     const response = await fetch('/api/task_info', {
@@ -383,7 +399,14 @@
                     const data = await response.json();
                     if (!data.success) throw new Error(data.msg || '查询任务失败');
 
-                    data.tasks.forEach(renderTask);
+                    data.tasks.forEach((task, index) => {
+                        renderTask(task);
+                        if (index === 0) renderPreview(task);
+                    });
+                    if (!metadataStarted && data.tasks.length === 1 && data.tasks[0].source_url) {
+                        metadataStarted = true;
+                        updateMetadata(data.tasks[0].source_url);
+                    }
                     pollingStopped = data.tasks.every(task =>
                         ['completed', 'failed', 'missing'].includes(task.state)
                     );

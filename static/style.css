@@ -553,12 +553,38 @@ body {
     height: 90px;
     border-radius: 4px;
     overflow: hidden;
+    position: relative;
+    background: linear-gradient(135deg, #e8f0fe, #f1f3f4);
 }
 
 .video-thumbnail img {
     width: 100%;
     height: 100%;
     object-fit: cover;
+}
+
+.thumbnail-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #6b7280;
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+}
+
+.video-thumbnail:not(.is-placeholder) .thumbnail-placeholder {
+    display: none;
+}
+
+.metadata-pending {
+    color: #80868b;
+}
+
+.download-form button:disabled {
+    cursor: wait;
+    opacity: 0.75;
 }
 
 .video-details {
