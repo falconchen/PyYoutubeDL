@@ -73,6 +73,7 @@ flask get-cookie
 - Python 代码应遵循现有文件风格，不引入不必要的新框架。
 - 与下载、上传、删除、cookie、WebDAV、日志清理相关的改动要特别谨慎。
 - `tests/test_video_info.py` 中的部分测试可能访问 YouTube，需要网络环境支持。
+- 本地验证服务时注意执行环境的进程生命周期：当前 Codex 命令执行器在命令结束后可能回收由命令启动的后台子进程，即使 `runner.sh` 使用了 `nohup` 也可能导致服务随后不可访问。需要保持服务运行时，应在用户自己的终端启动 `./runner.sh start`，或让验证会话保持前台；不要仅根据 `runner.sh` 的“启动成功”提示判断服务已持续运行，需另行检查 `http://127.0.0.1:5100/` 和相关进程。
 - 不要把真实 cookie、密钥、Token、服务器密码等敏感信息写入文档、日志或测试数据。
 - 修改配置时优先更新 `config.sample.json` 或文档说明，不要把本地私有配置当作默认值。
 - 带注释的配置不能使用 `python -m json.tool` 或 `jq` 验证；应运行 `tests/test_config_util.py`。项目只约定 JSONC 风格注释和尾逗号，不推广其他 JSON5 扩展语法。
