@@ -1851,6 +1851,74 @@ def read_downloader_log_chunk(filepath, cursor=None, expected_file_id=None):
     }
 
 
+def read_task_log_tail(filepath):
+    """读取单个任务日志的末尾，避免首页日志接口暴露完整全局日志。"""
+    try:
+        with open(filepath, 'rb') as log_file:
+            log_file.seek(0, os.SEEK_END)
+            file_size = log_file.tell()
+            log_file.seek(max(0, file_size - DOWNLOADER_LOG_MAX_BYTES))
+            data = log_file.read()
+    except OSError:
+        return ''
+    return data.decode('utf-8', errors='replace')
+
+
+def redact_task_log_text(text):
+    """隐藏日志中的项目绝对路径，保留相对目录和文件名便于排查。"""
+    project_root = os.path.abspath(os.path.dirname(__file__))
+    return text.replace(project_root, '[项目目录]')
+
+
+@app.route('/api/task_log', methods=['POST'])
+def api_task_log():
+    """返回指定任务相关的日志，供首页侧栏使用。"""
+    data = request.get_json() if request.is_json else request.form
+    tasks = data.get('tasks')
+    if not tasks:
+        return jsonify({"success": False, "msg": "Missing required parameter: tasks"}), 400
+    if not isinstance(tasks, list):
+        tasks = [tasks]
+    tasks = [task for task in tasks if isinstance(task, str) and TASK_ID_PATTERN.fullmatch(task)]
+    if not tasks or len(tasks) > 20:
+        return jsonify({"success": False, "msg": "Invalid task list"}), 400
+
+    task_urls = {}
+    for task in tasks:
+        task_info = get_task_info(task)
+        if task_info.get('exists'):
+            task_urls[task] = task_info.get('url', '')
+
+    relevant_lines = []
+    seen_lines = set()
+
+    def append_lines(text):
+        text = redact_task_log_text(text)
+        for line in text.splitlines():
+            if line and line not in seen_lines:
+                seen_lines.add(line)
+                relevant_lines.append(line)
+
+    for task, task_url in task_urls.items():
+        task_log_path = os.path.join(config['LOG_DIR'], f'{task}.log')
+        append_lines(read_task_log_tail(task_log_path))
+
+    global_log_path = os.path.join(config['LOG_DIR'], 'downloader.log')
+    global_log = read_task_log_tail(global_log_path)
+    for line in global_log.splitlines():
+        if any(
+            marker and marker in line
+            for marker in [*task_urls.keys(), *task_urls.values()]
+        ):
+            append_lines(line)
+
+    return jsonify({
+        'success': True,
+        'text': '\n'.join(relevant_lines),
+        'tasks': tasks,
+    })
+
+
 @app.route('/api/downloader_log', methods=['GET'])
 def api_downloader_log():
     def log_response(payload, status=200):

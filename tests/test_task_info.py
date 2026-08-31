@@ -291,6 +291,23 @@ class TestTaskInfoAPI(unittest.TestCase):
         self.assertIn('正在重试获取标题…', template)
         self.assertIn('updateMetadata(url, attempt + 1)', template)
 
+    def test_task_log_drawer_is_compact(self):
+        template = Path(app.app.template_folder, 'index.html').read_text(
+            encoding='utf-8',
+        )
+        css = Path(app.app.static_folder, 'style.css').read_text(
+            encoding='utf-8',
+        )
+
+        self.assertIn('class="task-log-output"', template)
+        self.assertNotIn('task-log-pause', template)
+        self.assertNotIn('task-log-clear', template)
+        self.assertNotIn('task-log-reconnect', template)
+        self.assertNotIn('实时连接中', template)
+        self.assertNotIn('tail -f task logs', template)
+        self.assertIn('height: min(33vh, 360px);', css)
+        self.assertIn('background: rgba(17, 20, 24, 0.84);', css)
+
     def test_completed_task_is_always_100_percent(self):
         task_id = 'v20260723120000QwE'
         self.write_task(task_id, '.ok')

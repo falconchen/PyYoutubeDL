@@ -49,6 +49,21 @@
     </div>
 
     {% if tasks %}
+    <button class="task-log-toggle" type="button" aria-controls="task-log-drawer" aria-expanded="true">
+        <i class="fas fa-terminal"></i>
+        <span>下载日志</span>
+    </button>
+    <aside id="task-log-drawer" class="task-log-drawer" aria-label="下载日志侧栏">
+        <div class="task-log-header">
+            <div>
+                <strong><i class="fas fa-terminal"></i> 下载日志</strong>
+            </div>
+            <button class="task-log-close" type="button" aria-label="关闭下载日志">×</button>
+        </div>
+        <div class="task-log-terminal">
+            <pre class="task-log-output" role="log" aria-live="polite">等待下载日志…</pre>
+        </div>
+    </aside>
     <div class="container task-container">
         <h3><i class="fas fa-tasks"></i> 任务已创建</h3>
         <div class="task-info">
@@ -185,6 +200,56 @@
         }
 
         const taskItems = Array.from(document.querySelectorAll('.task-item'));
+        const taskLogDrawer = document.querySelector('.task-log-drawer');
+        const taskLogToggle = document.querySelector('.task-log-toggle');
+        const taskLogOutput = document.querySelector('.task-log-output');
+        const taskLogClose = document.querySelector('.task-log-close');
+
+        if (taskLogDrawer && taskItems.length > 0) {
+            let taskLogTimer = null;
+
+            function scheduleTaskLog(delay = 1500) {
+                if (taskLogTimer !== null) window.clearTimeout(taskLogTimer);
+                taskLogTimer = window.setTimeout(updateTaskLog, delay);
+            }
+
+            async function updateTaskLog() {
+                try {
+                    const response = await fetch('/api/task_log', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            tasks: taskItems.map(item => item.dataset.task)
+                        })
+                    });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const data = await response.json();
+                    if (!data.success) throw new Error(data.msg || '读取日志失败');
+                    const wasNearBottom = taskLogOutput.scrollHeight
+                        - taskLogOutput.scrollTop
+                        - taskLogOutput.clientHeight < 48;
+                    taskLogOutput.textContent = data.text || '等待下载日志…';
+                    if (wasNearBottom) {
+                        taskLogOutput.scrollTop = taskLogOutput.scrollHeight;
+                    }
+                } catch (error) {
+                    console.warn('获取下载日志失败:', error);
+                }
+                scheduleTaskLog();
+            }
+
+            function setTaskLogOpen(value) {
+                taskLogDrawer.classList.toggle('open', value);
+                taskLogToggle.classList.toggle('hidden', value);
+                taskLogToggle.setAttribute('aria-expanded', String(value));
+            }
+
+            taskLogToggle.addEventListener('click', () => setTaskLogOpen(true));
+            taskLogClose.addEventListener('click', () => setTaskLogOpen(false));
+            setTaskLogOpen(true);
+            updateTaskLog();
+        }
+
         const videoInfo = document.querySelector('.video-info');
         const videoThumbnail = videoInfo ? videoInfo.querySelector('.video-thumbnail') : null;
         const thumbnail = videoInfo ? videoInfo.querySelector('img') : null;

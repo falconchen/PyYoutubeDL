@@ -225,6 +225,11 @@ curl -X POST http://localhost:5100/api/task_info \
   -H "Content-Type: application/json" \
   -d '{"tasks": ["v20250601120000abc"]}'
 
+# 查询首页侧栏使用的当前任务日志
+curl -X POST http://localhost:5100/api/task_log \
+  -H "Content-Type: application/json" \
+  -d '{"tasks": ["v20250601120000abc"]}'
+
 # 查询轻量视频预览信息（标题、作者、时长、缩略图）
 curl -X POST http://localhost:5100/api/video_info_basic \
   -H "Content-Type: application/json" \
@@ -246,6 +251,8 @@ curl http://localhost:5100/api/ai_summaries/jobs/<job_id> \
 ```
 
 `/api/task_info` 会返回任务的 `state`（`queued`、`downloading`、`completed`、`failed` 或 `missing`）和 `progress`。下载中任务的 `progress` 包含可用的 `percent`、`downloaded`、`total`、`speed`、`eta` 等字段；新任务完成后包含 `final_size_bytes`、`elapsed_seconds`、`average_speed_bytes_per_second`。视频或音频任务完成并且主媒体产物仍在本地时，还会返回对应的 `player_url`。
+
+`/api/task_log` 只返回请求任务对应的任务日志，以及 `downloader.log` 中包含这些任务 ID 或任务 URL 的日志行，供首页右侧日志侧栏滚动显示；不会把完整全局日志或日志访问令牌发送给浏览器。返回前会将项目绝对路径替换为 `[项目目录]`，避免把服务器目录结构暴露给用户。
 
 对于没有完成摘要的旧任务，任务 API 只从仍存在的主媒体文件读取最终大小，不使用最后一个下载阶段的耗时和速率；无法可靠恢复的总耗时及平均速率会省略。未生成 `result.json` 的旧任务还会尝试从 downloader 的文件移动日志中恢复最终文件名；只有日志记录和本地文件都仍然存在时才会返回播放链接。
 

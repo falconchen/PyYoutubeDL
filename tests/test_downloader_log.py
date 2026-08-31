@@ -117,6 +117,42 @@ class TestDownloaderLogAPI(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    def test_task_log_returns_only_matching_task_logs(self):
+        with tempfile.TemporaryDirectory() as root_dir:
+            urls_dir = Path(root_dir, 'urls')
+            log_dir = Path(root_dir, 'logs')
+            urls_dir.mkdir()
+            log_dir.mkdir()
+            task_id = 'v20260831172600AbC'
+            Path(urls_dir, f'{task_id}.txt').write_text(
+                'https://example.com/video', encoding='utf-8'
+            )
+            project_root = Path(app_module.__file__).resolve().parent
+            Path(log_dir, f'{task_id}.log').write_text(
+                f'task line\n[download] Destination: '
+                f'{project_root}/tmp/{task_id}/file.m4a\n',
+                encoding='utf-8',
+            )
+            Path(log_dir, 'downloader.log').write_text(
+                'matching https://example.com/video\nother task secret\n',
+                encoding='utf-8',
+            )
+            with (
+                patch.object(app_module, 'URLS_DIR', str(urls_dir)),
+                patch.dict(app_module.config, {'LOG_DIR': str(log_dir)}),
+            ):
+                response = self.client.post(
+                    '/api/task_log', json={'tasks': [task_id]}
+                )
+
+        self.assertEqual(response.status_code, 200)
+        text = response.get_json()['text']
+        self.assertIn('task line', text)
+        self.assertIn('matching https://example.com/video', text)
+        self.assertIn('[项目目录]/tmp/v20260831172600AbC/file.m4a', text)
+        self.assertNotIn(str(project_root), text)
+        self.assertNotIn('other task secret', text)
+
 
 if __name__ == '__main__':
     unittest.main()
