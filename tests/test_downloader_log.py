@@ -149,7 +149,7 @@ class TestDownloaderLogAPI(unittest.TestCase):
         text = response.get_json()['text']
         self.assertIn('task line', text)
         self.assertIn('matching https://example.com/video', text)
-        self.assertIn('[项目目录]/tmp/v20260831172600AbC/file.m4a', text)
+        self.assertIn('📁/tmp/v20260831172600AbC/file.m4a', text)
         self.assertNotIn(str(project_root), text)
         self.assertNotIn('other task secret', text)
 

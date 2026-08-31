@@ -1867,7 +1867,7 @@ def read_task_log_tail(filepath):
 def redact_task_log_text(text):
     """隐藏日志中的项目绝对路径，保留相对目录和文件名便于排查。"""
     project_root = os.path.abspath(os.path.dirname(__file__))
-    return text.replace(project_root, '[项目目录]')
+    return text.replace(project_root, '📁')
 
 
 @app.route('/api/task_log', methods=['POST'])
