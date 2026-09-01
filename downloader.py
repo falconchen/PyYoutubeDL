@@ -53,6 +53,15 @@ ITEM_COMPLETE_PREFIX = 'PYDL_ITEM_COMPLETE|'
 SUBTITLE_OUTPUT_EXTENSIONS = {'.ass', '.lrc', '.srt', '.ssa', '.ttml', '.vtt'}
 
 
+def _ytdlp_cmd():
+    """返回调用 yt-dlp 的命令前缀。
+
+    使用当前解释器内的 yt_dlp 模块，避免依赖进程 PATH 或外部 yt-dlp 可执行文件，
+    保证与运行 downloader 的 Python 环境（项目 venv）保持一致。
+    """
+    return [sys.executable, '-m', 'yt_dlp']
+
+
 def _available_subtitle_languages(subtitle_map):
     """返回确实包含格式且适合 AI 总结的字幕语言代码。"""
     if not isinstance(subtitle_map, dict):
@@ -172,8 +181,7 @@ def _first_video_info(info):
 
 def probe_subtitle_fallback(url, conf_path):
     """使用实际 yt-dlp 配置预检字幕，仅在配置未匹配时返回回退项。"""
-    cmd = [
-        'yt-dlp',
+    cmd = _ytdlp_cmd() + [
         '--config-location', conf_path,
         '--simulate',
         '--skip-download',
@@ -549,8 +557,7 @@ class DownloadHandler(FileSystemEventHandler):
                 ]
         
         # 核心修改：添加 --newline 和 --progress 确保进度条被捕获
-        cmd = [
-            'yt-dlp',
+        cmd = _ytdlp_cmd() + [
             '--config-location', conf_path,
             '--add-metadata',     # 视频和音频统一在运行时写入媒体元信息
             '--newline',           # 强制进度输出换行，以便逐行读取
