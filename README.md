@@ -4,11 +4,12 @@
 
 ## 架构
 
-项目由三个独立进程组成：
+项目由若干独立进程组成：
 
 - **app.py** — Flask Web 应用，提供管理界面和 API，用户通过网页提交下载链接
 - **downloader.py** — 下载器，基于 watchdog 监控 `urls/` 目录，自动处理新任务并调用 yt-dlp 下载
 - **webdav_uploader.py** — 上传器，基于 watchdog 监控 `files/` 目录，自动将完成文件上传至 WebDAV 远程存储
+- **playlist_monitor.py** — 播放列表监控（可选，配置 OAuth 后启用），轮询 YouTube Data API 的收件箱播放列表，消费式下发下载任务
 
 任务通过文件系统通信：Web 端写入 `.txt` 任务文件到 `urls/` 目录，下载器处理后重命名为 `.ok`/`.fail`，完成文件移动到 `files/` 目录后由上传器处理。
 
@@ -328,6 +329,16 @@ video (2).mp4
 | `FLASK_HOST` | string | Flask 监听地址，默认 `0.0.0.0` |
 | `FLASK_PORT` | int | Flask Web 应用监听端口，默认 `5100`；应避免与 YTC 的 `5001` 冲突 |
 | `FLASK_DEBUG` | bool | Flask 调试模式 |
+| `FLASK_SECRET_KEY` | string | OAuth state 会话签名密钥，需在 `config.json` 设置稳定值 |
+| `GOOGLE_OAUTH_CLIENT_ID` | string | Google OAuth 客户端 ID |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | string | Google OAuth 客户端密钥 |
+| `GOOGLE_OAUTH_REDIRECT_URI` | string | OAuth 回调地址，默认 `https://yter.cellmean.com/oauth/callback` |
+| `GOOGLE_OAUTH_TOKEN_FILE` | string | OAuth 令牌文件，默认 `./data/youtube_token.json` |
+| `GOOGLE_OAUTH_FAIL_LOCK_FILE` | string | 刷新失败锁文件，默认 `./data/youtube_oauth_fail.lock` |
+| `YOUTUBE_API_PROXY` | string | YouTube API 可选代理，如 `socks5h://host:port`；留空走直连/环境变量 |
+| `PLAYLIST_POLL_INTERVAL_SECONDS` | int | 播放列表轮询间隔（秒），默认 300 |
+| `PLAYLIST_MAX_ITEMS_PER_RUN` | int | 每次每列表最多处理条目数，默认 10 |
+| `MONITOR_PLAYLISTS` | object | 监控的收件箱播放列表映射 `{playlistId: [types]}` |
 | `SCHEDULED_PLAYLISTS` | array | 定时下载的播放列表配置 |
 
 将 `ENABLE_WEBDAV_UPLOAD` 设为 `false` 后，`runner.sh` 和 `start.py` 会输出“WebDAV上传已关闭，已跳过启动上传器。”，不再启动上传器进程。此时不会连接 WebDAV、上传或删除下载文件，也不会执行本地过期文件和 WebDAV 远端日期目录清理；下载文件会保留在 `FILES_DIR`。直接运行 `webdav_uploader.py` 时，进程会保持空闲并执行相同的禁用行为。
@@ -372,6 +383,38 @@ YouTube 部分视频需要登录才能下载。支持通过 yt-dlp 浏览器 coo
 ```bash
 ./update_cookie.sh
 ```
+
+## YouTube OAuth 授权与播放列表监控
+
+可选功能：通过 Google OAuth 授权，让后台 `playlist_monitor.py` 轮询你的 YouTube“收件箱”播放列表，并把列表中的视频按视频/音频模式加入下载队列。行为与同仓库的 PHP 版 `yter/ProcessPlaylist.php` 一致——消费式：加入下载后从播放列表删除该条目。
+
+### 前置条件
+
+1. 在 Google Cloud Console 为 OAuth 客户端配置回调地址 `https://yter.cellmean.com/oauth/callback`（部署域名不同则同步修改 `GOOGLE_OAUTH_REDIRECT_URI`）。
+2. 确保 YouTube Data API v3 已启用，且你的 Google 账号已通过 OAuth 同意屏幕放行。
+
+### 授权
+
+在 `config.json` 配置 `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` / `FLASK_SECRET_KEY` 后，访问 `/oauth/start` 完成授权。成功后令牌写入 `GOOGLE_OAUTH_TOKEN_FILE`（默认 `./data/youtube_token.json`，`0600` 权限，`data/` 已被 `.gitignore` 忽略）。
+
+### 配置监控的播放列表
+
+```json
+"MONITOR_PLAYLISTS": {
+  "PLxxxxxxxxxxxxx1": ["audio", "video"],
+  "PLxxxxxxxxxxxxx2": ["video"],
+  "PLxxxxxxxxxxxxx3": ["audio"]
+}
+```
+
+值为下载类型列表，`video` 写视频任务、`audio` 写音频任务。配置好 `GOOGLE_OAUTH_CLIENT_ID`、`GOOGLE_OAUTH_CLIENT_SECRET` 与 `MONITOR_PLAYLISTS` 后，`start.py` / `runner.sh` 会自动启动 `playlist_monitor.py`；否则会打印跳过原因。
+
+### 失败处理与配额
+
+- 令牌过期会自动用 `refresh_token` 刷新；刷新失败会写入 `GOOGLE_OAUTH_FAIL_LOCK_FILE` 并发送 Bark 通知，重新授权后自动清除并恢复。
+- 删除播放列表条目失败时，该条不会下发下载，避免重复下载，并继续处理后续条目。
+- YouTube Data API 有日配额（`playlistItems.list` 消耗 1、`playlistItems.delete` 消耗 50 单位/次），默认 300 秒轮询一次、每次每列表最多 10 条。消费式删除是配额大头，量大时应调大 `PLAYLIST_POLL_INTERVAL_SECONDS` 或提升配额。
+- 服务器无法直连 Google 时，可设置 `YOUTUBE_API_PROXY`（例如 `socks5h://192.168.11.7:1080`）供令牌刷新与 API 调用走代理；OAuth 网页回调的令牌换取走环境变量 `HTTPS_PROXY`。
 
 ## WebDAV 上传
 
@@ -452,6 +495,9 @@ PyYoutubeDL/
 ├── app.py                # Flask Web 应用
 ├── downloader.py         # 下载器（watchdog + yt-dlp）
 ├── webdav_uploader.py    # WebDAV 上传器
+├── playlist_monitor.py   # 播放列表监控 worker（可选）
+├── youtube_auth.py       # YouTube OAuth / Data API 封装
+├── task_queue.py         # 下载任务写入（Web 与 worker 共用）
 ├── runner.sh             # 启动脚本
 ├── supervisor-runner.sh  # Supervisor 部署维护脚本
 ├── deploy/               # 开发机与远端发布脚本
@@ -468,6 +514,7 @@ PyYoutubeDL/
 ├── tmp/                  # 临时下载目录
 ├── files/                # 完成文件目录
 ├── logs/                 # 日志目录
+├── data/                 # AI 总结数据库与 OAuth 令牌（gitignore）
 ├── static/               # Web 静态资源
 ├── templates/            # Jinja2 模板
 ├── yt-dlp.conf           # yt-dlp 视频配置文件

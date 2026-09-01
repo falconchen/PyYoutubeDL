@@ -77,6 +77,17 @@ class TestWebDAVUploadToggle(unittest.TestCase):
         self.assertNotIn(('ai_summary_worker.py', 'AI总结Worker'), disabled)
         self.assertIn(('ai_summary_worker.py', 'AI总结Worker'), enabled)
 
+    def test_start_services_include_playlist_monitor_only_when_configured(self):
+        disabled = start.get_service_scripts({})
+        enabled = start.get_service_scripts({
+            'GOOGLE_OAUTH_CLIENT_ID': 'cid',
+            'GOOGLE_OAUTH_CLIENT_SECRET': 'secret',
+            'MONITOR_PLAYLISTS': {'PL1': ['video']},
+        })
+
+        self.assertNotIn(('playlist_monitor.py', '播放列表监控'), disabled)
+        self.assertIn(('playlist_monitor.py', '播放列表监控'), enabled)
+
     def test_runner_reports_disabled_upload_and_skips_uploader(self):
         result = subprocess.run(
             [
@@ -88,6 +99,7 @@ command() { return 0; }
 start_service() { echo "START:$1"; }
 ai_summary_status() { return 10; }
 webdav_upload_status() { return 10; }
+playlist_monitor_status() { return 10; }
 start_services
 ''',
             ],

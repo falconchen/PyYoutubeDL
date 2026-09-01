@@ -12,6 +12,7 @@ TARGET_SCRIPT_NAMES = {
     'app.py',
     'ai_summary_worker.py',
     'downloader.py',
+    'playlist_monitor.py',
     'start.py',
     'webdav_uploader.py',
 }

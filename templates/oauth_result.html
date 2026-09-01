@@ -1,0 +1,21 @@
+{% extends 'content_base.html' %}
+
+{% block title %}YouTube 授权结果{% endblock %}
+{% block description %}查看 YouTube 账号授权结果。{% endblock %}
+{% block heading %}{% if ok %}授权成功{% else %}授权未完成{% endif %}{% endblock %}
+{% block lead %}
+<p class="content-lead">{% if ok %}您的 YouTube 账号已绑定，播放列表监控可以开始工作。{% else %}授权过程中出现问题，请重试。{% endif %}</p>
+{% endblock %}
+
+{% block content %}
+<section>
+    <aside class="content-notice">
+        <strong>{% if ok %}✅ 授权成功{% else %}⚠️ 授权失败{% endif %}</strong>
+        <p>{{ message }}</p>
+    </aside>
+    <p>
+        <a href="{{ url_for('index') }}">返回下载页</a>
+        {% if not ok %}· <a href="{{ url_for('oauth_start') }}">重新授权</a>{% endif %}
+    </p>
+</section>
+{% endblock %}

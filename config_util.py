@@ -49,12 +49,25 @@ DEFAULT_CONFIG = {
     # 通用配置
     "TIMEZONE": "Asia/Shanghai",    # 系统使用的时区
     "FLASK_PORT": 5100,              # Flask Web 应用监听端口
+
+    # YouTube OAuth 与播放列表监控
+    "GOOGLE_OAUTH_CLIENT_ID": "",    # Google OAuth 客户端 ID
+    "GOOGLE_OAUTH_CLIENT_SECRET": "",# Google OAuth 客户端密钥
+    "GOOGLE_OAUTH_REDIRECT_URI": "https://yter.cellmean.com/oauth/callback",  # OAuth 回调地址
+    "GOOGLE_OAUTH_TOKEN_FILE": "./data/youtube_token.json",  # OAuth 令牌文件
+    "GOOGLE_OAUTH_FAIL_LOCK_FILE": "./data/youtube_oauth_fail.lock",  # 刷新失败锁
+    "YOUTUBE_API_PROXY": "",         # YouTube API 可选代理（如 socks5h://host:port）
+    "PLAYLIST_POLL_INTERVAL_SECONDS": 300,  # 播放列表轮询间隔（秒）
+    "PLAYLIST_MAX_ITEMS_PER_RUN": 10,       # 每次每列表最多处理条目数
+    "MONITOR_PLAYLISTS": {},         # {playlistId: [types]}
+    "FLASK_SECRET_KEY": "",          # OAuth state 会话签名密钥
 }
 
 # 需要转换为绝对路径的配置项
 PATH_CONFIG_KEYS = [
-    "URLS_DIR",  "TMP_DIR", 
-    "FILES_DIR", "LOG_DIR", "AI_SUMMARY_DB_PATH"
+    "URLS_DIR",  "TMP_DIR",
+    "FILES_DIR", "LOG_DIR", "AI_SUMMARY_DB_PATH",
+    "GOOGLE_OAUTH_TOKEN_FILE", "GOOGLE_OAUTH_FAIL_LOCK_FILE",
 ]
 
 
@@ -92,6 +105,17 @@ def get_playlist_max_items(runtime_config):
     ):
         return DEFAULT_PLAYLIST_MAX_ITEMS
     return max_items
+
+
+def is_playlist_monitor_enabled(runtime_config):
+    """OAuth 客户端 ID/密钥与播放列表映射均配置时启用播放列表监控。"""
+    return bool(
+        isinstance(runtime_config.get("GOOGLE_OAUTH_CLIENT_ID"), str)
+        and runtime_config.get("GOOGLE_OAUTH_CLIENT_ID").strip()
+        and isinstance(runtime_config.get("GOOGLE_OAUTH_CLIENT_SECRET"), str)
+        and runtime_config.get("GOOGLE_OAUTH_CLIENT_SECRET").strip()
+        and runtime_config.get("MONITOR_PLAYLISTS")
+    )
 
 
 def load_config(default_config=None, config_keys=None):

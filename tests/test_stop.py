@@ -21,6 +21,10 @@ class TestCommandTargetsProject(unittest.TestCase):
             stop.command_targets_project(cmdline, self.base_dir, self.base_dir)
         )
 
+    def test_matches_playlist_monitor_script(self):
+        cmdline = ['python', '/srv/PyYoutubeDL/playlist_monitor.py']
+        self.assertTrue(stop.command_targets_project(cmdline, '/', self.base_dir))
+
     def test_rejects_same_script_name_in_another_project(self):
         cmdline = ['python', '/srv/another-project/downloader.py']
         self.assertFalse(stop.command_targets_project(cmdline, '/', self.base_dir))

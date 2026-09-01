@@ -108,5 +108,43 @@ class TestConfigLoading(unittest.TestCase):
         self.assertIn('加载配置文件失败，使用默认配置', output.getvalue())
 
 
+class TestPlaylistMonitorConfig(unittest.TestCase):
+    def test_oauth_redirect_uri_default(self):
+        self.assertEqual(
+            DEFAULT_CONFIG['GOOGLE_OAUTH_REDIRECT_URI'],
+            'https://yter.cellmean.com/oauth/callback',
+        )
+
+    def test_poll_interval_default(self):
+        self.assertEqual(DEFAULT_CONFIG['PLAYLIST_POLL_INTERVAL_SECONDS'], 300)
+
+    def test_monitor_playlists_default_empty(self):
+        self.assertEqual(DEFAULT_CONFIG['MONITOR_PLAYLISTS'], {})
+
+    def test_is_playlist_monitor_enabled(self):
+        cfg = {
+            'GOOGLE_OAUTH_CLIENT_ID': 'cid',
+            'GOOGLE_OAUTH_CLIENT_SECRET': 'secret',
+            'MONITOR_PLAYLISTS': {'PL1': ['video']},
+        }
+        self.assertTrue(config_util.is_playlist_monitor_enabled(cfg))
+
+    def test_is_playlist_monitor_disabled_without_secret(self):
+        cfg = {
+            'GOOGLE_OAUTH_CLIENT_ID': 'cid',
+            'GOOGLE_OAUTH_CLIENT_SECRET': '',
+            'MONITOR_PLAYLISTS': {'PL1': ['video']},
+        }
+        self.assertFalse(config_util.is_playlist_monitor_enabled(cfg))
+
+    def test_is_playlist_monitor_disabled_without_playlists(self):
+        cfg = {
+            'GOOGLE_OAUTH_CLIENT_ID': 'cid',
+            'GOOGLE_OAUTH_CLIENT_SECRET': 'secret',
+            'MONITOR_PLAYLISTS': {},
+        }
+        self.assertFalse(config_util.is_playlist_monitor_enabled(cfg))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -1,5 +1,5 @@
 #!venv/bin/python
-from flask import Flask, request, render_template, redirect, url_for, send_from_directory, jsonify, abort, Response, stream_with_context
+from flask import Flask, request, render_template, redirect, url_for, send_from_directory, jsonify, abort, Response, stream_with_context, session
 import os
 import glob
 import html
@@ -13,14 +13,14 @@ import hashlib
 import hmac
 from werkzeug.utils import safe_join
 from config_util import get_playlist_max_items, load_config
-import random
-import string
 import pytz
 from datetime import datetime
 import requests
 from requests.auth import HTTPBasicAuth
 from log_util import setup_logger
 import ai_summary_store
+import task_queue
+import youtube_auth
 import click
 from flask.cli import with_appcontext
 
@@ -58,6 +58,11 @@ logger = setup_logger(
 
 # 将logger赋值给app.logger
 app.logger = logger
+
+# OAuth state 会话需要稳定密钥；未配置时生成临时密钥（多 worker 部署需在 config.json 配置）
+app.secret_key = config.get("FLASK_SECRET_KEY") or os.urandom(24)
+if not config.get("FLASK_SECRET_KEY"):
+    app.logger.warning("FLASK_SECRET_KEY 未配置，OAuth state 会话在多 worker 部署下可能失效，请在 config.json 中设置稳定密钥。")
 
 URLS_DIR = config["URLS_DIR"]
 FILES_DIR = config["FILES_DIR"]
@@ -124,9 +129,6 @@ def versioned_static(filename):
     if file_hash:
         return f"{url_for('static', filename=filename)}?v={file_hash[:8]}"
     return url_for('static', filename=filename)
-
-def random_str(length=3):
-    return ''.join(random.choices(string.ascii_letters, k=length))
 
 def extract_url(text):
     """从分享文本中提取URL
@@ -310,7 +312,7 @@ def expand_task_urls(url):
 
 
 def create_tasks(urls, types):
-    """创建下载任务并返回任务ID列表
+    """创建下载任务并返回任务ID列表（委托 task_queue 共享实现）。
 
     Args:
         urls (list): 要下载的 URL 列表（播放列表已展开为逐集 URL）。
@@ -319,22 +321,7 @@ def create_tasks(urls, types):
     Returns:
         list: 创建的任务ID列表
     """
-    task_ids = []
-    current_time = get_current_time()
-    for url in urls:
-        for t in types:
-            # 同一秒内创建多个任务时保证 task_id 唯一，避免覆盖已有任务文件
-            while True:
-                timestamp = current_time.strftime('%Y%m%d%H%M%S') + random_str(3)
-                prefix = 'v' if t == 'video' else 'a'
-                task_id = f"{prefix}{timestamp}"
-                filename = os.path.join(URLS_DIR, f"{task_id}.txt")
-                if not os.path.exists(filename):
-                    break
-            task_ids.append(task_id)
-            with open(filename, 'w') as f:
-                f.write(url)
-    return task_ids
+    return task_queue.create_tasks(urls, types, URLS_DIR, config["TIMEZONE"])
 
 
 def classify_download_stage(extension, vcodec, acodec):
@@ -1460,6 +1447,79 @@ def terms():
 @app.route('/privacy')
 def privacy():
     return render_template('privacy.html')
+
+
+@app.route('/oauth/start')
+def oauth_start():
+    flow = youtube_auth.build_oauth_flow(config)
+    state = hashlib.sha256(os.urandom(32)).hexdigest()
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        prompt='consent',
+        state=state,
+    )
+    session['oauth_state'] = state
+    return redirect(authorization_url)
+
+
+@app.route('/oauth/callback')
+def oauth_callback():
+    error = request.args.get('error')
+    if error:
+        return render_template(
+            'oauth_result.html',
+            ok=False,
+            message=f"授权被取消或失败：{error}",
+        ), 400
+
+    state = request.args.get('state')
+    if not state or state != session.pop('oauth_state', None):
+        return render_template(
+            'oauth_result.html',
+            ok=False,
+            message="OAuth state 校验失败，请重新发起授权。",
+        ), 400
+
+    code = request.args.get('code')
+    if not code:
+        return render_template(
+            'oauth_result.html',
+            ok=False,
+            message="缺少授权码，请重新发起授权。",
+        ), 400
+
+    try:
+        flow = youtube_auth.build_oauth_flow(config)
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+    except Exception as exc:
+        return render_template(
+            'oauth_result.html',
+            ok=False,
+            message=f"换取令牌失败：{exc}",
+        ), 400
+
+    if not creds.refresh_token:
+        return render_template(
+            'oauth_result.html',
+            ok=False,
+            message="未返回 refresh_token，请重新授权并同意离线访问。",
+        ), 400
+
+    youtube_auth.save_token(config, json.loads(creds.to_json()))
+    youtube_auth.clear_fail_lock(config)
+    try:
+        import bark_util
+        device_token = config.get("BARK_DEVICE_TOKEN")
+        if device_token:
+            bark_util.bark_notify(device_token, "YouTube 授权成功", "播放列表监控已就绪")
+    except Exception:
+        pass
+    return render_template(
+        'oauth_result.html',
+        ok=True,
+        message="YouTube 授权成功，令牌已保存，播放列表监控已就绪。",
+    )
 
 @app.route('/player')
 def player():

@@ -27,6 +27,9 @@
 - `app.py`：Flask Web 应用，提供页面和 API。
 - `downloader.py`：监听任务目录并调用 `yt-dlp` 下载视频或音频。
 - `webdav_uploader.py`：监听下载产物并上传到 WebDAV。
+- `playlist_monitor.py`：播放列表监控 worker（可选），轮询 YouTube Data API 的收件箱播放列表并消费式下发下载任务。
+- `youtube_auth.py`：YouTube OAuth 授权与 Data API 封装（令牌加载/刷新、service 构建）。
+- `task_queue.py`：下载任务写入（Web 与 worker 共用），负责 `<v|a><时间戳><随机>.txt` 任务文件。
 - `config_util.py`：读取 `config.json`，并提供默认配置。
 - `start.py` / `stop.py` / `runner.sh`：启动、停止和运行相关服务。
 - `yt-dlp.conf` / `yta-dlp.conf`：视频和音频下载配置。
@@ -83,6 +86,8 @@ flask get-cookie
 - 如果修改页面评论相关代码，确认 Waline 的 `/srv/docker/waline/.env` 中 `SECURE_DOMAINS` 包含 `yter.cellmean.com`。
 - Chrome 扩展实时日志通过 `/api/downloader_log` 增量读取 `LOG_DIR/downloader.log`；必须使用 `EXTENSION_LOG_TOKEN` 和 `X-Yter-Log-Token` 请求头，禁止在 URL、文档或测试中写入真实令牌。
 - URL 级 AI 总结持久化在 `AI_SUMMARY_DB_PATH` 的 SQLite 中，由 `ai_summary_worker.py` 异步、流式处理；生成中的 Markdown 增量可写入任务记录，原始字幕不得写入数据库。扩展接口 `/api/ai_summaries` 及其流接口必须使用独立的 `AI_SUMMARY_ACCESS_TOKEN` 和 `X-Yter-AI-Token`。
+- YouTube OAuth 令牌文件（默认 `data/youtube_token.json`）是凭据，禁止写入文档、日志或测试数据；`data/` 已在 `.gitignore` 中。OAuth 客户端密钥只应出现在 gitignored 的 `config.json`，示例配置 `config.sample.json` 用占位值。
+- 播放列表监控是消费式的：`playlist_monitor.py` 会先从播放列表删除条目、删除成功才写下载任务；涉及该 worker 的改动要注意不要破坏“先删除、后下发、失败跳过”的顺序，避免重复下载或丢失条目。
 
 ## 文档要求
 

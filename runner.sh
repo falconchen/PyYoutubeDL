@@ -97,6 +97,15 @@ sys.exit(0 if is_ai_summary_enabled(load_config()) else 10)
 '
 }
 
+playlist_monitor_status() {
+    "$PYTHON_BIN" -c '
+import sys
+from config_util import is_playlist_monitor_enabled, load_config
+
+sys.exit(0 if is_playlist_monitor_enabled(load_config()) else 10)
+'
+}
+
 start_services() {
     local services_failed=0
     local webdav_status
@@ -128,6 +137,17 @@ start_services() {
             echo "WebDAV上传已关闭，已跳过启动上传器。"
         else
             echo "无法读取WebDAV上传配置，已跳过启动上传器。"
+            services_failed=1
+        fi
+    fi
+    if playlist_monitor_status; then
+        start_service "播放列表监控" "playlist_monitor.py" || services_failed=1
+    else
+        playlist_monitor_status_code=$?
+        if [ "$playlist_monitor_status_code" -eq 10 ]; then
+            echo "OAuth 或播放列表尚未配置，已跳过启动播放列表监控。"
+        else
+            echo "无法读取播放列表监控配置，已跳过启动播放列表监控。"
             services_failed=1
         fi
     fi

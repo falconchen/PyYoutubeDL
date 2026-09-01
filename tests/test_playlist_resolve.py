@@ -266,7 +266,11 @@ class TestCreateTasks(unittest.TestCase):
             encoding='utf-8',
         )
         calls = iter(['xyz', 'abc'])
-        with patch('app.random_str', side_effect=lambda _length: next(calls)):
+        with (
+            patch('task_queue._random_str', side_effect=lambda: next(calls)),
+            patch('task_queue.datetime') as mock_datetime,
+        ):
+            mock_datetime.now.return_value = datetime(2026, 8, 22, 12, 0, 0)
             task_ids = app.create_tasks(['u1'], ['video'])
 
         self.assertEqual(task_ids, ['v20260822120000abc'])
