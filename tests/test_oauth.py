@@ -13,6 +13,7 @@ class TestOAuthRoutes(unittest.TestCase):
     @patch('youtube_auth.build_oauth_flow')
     def test_oauth_start_redirects_to_google(self, build_flow):
         flow = MagicMock()
+        flow.code_verifier = 'test-verifier'
         flow.authorization_url.return_value = (
             'https://accounts.google.com/o/oauth2/auth?client_id=x',
             'fixed_state',
@@ -25,6 +26,8 @@ class TestOAuthRoutes(unittest.TestCase):
         self.assertTrue(
             response.headers['Location'].startswith('https://accounts.google.com')
         )
+        with self.client.session_transaction() as sess:
+            self.assertEqual(sess['oauth_code_verifier'], 'test-verifier')
 
     @patch('youtube_auth.build_oauth_flow')
     @patch('youtube_auth.save_token')
@@ -48,10 +51,12 @@ class TestOAuthRoutes(unittest.TestCase):
 
         with self.client.session_transaction() as sess:
             sess['oauth_state'] = 'fixed_state'
+            sess['oauth_code_verifier'] = 'test-verifier'
 
         response = self.client.get('/oauth/callback?code=CODE&state=fixed_state')
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(flow.code_verifier, 'test-verifier')
         flow.fetch_token.assert_called_once_with(code='CODE')
         save_token.assert_called_once()
         clear_lock.assert_called_once()
@@ -75,11 +80,25 @@ class TestOAuthRoutes(unittest.TestCase):
 
         with self.client.session_transaction() as sess:
             sess['oauth_state'] = 's'
+            sess['oauth_code_verifier'] = 'test-verifier'
 
         response = self.client.get('/oauth/callback?code=CODE&state=s')
 
         self.assertEqual(response.status_code, 400)
         flow.fetch_token.assert_called_once_with(code='CODE')
+
+    @patch('youtube_auth.build_oauth_flow')
+    def test_oauth_callback_requires_code_verifier(self, build_flow):
+        flow = MagicMock()
+        build_flow.return_value = flow
+
+        with self.client.session_transaction() as sess:
+            sess['oauth_state'] = 's'
+
+        response = self.client.get('/oauth/callback?code=CODE&state=s')
+
+        self.assertEqual(response.status_code, 400)
+        flow.fetch_token.assert_not_called()
 
 
 if __name__ == '__main__':

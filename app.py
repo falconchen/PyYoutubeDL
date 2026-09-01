@@ -1459,6 +1459,9 @@ def oauth_start():
         state=state,
     )
     session['oauth_state'] = state
+    # PKCE：authorization_url 会生成 code_verifier 并放入 code_challenge，
+    # 回调换取令牌时必须带上同一个 code_verifier，故一并存入会话
+    session['oauth_code_verifier'] = flow.code_verifier
     return redirect(authorization_url)
 
 
@@ -1488,8 +1491,18 @@ def oauth_callback():
             message="缺少授权码，请重新发起授权。",
         ), 400
 
+    # 恢复 /oauth/start 时生成的 PKCE code_verifier，否则换取令牌会报
+    # invalid_grant: Missing code verifier
+    flow = youtube_auth.build_oauth_flow(config)
+    flow.code_verifier = session.pop('oauth_code_verifier', None)
+    if not flow.code_verifier:
+        return render_template(
+            'oauth_result.html',
+            ok=False,
+            message="缺少 PKCE code_verifier（会话可能已丢失），请重新发起授权。",
+        ), 400
+
     try:
-        flow = youtube_auth.build_oauth_flow(config)
         flow.fetch_token(code=code)
         creds = flow.credentials
     except Exception as exc:
