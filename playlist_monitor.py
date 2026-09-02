@@ -84,6 +84,12 @@ class PlaylistMonitor:
             return
 
         service = youtube_auth.build_youtube_service(self.config, creds)
+        # 若尚未保存用户信息（例如本功能上线前已授权），补拉一次头像/名称
+        if not youtube_auth.load_user_profile(self.config):
+            profile = youtube_auth.fetch_user_profile(self.config, creds)
+            if profile:
+                youtube_auth.save_user_profile(self.config, profile)
+
         playlists = self.config.get("MONITOR_PLAYLISTS") or {}
         for playlist_id, types in playlists.items():
             if not playlist_id:

@@ -63,6 +63,25 @@ body {
     font-size: 1.1em;
 }
 
+.oauth-user {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.oauth-avatar {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    object-fit: cover;
+    vertical-align: middle;
+}
+
+.oauth-relogin {
+    font-size: 0.85em;
+}
+
 .download-form {
     display: flex;
     flex-direction: column;
