@@ -121,6 +121,22 @@ class TestPlaylistMonitorConfig(unittest.TestCase):
     def test_monitor_playlists_default_empty(self):
         self.assertEqual(DEFAULT_CONFIG['MONITOR_PLAYLISTS'], {})
 
+    def test_enable_playlist_monitor_defaults_to_true(self):
+        self.assertIs(DEFAULT_CONFIG['ENABLE_PLAYLIST_MONITOR'], True)
+
+    def test_is_playlist_monitor_switch_on_defaults_true(self):
+        self.assertTrue(config_util.is_playlist_monitor_switch_on({}))
+
+    def test_is_playlist_monitor_disabled_when_switch_off(self):
+        cfg = {
+            'GOOGLE_OAUTH_CLIENT_ID': 'cid',
+            'GOOGLE_OAUTH_CLIENT_SECRET': 'secret',
+            'MONITOR_PLAYLISTS': {'PL1': ['video']},
+            'ENABLE_PLAYLIST_MONITOR': False,
+        }
+        self.assertFalse(config_util.is_playlist_monitor_switch_on(cfg))
+        self.assertFalse(config_util.is_playlist_monitor_enabled(cfg))
+
     def test_oauth_user_file_default(self):
         self.assertEqual(
             DEFAULT_CONFIG['GOOGLE_OAUTH_USER_FILE'],

@@ -73,6 +73,7 @@ def start_processes():
     from config_util import (
         is_ai_summary_enabled,
         is_playlist_monitor_enabled,
+        is_playlist_monitor_switch_on,
         is_webdav_upload_enabled,
         load_config,
     )
@@ -88,7 +89,9 @@ def start_processes():
         print("WebDAV上传已关闭，已跳过启动上传器。")
     if not is_ai_summary_enabled(runtime_config):
         print("AI总结尚未配置，已跳过启动AI总结Worker。")
-    if not is_playlist_monitor_enabled(runtime_config):
+    if not is_playlist_monitor_switch_on(runtime_config):
+        print("播放列表监控已关闭，已跳过启动播放列表监控。")
+    elif not is_playlist_monitor_enabled(runtime_config):
         print("OAuth 或播放列表尚未配置，已跳过启动播放列表监控。")
 
     try:

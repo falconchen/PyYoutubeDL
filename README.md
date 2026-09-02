@@ -343,6 +343,7 @@ video (2).mp4
 | `PLAYLIST_POLL_INTERVAL_SECONDS` | int | 播放列表轮询间隔（秒），默认 300 |
 | `PLAYLIST_MAX_ITEMS_PER_RUN` | int | 每次每列表最多处理条目数，默认 10 |
 | `MONITOR_PLAYLISTS` | object | 监控的收件箱播放列表映射 `{playlistId: [types]}` |
+| `ENABLE_PLAYLIST_MONITOR` | bool | 是否启动播放列表监控 worker，默认 `true`（启动）；设为 `false` 可禁用 |
 | `SCHEDULED_PLAYLISTS` | array | 定时下载的播放列表配置 |
 
 将 `ENABLE_WEBDAV_UPLOAD` 设为 `false` 后，`runner.sh` 和 `start.py` 会输出“WebDAV上传已关闭，已跳过启动上传器。”，不再启动上传器进程。此时不会连接 WebDAV、上传或删除下载文件，也不会执行本地过期文件和 WebDAV 远端日期目录清理；下载文件会保留在 `FILES_DIR`。直接运行 `webdav_uploader.py` 时，进程会保持空闲并执行相同的禁用行为。
@@ -455,6 +456,8 @@ grep OAUTH_AUTH_USERNAME config.json
 ```
 
 值为下载类型列表，`video` 写视频任务、`audio` 写音频任务。配置好 `GOOGLE_OAUTH_CLIENT_ID`、`GOOGLE_OAUTH_CLIENT_SECRET` 与 `MONITOR_PLAYLISTS` 后，`start.py` / `runner.sh` 会自动启动 `playlist_monitor.py`；否则会打印跳过原因。
+
+播放列表监控默认启动（`ENABLE_PLAYLIST_MONITOR: true`）。若想禁用该 worker（例如暂时不想消费收件箱播放列表），在 `config.json` 中设 `"ENABLE_PLAYLIST_MONITOR": false` 后重启服务即可，`start.py` / `runner.sh` 会输出“播放列表监控已关闭，已跳过启动播放列表监控。”；直接运行 `playlist_monitor.py` 时也会在启动阶段检测到关闭并退出。OAuth 配置未就绪或开关关闭任一条件不满足时均不会启动。
 
 ### 失败处理与配额
 

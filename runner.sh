@@ -100,9 +100,16 @@ sys.exit(0 if is_ai_summary_enabled(load_config()) else 10)
 playlist_monitor_status() {
     "$PYTHON_BIN" -c '
 import sys
-from config_util import is_playlist_monitor_enabled, load_config
+from config_util import (
+    is_playlist_monitor_enabled,
+    is_playlist_monitor_switch_on,
+    load_config,
+)
 
-sys.exit(0 if is_playlist_monitor_enabled(load_config()) else 10)
+cfg = load_config()
+if not is_playlist_monitor_switch_on(cfg):
+    sys.exit(11)
+sys.exit(0 if is_playlist_monitor_enabled(cfg) else 10)
 '
 }
 
@@ -144,7 +151,9 @@ start_services() {
         start_service "播放列表监控" "playlist_monitor.py" || services_failed=1
     else
         playlist_monitor_status_code=$?
-        if [ "$playlist_monitor_status_code" -eq 10 ]; then
+        if [ "$playlist_monitor_status_code" -eq 11 ]; then
+            echo "播放列表监控已关闭，已跳过启动播放列表监控。"
+        elif [ "$playlist_monitor_status_code" -eq 10 ]; then
             echo "OAuth 或播放列表尚未配置，已跳过启动播放列表监控。"
         else
             echo "无法读取播放列表监控配置，已跳过启动播放列表监控。"

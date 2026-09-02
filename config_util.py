@@ -64,6 +64,7 @@ DEFAULT_CONFIG = {
     "PLAYLIST_POLL_INTERVAL_SECONDS": 300,  # 播放列表轮询间隔（秒）
     "PLAYLIST_MAX_ITEMS_PER_RUN": 10,       # 每次每列表最多处理条目数
     "MONITOR_PLAYLISTS": {},         # {playlistId: [types]}
+    "ENABLE_PLAYLIST_MONITOR": True, # 是否启动播放列表监控 worker；默认启动，设为 false 可禁用
     "FLASK_SECRET_KEY": "",          # OAuth state 会话签名密钥
 }
 
@@ -112,8 +113,15 @@ def get_playlist_max_items(runtime_config):
     return max_items
 
 
+def is_playlist_monitor_switch_on(runtime_config):
+    """返回 ENABLE_PLAYLIST_MONITOR 开关状态；默认开启（True）。"""
+    return bool(runtime_config.get("ENABLE_PLAYLIST_MONITOR", True))
+
+
 def is_playlist_monitor_enabled(runtime_config):
-    """OAuth 客户端 ID/密钥与播放列表映射均配置时启用播放列表监控。"""
+    """开关开启且 OAuth 客户端 ID/密钥与播放列表映射均配置时启用播放列表监控。"""
+    if not is_playlist_monitor_switch_on(runtime_config):
+        return False
     return bool(
         isinstance(runtime_config.get("GOOGLE_OAUTH_CLIENT_ID"), str)
         and runtime_config.get("GOOGLE_OAUTH_CLIENT_ID").strip()

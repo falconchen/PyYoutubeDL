@@ -12,7 +12,11 @@ import json
 import signal
 import time
 
-from config_util import is_playlist_monitor_enabled, load_config
+from config_util import (
+    is_playlist_monitor_enabled,
+    is_playlist_monitor_switch_on,
+    load_config,
+)
 from log_util import setup_logger
 
 import task_queue
@@ -252,6 +256,12 @@ class PlaylistMonitor:
 
 def main():
     config = load_config()
+    if not is_playlist_monitor_enabled(config):
+        if is_playlist_monitor_switch_on(config):
+            print("OAuth 或播放列表尚未配置，播放列表监控退出。")
+        else:
+            print("播放列表监控已关闭（ENABLE_PLAYLIST_MONITOR 为 false），播放列表监控退出。")
+        return
     monitor = PlaylistMonitor(config)
 
     def _handle_signal(signum, frame):

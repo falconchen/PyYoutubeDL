@@ -93,6 +93,8 @@
     "PLXXXXXXXXXX": ["audio"],
     "PLYYYYYYYYYY": ["video"],
   },
+  // 是否启动播放列表监控 worker，默认 true（启动）；设为 false 可禁用
+  "ENABLE_PLAYLIST_MONITOR": true,
 
   // 定时播放列表
   "SCHEDULED_PLAYLISTS": [
