@@ -26,6 +26,7 @@ echo "正在通过 Supervisor 重启 PyYoutubeDL 服务..."
     pyyoutubedl-app \
     pyyoutubedl-downloader \
     pyyoutubedl-ai-summary \
-    pyyoutubedl-webdav
+    pyyoutubedl-webdav \
+    pyyoutubedl-playlist-monitor
 
 echo "PyYoutubeDL 依赖更新及服务重启完成。"

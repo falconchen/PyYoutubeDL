@@ -22,6 +22,9 @@ from googleapiclient.errors import HttpError
 
 ALLOWED_TYPES = {"video", "audio"}
 
+# 同状态下每 N 轮打一次心跳日志（间隔 = N × POLL_INTERVAL），避免日志死寂又不过度刷屏
+HEARTBEAT_EVERY_ROUNDS = 5
+
 
 class PlaylistMonitor:
     def __init__(self, config):
@@ -37,6 +40,12 @@ class PlaylistMonitor:
         self.url_dir = config["URLS_DIR"]
         self.timezone = config.get("TIMEZONE", "Asia/Shanghai")
         self._stop = False
+        # 状态跟踪：只在上轮状态变化时输出一次提示日志，避免每轮重复刷屏
+        self._prev_state = None
+        # 心跳计数（同状态连续轮数）
+        self._state_rounds = 0
+        # 近一个心跳窗口内累计下发的下载任务数
+        self._window_dispatched = 0
 
     def notify(self, title, content):
         try:
@@ -54,10 +63,63 @@ class PlaylistMonitor:
     def run(self):
         while not self._stop:
             try:
-                self._run_once()
+                summary = self._run_once()
             except Exception as exc:
                 self.logger.exception("播放列表轮询异常: %s", exc)
+                summary = {"state": "error"}
+            self._log_state(summary)
             self._sleep(self.config.get("PLAYLIST_POLL_INTERVAL_SECONDS", 300))
+
+    def _log_state(self, summary):
+        """按状态输出日志：状态跃迁时提示一次，稳定状态下周期性心跳。
+
+        summary: _run_once 返回的 dict，包含 "state"（disabled / no_token /
+        fail_lock / monitoring / error）及可选的已下发任务数。
+        """
+        state = summary.get("state", "unknown")
+        dispatched = summary.get("dispatched", 0)
+        self._window_dispatched += dispatched
+
+        # 状态跃迁：输出一次状态提示，重置同状态心跳计数
+        if state != self._prev_state:
+            self._state_rounds = 1
+            self._window_dispatched = dispatched
+            if state == "disabled":
+                self.logger.info("OAuth 或播放列表未配置，暂停轮询，等待配置。")
+            elif state == "no_token":
+                self.logger.warning(
+                    "等待 OAuth 授权，请访问 %s 完成授权后自动恢复。",
+                    youtube_auth.get_oauth_start_url(self.config),
+                )
+            elif state == "fail_lock":
+                self.logger.warning(
+                    "OAuth 刷新失败锁定，需重新授权: %s",
+                    youtube_auth.get_oauth_start_url(self.config),
+                )
+            elif state == "monitoring":
+                self.logger.info("OAuth 授权就绪，开始监控播放列表。")
+            elif state == "error":
+                pass  # 异常堆栈已由 run() 输出，此处不重复
+            self._prev_state = state
+            return
+
+        # 同状态持续：按心跳周期输出一次，证明 worker 仍在运行
+        self._state_rounds += 1
+        if self._state_rounds >= HEARTBEAT_EVERY_ROUNDS:
+            self._state_rounds = 0
+            if state == "no_token":
+                self.logger.info("仍在等待 OAuth 授权（每 %s 秒重试）。",
+                                 self.config.get("PLAYLIST_POLL_INTERVAL_SECONDS", 300))
+            elif state == "fail_lock":
+                self.logger.info("OAuth 刷新失败锁仍存在，等待重新授权。")
+            elif state == "monitoring":
+                playlist_count = len(self.config.get("MONITOR_PLAYLISTS") or {})
+                self.logger.info(
+                    "心跳：监控 %s 个播放列表，近 %s 轮下发 %s 条下载任务。",
+                    playlist_count, HEARTBEAT_EVERY_ROUNDS, self._window_dispatched,
+                )
+                self._window_dispatched = 0
+            # disabled / error 状态静默，避免配置缺失时也持续输出
 
     def _run_once(self):
         self.config = load_config()
@@ -65,23 +127,14 @@ class PlaylistMonitor:
         self.timezone = self.config.get("TIMEZONE", "Asia/Shanghai")
 
         if not is_playlist_monitor_enabled(self.config):
-            self.logger.info("OAuth 或播放列表未配置，跳过本轮（等待配置）。")
-            return
+            return {"state": "disabled"}
 
         if youtube_auth.fail_lock_exists(self.config):
-            self.logger.warning(
-                "存在刷新失败锁，请重新授权: %s",
-                youtube_auth.get_oauth_start_url(self.config),
-            )
-            return
+            return {"state": "fail_lock"}
 
         creds = youtube_auth.get_credentials(self.config, notify=self.notify)
         if creds is None:
-            self.logger.warning(
-                "未找到 OAuth 令牌，请先访问 %s 授权。",
-                youtube_auth.get_oauth_start_url(self.config),
-            )
-            return
+            return {"state": "no_token"}
 
         service = youtube_auth.build_youtube_service(self.config, creds)
         # 若尚未保存用户信息（例如本功能上线前已授权），补拉一次头像/名称
@@ -91,17 +144,19 @@ class PlaylistMonitor:
                 youtube_auth.save_user_profile(self.config, profile)
 
         playlists = self.config.get("MONITOR_PLAYLISTS") or {}
+        dispatched = 0
         for playlist_id, types in playlists.items():
             if not playlist_id:
                 continue
             try:
-                self._process_playlist(
+                dispatched += self._process_playlist(
                     service,
                     playlist_id,
                     [t for t in (types or []) if t in ALLOWED_TYPES],
                 )
             except HttpError as exc:
                 self._handle_http_error(exc, playlist_id)
+        return {"state": "monitoring", "dispatched": dispatched}
 
     def _process_playlist(self, service, playlist_id, types):
         max_items = self._valid_max_items(
@@ -113,9 +168,11 @@ class PlaylistMonitor:
             .execute()
         )
         items = response.get("items") or []
+        dispatched = 0
         for item in items:
             try:
-                self._consume_item(service, item, types)
+                if self._consume_item(service, item, types):
+                    dispatched += 1
             except HttpError as exc:
                 self.logger.warning(
                     "处理播放列表 %s 条目 %s 失败: %s",
@@ -125,6 +182,7 @@ class PlaylistMonitor:
                 )
             except Exception as exc:
                 self.logger.exception("处理条目异常: %s", exc)
+        return dispatched
 
     def _consume_item(self, service, item, types):
         snippet = item.get("snippet") or {}
