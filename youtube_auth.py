@@ -208,3 +208,60 @@ def build_youtube_service(config, credentials):
         authorized_http = AuthorizedHttp(credentials, http=http)
         return build("youtube", "v3", http=authorized_http, cache_discovery=False)
     return build("youtube", "v3", credentials=credentials, cache_discovery=False)
+
+
+def load_user_profile(config):
+    """读取已保存的授权用户信息（头像/名称）；不存在或解析失败返回 None。"""
+    user_file = config.get("GOOGLE_OAUTH_USER_FILE", "")
+    if not user_file or not os.path.exists(user_file):
+        return None
+    try:
+        with open(user_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def save_user_profile(config, profile):
+    """保存授权用户信息（头像/名称等），文件权限 0600。"""
+    user_file = config.get("GOOGLE_OAUTH_USER_FILE", "")
+    if not user_file:
+        return
+    user_dir = os.path.dirname(user_file)
+    if user_dir:
+        os.makedirs(user_dir, exist_ok=True)
+    with open(user_file, "w", encoding="utf-8") as f:
+        json.dump(profile, f, indent=2, ensure_ascii=False)
+    try:
+        os.chmod(user_file, 0o600)
+    except OSError:
+        pass
+
+
+def fetch_user_profile(config, credentials):
+    """用已授权凭据查询当前用户的 YouTube 频道信息（头像 + 名称）。
+
+    返回 dict（channel_id/name/avatar_url），无频道或请求失败返回 None。
+    """
+    service = build_youtube_service(config, credentials)
+    try:
+        response = service.channels().list(part="snippet", mine=True).execute()
+    except Exception:
+        return None
+    items = response.get("items") or []
+    if not items:
+        return None
+    snippet = items[0].get("snippet") or {}
+    thumbnails = snippet.get("thumbnails") or {}
+    avatar_url = (
+        (thumbnails.get("high") or {}).get("url")
+        or (thumbnails.get("medium") or {}).get("url")
+        or (thumbnails.get("default") or {}).get("url")
+        or ""
+    )
+    return {
+        "channel_id": items[0].get("id") or "",
+        "name": snippet.get("title") or "",
+        "avatar_url": avatar_url,
+    }

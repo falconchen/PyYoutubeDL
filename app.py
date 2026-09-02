@@ -1382,6 +1382,9 @@ def get_player_exclude_keywords():
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
+    youtube_user = youtube_auth.load_user_profile(config)
+    is_authorized = bool(youtube_user) or bool(youtube_auth.load_token(config))
+
     if request.method == 'POST':
         url = request.form.get('url')
         types = request.form.getlist('type')
@@ -1397,6 +1400,8 @@ def index():
                 tasks=[],
                 error='请输入有效的视频或播放列表链接',
                 show_waline=config.get("SHOW_WALINE_ON_INDEX", False),
+                youtube_user=youtube_user,
+                is_authorized=is_authorized,
             ), 400
 
         # 播放列表展开为逐集 URL，再逐个创建任务
@@ -1409,6 +1414,8 @@ def index():
                 tasks=[],
                 error=error,
                 show_waline=config.get("SHOW_WALINE_ON_INDEX", False),
+                youtube_user=youtube_user,
+                is_authorized=is_authorized,
             ), 400
 
         task_ids = create_tasks(urls, types)
@@ -1431,7 +1438,9 @@ def index():
                          types=types,
                          tasks=tasks,
                          error='',
-                         show_waline=config.get("SHOW_WALINE_ON_INDEX", False))
+                         show_waline=config.get("SHOW_WALINE_ON_INDEX", False),
+                         youtube_user=youtube_user,
+                         is_authorized=is_authorized)
 
 
 @app.route('/about')
@@ -1449,8 +1458,42 @@ def privacy():
     return render_template('privacy.html')
 
 
+def _oauth_basic_auth_check():
+    """/oauth/start 的 Basic Auth 校验（Python 原生实现，不依赖服务器配置）。
+
+    config.json 中同时配置了 OAUTH_AUTH_USERNAME 与 OAUTH_AUTH_PASSWORD_SHA256
+    （密码的 sha256 十六进制哈希）时才启用；任一缺失则放行，便于未启用场景。
+    校验失败返回 401 响应（浏览器弹出认证框），通过返回 None。
+    """
+    username = config.get('OAUTH_AUTH_USERNAME', '')
+    password_sha256 = config.get('OAUTH_AUTH_PASSWORD_SHA256', '')
+    if not username or not password_sha256:
+        return None
+
+    auth = request.authorization
+    if (
+        auth is not None
+        and hmac.compare_digest(auth.username, username)
+        and hmac.compare_digest(
+            hashlib.sha256(auth.password.encode('utf-8')).hexdigest(),
+            password_sha256,
+        )
+    ):
+        return None
+
+    return Response(
+        '需要认证后才能访问授权入口，请在弹窗中输入用户名与密码。',
+        status=401,
+        headers={'WWW-Authenticate': 'Basic realm="PyYoutubeDL OAuth"'},
+    )
+
+
 @app.route('/oauth/start')
 def oauth_start():
+    auth_error = _oauth_basic_auth_check()
+    if auth_error is not None:
+        return auth_error
+
     flow = youtube_auth.build_oauth_flow(config)
     state = hashlib.sha256(os.urandom(32)).hexdigest()
     authorization_url, state = flow.authorization_url(
@@ -1521,6 +1564,15 @@ def oauth_callback():
 
     youtube_auth.save_token(config, json.loads(creds.to_json()))
     youtube_auth.clear_fail_lock(config)
+    # 拉取当前用户信息（头像/名称）用于主页展示；失败不阻断授权成功
+    try:
+        profile = youtube_auth.fetch_user_profile(config, creds)
+        if profile:
+            youtube_auth.save_user_profile(config, profile)
+        else:
+            app.logger.warning("未获取到 YouTube 用户信息（可能没有频道）。")
+    except Exception as exc:
+        app.logger.warning("获取 YouTube 用户信息失败: %s", exc)
     try:
         import bark_util
         device_token = config.get("BARK_DEVICE_TOKEN")

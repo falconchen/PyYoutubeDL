@@ -77,6 +77,11 @@
   "GOOGLE_OAUTH_REDIRECT_URI": "https://yter.cellmean.com/oauth/callback",
   "GOOGLE_OAUTH_TOKEN_FILE": "./data/youtube_token.json",
   "GOOGLE_OAUTH_FAIL_LOCK_FILE": "./data/youtube_oauth_fail.lock",
+  "GOOGLE_OAUTH_USER_FILE": "./data/youtube_user.json",
+  // /oauth/start 的 Basic Auth（Python 原生校验，不依赖 Web 服务器；两者都配置才启用）
+  // 密码哈希生成：python -c "import hashlib;print(hashlib.sha256(b'你的密码').hexdigest())"
+  "OAUTH_AUTH_USERNAME": "",
+  "OAUTH_AUTH_PASSWORD_SHA256": "",
   "YOUTUBE_API_PROXY": "",
   "PLAYLIST_POLL_INTERVAL_SECONDS": 300,
   "PLAYLIST_MAX_ITEMS_PER_RUN": 10,

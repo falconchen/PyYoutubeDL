@@ -121,6 +121,12 @@ class TestPlaylistMonitorConfig(unittest.TestCase):
     def test_monitor_playlists_default_empty(self):
         self.assertEqual(DEFAULT_CONFIG['MONITOR_PLAYLISTS'], {})
 
+    def test_oauth_user_file_default(self):
+        self.assertEqual(
+            DEFAULT_CONFIG['GOOGLE_OAUTH_USER_FILE'],
+            './data/youtube_user.json',
+        )
+
     def test_is_playlist_monitor_enabled(self):
         cfg = {
             'GOOGLE_OAUTH_CLIENT_ID': 'cid',
