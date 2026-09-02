@@ -26,6 +26,28 @@ from googleapiclient.errors import HttpError
 
 ALLOWED_TYPES = {"video", "audio"}
 
+# Bark 通知中下载类型的中文显示名
+TYPE_DISPLAY_NAMES = {
+    "video": "视频",
+    "audio": "音频",
+}
+
+
+def describe_types(types):
+    """把下载类型列表翻译为通知用中文标签。
+
+    返回 "视频"、"音频"、"视频+音频"（顺序无关）；类型为空或未知时返回空字符串。
+    """
+    present = set(t for t in (types or []) if t in TYPE_DISPLAY_NAMES)
+    if present == {"video", "audio"}:
+        return "视频+音频"
+    if "video" in present:
+        return "视频"
+    if "audio" in present:
+        return "音频"
+    return ""
+
+
 # 同状态下每 N 轮打一次心跳日志（间隔 = N × POLL_INTERVAL），避免日志死寂又不过度刷屏
 HEARTBEAT_EVERY_ROUNDS = 5
 
@@ -211,7 +233,12 @@ class PlaylistMonitor:
             [url], types, self.url_dir, self.timezone
         )
         self.logger.info("已下发下载 %s (%s): %s", title, ",".join(types), url)
-        self.notify(f"已加入下载: {title}", url)
+        label = describe_types(types)
+        # Bark 通知标注下载类型：视频 / 音频 / 视频+音频
+        notify_title = (
+            f"已加入下载【{label}】: {title}" if label else f"已加入下载: {title}"
+        )
+        self.notify(notify_title, url)
         return task_ids
 
     def _handle_http_error(self, exc, playlist_id):

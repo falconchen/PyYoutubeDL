@@ -76,6 +76,39 @@ class PlaylistMonitorTestCase(unittest.TestCase):
         service.playlistItems.return_value.delete.assert_not_called()
         self.assertEqual(self._task_files(), [])
 
+    def test_consume_item_notify_marks_download_type(self):
+        service = self._service()
+        with patch.object(self.monitor, 'notify') as notify:
+            self.monitor._consume_item(
+                service, self._item(), ['video', 'audio']
+            )
+        notify.assert_called_once_with(
+            '已加入下载【视频+音频】: Test video',
+            'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        )
+
+    def test_consume_item_notify_video_only(self):
+        service = self._service()
+        with patch.object(self.monitor, 'notify') as notify:
+            self.monitor._consume_item(
+                service, self._item(title='Only video'), ['video']
+            )
+        notify.assert_called_once_with(
+            '已加入下载【视频】: Only video',
+            'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        )
+
+    def test_consume_item_notify_audio_only(self):
+        service = self._service()
+        with patch.object(self.monitor, 'notify') as notify:
+            self.monitor._consume_item(
+                service, self._item(title='Only audio'), ['audio']
+            )
+        notify.assert_called_once_with(
+            '已加入下载【音频】: Only audio',
+            'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        )
+
     def test_process_playlist_skips_enqueue_on_delete_failure_and_continues(self):
         items = [
             self._item(video_id='VIDEO1', item_id='ITEM1'),
@@ -95,6 +128,27 @@ class PlaylistMonitorTestCase(unittest.TestCase):
             self.assertEqual(
                 fh.read(), 'https://www.youtube.com/watch?v=VIDEO2'
             )
+
+
+class TestDescribeTypes(unittest.TestCase):
+    def test_video(self):
+        self.assertEqual(playlist_monitor.describe_types(['video']), '视频')
+
+    def test_audio(self):
+        self.assertEqual(playlist_monitor.describe_types(['audio']), '音频')
+
+    def test_video_and_audio_order_insensitive(self):
+        self.assertEqual(
+            playlist_monitor.describe_types(['video', 'audio']), '视频+音频'
+        )
+        self.assertEqual(
+            playlist_monitor.describe_types(['audio', 'video']), '视频+音频'
+        )
+
+    def test_unknown_and_empty(self):
+        self.assertEqual(playlist_monitor.describe_types([]), '')
+        self.assertEqual(playlist_monitor.describe_types(['unknown']), '')
+        self.assertEqual(playlist_monitor.describe_types(None), '')
 
 
 class TestRunOnceGuards(unittest.TestCase):
