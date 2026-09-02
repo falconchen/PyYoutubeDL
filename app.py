@@ -1461,10 +1461,15 @@ def privacy():
 def _oauth_basic_auth_check():
     """/oauth/start 的 Basic Auth 校验（Python 原生实现，不依赖服务器配置）。
 
-    config.json 中同时配置了 OAUTH_AUTH_USERNAME 与 OAUTH_AUTH_PASSWORD_SHA256
-    （密码的 sha256 十六进制哈希）时才启用；任一缺失则放行，便于未启用场景。
-    校验失败返回 401 响应（浏览器弹出认证框），通过返回 None。
+    仅在 ENABLE_OAUTH_BASIC_AUTH 为 true 且 OAUTH_AUTH_USERNAME 与
+    OAUTH_AUTH_PASSWORD_SHA256（密码的 sha256 十六进制哈希）均配置时启用。
+    默认关闭：若站点已在反向代理层（openresty/nginx 等）配置整站 Basic Auth，
+    保持关闭以避免双重弹窗。未启用时放行；校验失败返回 401 响应（浏览器弹出
+    认证框），通过返回 None。
     """
+    if not config.get('ENABLE_OAUTH_BASIC_AUTH', False):
+        return None
+
     username = config.get('OAUTH_AUTH_USERNAME', '')
     password_sha256 = config.get('OAUTH_AUTH_PASSWORD_SHA256', '')
     if not username or not password_sha256:

@@ -335,6 +335,10 @@ video (2).mp4
 | `GOOGLE_OAUTH_REDIRECT_URI` | string | OAuth 回调地址，默认 `https://yter.cellmean.com/oauth/callback` |
 | `GOOGLE_OAUTH_TOKEN_FILE` | string | OAuth 令牌文件，默认 `./data/youtube_token.json` |
 | `GOOGLE_OAUTH_FAIL_LOCK_FILE` | string | 刷新失败锁文件，默认 `./data/youtube_oauth_fail.lock` |
+| `GOOGLE_OAUTH_USER_FILE` | string | 授权用户资料文件（头像/名称），默认 `./data/youtube_user.json`，`0600` 权限 |
+| `OAUTH_AUTH_USERNAME` | string | `/oauth/start` 的 Basic Auth 用户名；需与开关及密码哈希同时满足才启用 |
+| `OAUTH_AUTH_PASSWORD_SHA256` | string | `/oauth/start` Basic Auth 密码的 sha256 十六进制哈希（**不存明文**） |
+| `ENABLE_OAUTH_BASIC_AUTH` | bool | 是否启用应用内 Basic Auth，默认 `false`；已有反代层整站认证时保持关闭 |
 | `YOUTUBE_API_PROXY` | string | YouTube API 可选代理，如 `socks5h://host:port`；留空走直连/环境变量 |
 | `PLAYLIST_POLL_INTERVAL_SECONDS` | int | 播放列表轮询间隔（秒），默认 300 |
 | `PLAYLIST_MAX_ITEMS_PER_RUN` | int | 每次每列表最多处理条目数，默认 10 |
@@ -396,6 +400,49 @@ YouTube 部分视频需要登录才能下载。支持通过 yt-dlp 浏览器 coo
 ### 授权
 
 在 `config.json` 配置 `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` / `FLASK_SECRET_KEY` 后，访问 `/oauth/start` 完成授权。成功后令牌写入 `GOOGLE_OAUTH_TOKEN_FILE`（默认 `./data/youtube_token.json`，`0600` 权限，`data/` 已被 `.gitignore` 忽略）。
+
+授权成功后会把当前用户的频道资料（频道 ID / 名称 / 头像地址）保存到 `GOOGLE_OAUTH_USER_FILE`（默认 `./data/youtube_user.json`，`0600` 权限）。公开页面不会渲染头像与名称，只显示「登录 / 重新授权」链接——若后续接入用户系统可复用已保存的资料。
+
+### 授权入口认证（Basic Auth）
+
+公开部署时，任何人都能访问 `/oauth/start` 触发 Google 授权流程。若希望只有站长能登录/重新授权，可对授权入口启用应用内 Basic Auth。在 `config.json` 中配置（见上方配置表）：
+
+```json
+"ENABLE_OAUTH_BASIC_AUTH": true,
+"OAUTH_AUTH_USERNAME": "your_username",
+"OAUTH_AUTH_PASSWORD_SHA256": "密码的 sha256 十六进制哈希"
+```
+
+- **默认关闭**（`ENABLE_OAUTH_BASIC_AUTH: false`）。若站点已通过反向代理（openresty/nginx 等）配置整站 Basic Auth，请保持关闭，避免与代理层重复弹窗。
+- 启用条件：`ENABLE_OAUTH_BASIC_AUTH` 为 `true` **且** `OAUTH_AUTH_USERNAME` / `OAUTH_AUTH_PASSWORD_SHA256` 均已配置；任一不满足则 `/oauth/start` 不要求认证（本地开发默认状态）。
+- 认证在 Flask 内用 Python 原生实现（`hmac.compare_digest` 比对），不依赖 Web 服务器（LSWS/nginx）的 realm 配置，校验失败返回 `401` 并带 `WWW-Authenticate: Basic` 弹窗。
+- 密码**只保存 sha256 哈希，不保存明文**；`config.json` 已被 `.gitignore` 忽略，但哈希仍不可逆，请勿依赖它找回明文。
+
+**查看用户名**（明文存储，随时可查）：
+
+```bash
+grep OAUTH_AUTH_USERNAME config.json
+```
+
+**重置密码**（忘记或轮换密码时）：
+
+1. 生成新密码并计算 sha256 哈希：
+
+   ```bash
+   python3 -c "import hashlib;print(hashlib.sha256(b'你的新密码').hexdigest())"
+   ```
+
+2. 用输出值替换 `config.json` 中 `OAUTH_AUTH_PASSWORD_SHA256` 的值（用户名可保持不变）。
+
+3. 重启服务使配置生效：
+
+   ```bash
+   systemctl restart pyyoutubedl   # systemd 部署
+   # 或
+   ./runner.sh restart             # 脚本部署
+   ```
+
+4. 妥善保存新密码明文——哈希不可逆，再次忘记只能重复上述步骤重置。
 
 ### 配置监控的播放列表
 

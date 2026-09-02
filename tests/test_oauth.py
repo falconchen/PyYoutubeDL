@@ -17,7 +17,11 @@ class TestOAuthRoutes(unittest.TestCase):
         # TestOAuthStartBasicAuth 单独覆盖。
         patch.dict(
             app_module.config,
-            {'OAUTH_AUTH_USERNAME': '', 'OAUTH_AUTH_PASSWORD_SHA256': ''},
+            {
+                'OAUTH_AUTH_USERNAME': '',
+                'OAUTH_AUTH_PASSWORD_SHA256': '',
+                'ENABLE_OAUTH_BASIC_AUTH': False,
+            },
         ).start()
         self.addCleanup(patch.stopall)
 
@@ -136,6 +140,7 @@ class TestOAuthStartBasicAuth(unittest.TestCase):
             {
                 'OAUTH_AUTH_USERNAME': self.USERNAME,
                 'OAUTH_AUTH_PASSWORD_SHA256': self.PASSWORD_SHA256,
+                'ENABLE_OAUTH_BASIC_AUTH': True,
             },
         ).start()
         self.addCleanup(patch.stopall)
@@ -200,11 +205,35 @@ class TestOAuthStartBasicAuth(unittest.TestCase):
 
         with patch.dict(
             app_module.config,
-            {'OAUTH_AUTH_USERNAME': '', 'OAUTH_AUTH_PASSWORD_SHA256': ''},
+            {
+                'OAUTH_AUTH_USERNAME': '',
+                'OAUTH_AUTH_PASSWORD_SHA256': '',
+                'ENABLE_OAUTH_BASIC_AUTH': True,
+            },
         ):
             response = self.client.get('/oauth/start')
 
         self.assertEqual(response.status_code, 302)
+
+    @patch('youtube_auth.build_oauth_flow')
+    def test_oauth_start_disabled_when_flag_false(self, build_flow):
+        """开关关闭时（如反代层已有整站 Basic Auth），即使配了凭据也不要求认证。"""
+        flow = MagicMock()
+        flow.code_verifier = 'test-verifier'
+        flow.authorization_url.return_value = (
+            'https://accounts.google.com/o/oauth2/auth?client_id=x',
+            'fixed_state',
+        )
+        build_flow.return_value = flow
+
+        with patch.dict(
+            app_module.config,
+            {'ENABLE_OAUTH_BASIC_AUTH': False},
+        ):
+            response = self.client.get('/oauth/start')
+
+        self.assertEqual(response.status_code, 302)
+        build_flow.assert_called_once()
 
 
 if __name__ == '__main__':

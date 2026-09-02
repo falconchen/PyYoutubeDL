@@ -59,6 +59,7 @@ DEFAULT_CONFIG = {
     "GOOGLE_OAUTH_USER_FILE": "./data/youtube_user.json",   # 授权用户信息（头像/名称）
     "OAUTH_AUTH_USERNAME": "",          # /oauth/start 的 Basic Auth 用户名（空则不启用）
     "OAUTH_AUTH_PASSWORD_SHA256": "",   # 密码的 sha256 十六进制哈希，禁止明文（空则不启用）
+    "ENABLE_OAUTH_BASIC_AUTH": False,   # 是否启用应用内 Basic Auth；默认关闭（已有反代整站认证时避免双重弹窗）
     "YOUTUBE_API_PROXY": "",         # YouTube API 可选代理（如 socks5h://host:port）
     "PLAYLIST_POLL_INTERVAL_SECONDS": 300,  # 播放列表轮询间隔（秒）
     "PLAYLIST_MAX_ITEMS_PER_RUN": 10,       # 每次每列表最多处理条目数

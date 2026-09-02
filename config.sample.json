@@ -80,8 +80,11 @@
   "GOOGLE_OAUTH_USER_FILE": "./data/youtube_user.json",
   // /oauth/start 的 Basic Auth（Python 原生校验，不依赖 Web 服务器；两者都配置才启用）
   // 密码哈希生成：python -c "import hashlib;print(hashlib.sha256(b'你的密码').hexdigest())"
+  // ENABLE_OAUTH_BASIC_AUTH 默认 false：若站点已在反向代理层（openresty/nginx 等）配置整站
+  // Basic Auth，请保持关闭以避免双重弹窗；无前置认证的裸部署可设为 true 启用应用内认证
   "OAUTH_AUTH_USERNAME": "",
   "OAUTH_AUTH_PASSWORD_SHA256": "",
+  "ENABLE_OAUTH_BASIC_AUTH": false,
   "YOUTUBE_API_PROXY": "",
   "PLAYLIST_POLL_INTERVAL_SECONDS": 300,
   "PLAYLIST_MAX_ITEMS_PER_RUN": 10,
