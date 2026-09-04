@@ -308,6 +308,18 @@ class TestTaskInfoAPI(unittest.TestCase):
         self.assertIn('height: min(33vh, 360px);', css)
         self.assertIn('background: rgba(17, 20, 24, 0.84);', css)
 
+    def test_task_log_drawer_defaults_to_closed_on_small_screens(self):
+        template = Path(app.app.template_folder, 'index.html').read_text(
+            encoding='utf-8',
+        )
+
+        self.assertIn('aria-expanded="false"', template)
+        self.assertIn(
+            "window.matchMedia('(max-width: 480px)').matches",
+            template,
+        )
+        self.assertIn('setTaskLogOpen(!isSmallScreen);', template)
+
     def test_completed_task_is_always_100_percent(self):
         task_id = 'v20260723120000QwE'
         self.write_task(task_id, '.ok')

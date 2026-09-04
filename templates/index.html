@@ -54,7 +54,7 @@
     </div>
 
     {% if tasks %}
-    <button class="task-log-toggle" type="button" aria-controls="task-log-drawer" aria-expanded="true">
+    <button class="task-log-toggle" type="button" aria-controls="task-log-drawer" aria-expanded="false">
         <i class="fas fa-terminal"></i>
         <span>下载日志</span>
     </button>
@@ -251,7 +251,8 @@
 
             taskLogToggle.addEventListener('click', () => setTaskLogOpen(true));
             taskLogClose.addEventListener('click', () => setTaskLogOpen(false));
-            setTaskLogOpen(true);
+            const isSmallScreen = window.matchMedia('(max-width: 480px)').matches;
+            setTaskLogOpen(!isSmallScreen);
             updateTaskLog();
         }
 
