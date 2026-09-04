@@ -496,12 +496,14 @@ body {
 
 .task-info {
     background: #f8f9fa;
-    padding: 1rem;
-    border-radius: 8px;
     margin-bottom: 1rem;
 }
 
 .task-url {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
     color: #1a73e8;
     word-break: break-all;
     margin-bottom: 1rem;
@@ -848,16 +850,19 @@ body {
 
 /* URL 复制区域样式 */
 .url-copy {
-    display: inline-flex;
+    display: flex;
+    flex: 1;
     align-items: center;
     gap: 0.5rem;
+    min-width: 0;
     background: #e8f0fe;
     padding: 0.5rem;
     border-radius: 4px;
-    margin-left: 0.5rem;
 }
 
 .url-display {
+    flex: 1;
+    min-width: 0;
     color: #1a73e8;
     font-size: 0.9rem;
     max-width: 300px;
@@ -867,6 +872,7 @@ body {
 }
 
 .copy-btn {
+    flex: 0 0 auto;
     background: none;
     border: none;
     color: #1a73e8;
@@ -925,8 +931,39 @@ body {
     }
 
     .task-id {
+        min-width: 0;
+        overflow: hidden;
         font-size: 0.75rem;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         /* 减小任务ID字体大小 */
+    }
+
+    .task-summary {
+        flex-wrap: nowrap;
+        gap: 0.5rem;
+    }
+
+    .task-summary .badge,
+    .task-actions {
+        flex-shrink: 0;
+    }
+
+    .task-actions {
+        gap: 0.35rem;
+    }
+
+    .task-actions .task-player-link,
+    .task-actions .task-download-link {
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        padding: 0;
+    }
+
+    .task-actions .task-player-link span,
+    .task-actions .task-download-link span {
+        display: none;
     }
 
     .task-list li {
@@ -980,13 +1017,13 @@ body {
     }
 
     .url-copy {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 0.25rem;
+        flex-direction: row;
+        align-items: center;
+        gap: 0.5rem;
     }
 
     .url-display {
-        max-width: 200px;
+        max-width: none;
     }
 
     .feature-grid {

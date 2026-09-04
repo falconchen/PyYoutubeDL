@@ -23,7 +23,7 @@
         <form method="post" class="download-form">
             <div class="input-group">
                 <i class="fas fa-link"></i>
-                <input type="text" name="url" placeholder="请输入 YouTube 视频、播放列表链接或分享文本" required class="input" value="{{ url }}">
+                <input type="text" name="url" placeholder="请输入 YouTube 视频、播放列表链接或分享文本" required class="input" value="{{ '' if tasks else url }}">
             </div>
             <div class="checkbox-group">
                 <label class="checkbox-label">
@@ -72,7 +72,16 @@
     <div class="container task-container">
         <h3><i class="fas fa-tasks"></i> 任务已创建</h3>
         <div class="task-info">
-            
+            <div class="task-url">
+                <i class="fas fa-link"></i>
+                <span class="url-text" style="display: none;">{{ url | escape }}</span>
+                <div class="url-copy">
+                    <span class="url-display">已复制到剪贴板</span>
+                    <button class="copy-btn" type="button" title="复制链接">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                </div>
+            </div>
             <div class="video-info">
                 <div class="video-thumbnail is-placeholder">
                     <span class="thumbnail-placeholder">预览</span>
@@ -84,16 +93,6 @@
                         <span class="uploader metadata-pending">元数据加载中</span>
                         <span class="duration"></span>
                     </div>
-                </div>
-            </div>
-            <div class="task-url">
-                <i class="fas fa-link"></i>
-                <span class="url-text" style="display: none;">{{ url | escape }}</span>
-                <div class="url-copy">
-                    <span class="url-display">已复制到剪贴板</span>
-                    <button class="copy-btn" title="复制链接">
-                        <i class="fas fa-copy"></i>
-                    </button>
                 </div>
             </div>
             <ul class="task-list">
@@ -114,11 +113,11 @@
                         {% endif %}
                         <span class="task-status queued">排队中</span>
                         <span class="task-actions" hidden>
-                            <a class="task-player-link" href="" hidden>
+                            <a class="task-player-link" href="" aria-label="播放" title="播放" hidden>
                                 <i class="fas fa-play"></i>
                                 <span>播放</span>
                             </a>
-                            <a class="task-download-link" href="" download hidden>
+                            <a class="task-download-link" href="" aria-label="下载" title="下载" download hidden>
                                 <i class="fas fa-download"></i>
                                 <span>下载</span>
                             </a>

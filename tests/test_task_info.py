@@ -320,6 +320,45 @@ class TestTaskInfoAPI(unittest.TestCase):
         )
         self.assertIn('setTaskLogOpen(!isSmallScreen);', template)
 
+    def test_task_url_precedes_video_info_and_stays_inline_on_small_screens(self):
+        template = Path(app.app.template_folder, 'index.html').read_text(
+            encoding='utf-8',
+        )
+        css = Path(app.app.static_folder, 'style.css').read_text(
+            encoding='utf-8',
+        )
+
+        self.assertLess(
+            template.index('<div class="task-url">'),
+            template.index('<div class="video-info">'),
+        )
+        self.assertIn('.task-url {\n    display: flex;', css)
+        self.assertIn('.url-copy {\n    display: flex;\n    flex: 1;', css)
+        self.assertIn('flex: 0 0 auto;', css)
+        self.assertIn('max-width: none;', css)
+
+    def test_mobile_task_actions_are_icon_only_and_stay_on_summary_row(self):
+        template = Path(app.app.template_folder, 'index.html').read_text(
+            encoding='utf-8',
+        )
+        css = Path(app.app.static_folder, 'style.css').read_text(
+            encoding='utf-8',
+        )
+
+        self.assertIn('aria-label="播放" title="播放"', template)
+        self.assertIn('aria-label="下载" title="下载"', template)
+        self.assertIn('.task-summary {\n        flex-wrap: nowrap;', css)
+        self.assertIn('.task-actions .task-player-link span,', css)
+        self.assertIn('.task-actions .task-download-link span {\n        display: none;', css)
+
+    def test_task_page_does_not_show_submitted_url_in_input(self):
+        template = Path(app.app.template_folder, 'index.html').read_text(
+            encoding='utf-8',
+        )
+
+        self.assertIn('value="{{ \'\' if tasks else url }}"', template)
+        self.assertIn('{{ url | escape }}', template)
+
     def test_completed_task_is_always_100_percent(self):
         task_id = 'v20260723120000QwE'
         self.write_task(task_id, '.ok')
