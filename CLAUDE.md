@@ -36,7 +36,7 @@ yt-dlp -vU --cookies-from-browser firefox --cookies firefox-cookie.txt
 
 The system has three persistent processes that communicate through the filesystem:
 
-**1. Flask web app (`app.py`)** — Serves the UI (index page for submitting URLs, player page for watching downloaded videos). On form submission, it writes task files (`.txt` containing the URL) into `URLS_DIR` (`./urls/`). Provides a REST API (`/api/add_task`, `/api/video_info`, `/api/task_info`, `/api/get-cookie`). Deployed via Passenger WSGI (`passenger_wsgi.py`) on shared hosting with `devil` CLI, or directly via Flask's dev server.
+**1. Flask web app (`app.py`)** — Serves the UI (index page for submitting URLs, player page for watching downloaded videos). On form submission, it writes task files (`.txt` containing the URL) into `URLS_DIR` (`./urls/`). Provides a REST API (`/api/add_task`, `/api/video_info`, `/api/task_info`, `/api/get-cookie`). It is started directly with the project's Python environment.
 
 **2. Downloader (`downloader.py`)** — Uses `watchdog` to monitor `URLS_DIR` for new `.txt` files. On detection, renames the file to `.downloading`, invokes `yt-dlp` as a subprocess (reading output line-by-line in real time), moves finished files to `FILES_DIR`, then renames the task file to `.ok` or `.fail`. Downloads go through a per-task temp dir in `TMP_DIR`. Video vs. audio mode is determined by the task file's first character (`v` = video, `a` = audio).
 

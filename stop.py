@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import argparse
 import os
-import subprocess
 import sys
 
 import psutil
@@ -15,6 +14,13 @@ TARGET_SCRIPT_NAMES = {
     'playlist_monitor.py',
     'start.py',
     'webdav_uploader.py',
+}
+SERVICE_SCRIPT_NAMES = {
+    'app': {'app.py'},
+    'downloader': {'downloader.py'},
+    'ai': {'ai_summary_worker.py'},
+    'webdav': {'webdav_uploader.py'},
+    'playlist': {'playlist_monitor.py'},
 }
 PROCESS_TIMEOUT = 5
 
@@ -50,17 +56,23 @@ def get_executed_script(cmdline):
     return None
 
 
-def command_targets_project(cmdline, cwd, base_dir=BASE_DIR):
+def command_targets_project(
+    cmdline,
+    cwd,
+    base_dir=BASE_DIR,
+    target_script_names=None,
+):
     """判断命令行是否明确执行本项目中的目标脚本。"""
     script_argument = get_executed_script(cmdline)
     if not script_argument:
         return False
 
+    script_names = target_script_names or TARGET_SCRIPT_NAMES
     target_paths = {
         os.path.realpath(os.path.join(base_dir, name))
-        for name in TARGET_SCRIPT_NAMES
+        for name in script_names
     }
-    if os.path.basename(script_argument) not in TARGET_SCRIPT_NAMES:
+    if os.path.basename(script_argument) not in script_names:
         return False
     if os.path.isabs(script_argument):
         script_path = os.path.realpath(script_argument)
@@ -82,10 +94,13 @@ def describe_process(proc):
     return f"PID {proc.pid}"
 
 
-def find_target_processes():
+def find_target_processes(service=None, include_children=True):
     """查找本项目服务进程，并包含它们派生的全部子进程。"""
     current_pid = os.getpid()
     roots = []
+    target_script_names = (
+        SERVICE_SCRIPT_NAMES[service] if service else TARGET_SCRIPT_NAMES
+    )
 
     try:
         for proc in psutil.process_iter(['pid', 'cmdline', 'cwd'], ad_value=None):
@@ -94,6 +109,7 @@ def find_target_processes():
             if command_targets_project(
                 proc.info.get('cmdline'),
                 proc.info.get('cwd'),
+                target_script_names=target_script_names,
             ):
                 roots.append(proc)
     except (psutil.Error, OSError) as exc:
@@ -103,6 +119,8 @@ def find_target_processes():
     errors = []
     for root in roots:
         processes[root.pid] = root
+        if not include_children:
+            continue
         try:
             for child in root.children(recursive=True):
                 if child.pid != current_pid:
@@ -158,9 +176,9 @@ def terminate_processes(processes, timeout=PROCESS_TIMEOUT):
     return errors
 
 
-def kill_existing_processes():
+def kill_existing_processes(service=None):
     """可靠终止本项目的服务进程及其全部子进程。"""
-    processes, errors = find_target_processes()
+    processes, errors = find_target_processes(service)
     if not processes:
         print("未发现正在运行的本项目服务进程。")
     else:
@@ -171,57 +189,16 @@ def kill_existing_processes():
     return not errors
 
 
-def has_devil():
-    from shutil import which
-    return which('devil') is not None
-
-
-def get_domain_from_path():
-    parts = BASE_DIR.split(os.sep)
-    if 'domains' in parts:
-        idx = parts.index('domains')
-        if idx + 1 < len(parts):
-            return parts[idx + 1]
-    return None
-
-
-def restart_devil():
-    """按 runner.sh 的显式要求重启 Devil 管理的 Web 应用。"""
-    if not has_devil():
-        return True
-
-    domain = get_domain_from_path()
-    if not domain:
-        print("错误: 未能从项目路径识别 Devil 域名目录。", file=sys.stderr)
-        return False
-
-    print(f"检测到 devil 命令，重启 Web 应用 ({domain})...")
-    try:
-        result = subprocess.run(['devil', 'www', 'restart', domain], check=False)
-    except OSError as exc:
-        print(f"错误: 无法执行 devil 命令: {exc}", file=sys.stderr)
-        return False
-    if result.returncode != 0:
-        print(
-            f"错误: Devil Web 应用重启失败，退出码: {result.returncode}",
-            file=sys.stderr,
-        )
-        return False
-    return True
-
-
 def main():
     parser = argparse.ArgumentParser(description="停止本项目的 Python 服务进程")
     parser.add_argument(
-        '--restart-devil',
-        action='store_true',
-        help="停止 Python 服务后重启 Devil 管理的 Web 应用",
+        '--service',
+        choices=sorted(SERVICE_SCRIPT_NAMES),
+        help="只停止指定服务（默认停止全部服务）",
     )
     args = parser.parse_args()
 
-    success = kill_existing_processes()
-    if args.restart_devil and success:
-        success = restart_devil()
+    success = kill_existing_processes(args.service)
 
     if success:
         print("本项目相关进程已全部终止。")

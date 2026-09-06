@@ -85,6 +85,59 @@ class TestTerminateProcesses(unittest.TestCase):
         self.assertEqual([proc.pid for proc in processes], [124, 123])
         self.assertEqual(errors, [])
 
+    @patch('stop.psutil.process_iter')
+    def test_filters_processes_by_service(self, process_iter):
+        downloader = Mock(
+            pid=123,
+            info={
+                'pid': 123,
+                'cmdline': ['python', os.path.join(stop.BASE_DIR, 'downloader.py')],
+                'cwd': stop.BASE_DIR,
+            },
+        )
+        downloader.children.return_value = []
+        uploader = Mock(
+            pid=456,
+            info={
+                'pid': 456,
+                'cmdline': [
+                    'python',
+                    os.path.join(stop.BASE_DIR, 'webdav_uploader.py'),
+                ],
+                'cwd': stop.BASE_DIR,
+            },
+        )
+        uploader.children.return_value = []
+        process_iter.return_value = [downloader, uploader]
+
+        processes, errors = stop.find_target_processes('webdav')
+
+        self.assertEqual([proc.pid for proc in processes], [456])
+        self.assertEqual(errors, [])
+
+    @patch('stop.psutil.process_iter')
+    def test_status_lookup_excludes_child_processes(self, process_iter):
+        child = Mock(pid=124)
+        root = Mock(
+            pid=123,
+            info={
+                'pid': 123,
+                'cmdline': ['python', os.path.join(stop.BASE_DIR, 'downloader.py')],
+                'cwd': stop.BASE_DIR,
+            },
+        )
+        root.children.return_value = [child]
+        process_iter.return_value = [root]
+
+        processes, errors = stop.find_target_processes(
+            'downloader',
+            include_children=False,
+        )
+
+        self.assertEqual([proc.pid for proc in processes], [123])
+        root.children.assert_not_called()
+        self.assertEqual(errors, [])
+
     @patch('stop.psutil.wait_procs')
     def test_force_kills_process_that_ignores_terminate(self, wait_procs):
         proc = Mock(pid=123)

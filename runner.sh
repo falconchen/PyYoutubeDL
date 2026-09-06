@@ -48,8 +48,53 @@ start_service() {
 }
 
 show_usage() {
-    echo "用法: $0 [start|stop|restart]"
-    echo "不提供参数时默认执行 restart。"
+    echo "用法: $0 [start|stop|restart|status] [app|downloader|ai|webdav|playlist]"
+    echo "       $0 -l|--list"
+    echo "不提供操作时默认执行 restart；不提供服务时默认操作全部服务。"
+}
+
+show_services() {
+    echo "可用服务:"
+    echo "  app         Web应用"
+    echo "  downloader  下载器"
+    echo "  ai          AI总结Worker"
+    echo "  webdav      WebDAV上传器"
+    echo "  playlist    播放列表监控"
+}
+
+status_services() {
+    local service="${1:-all}"
+
+    "$PYTHON_BIN" - "$service" <<'PY'
+import sys
+
+from stop import find_target_processes
+
+
+services = {
+    'app': 'Web应用',
+    'downloader': '下载器',
+    'ai': 'AI总结Worker',
+    'webdav': 'WebDAV上传器',
+    'playlist': '播放列表监控',
+}
+selected = sys.argv[1]
+names = services if selected == 'all' else (selected,)
+has_errors = False
+
+for name in names:
+    processes, errors = find_target_processes(name, include_children=False)
+    if errors:
+        has_errors = True
+        print(f'{name:<10} {services[name]:<15} 检查失败：{"; ".join(errors)}')
+    elif processes:
+        pids = ', '.join(str(process.pid) for process in processes)
+        print(f'{name:<10} {services[name]:<15} 运行中  PID: {pids}')
+    else:
+        print(f'{name:<10} {services[name]:<15} 已停止')
+
+sys.exit(1 if has_errors else 0)
+PY
 }
 
 update_dependencies() {
@@ -65,11 +110,11 @@ update_dependencies() {
 }
 
 stop_services() {
-    local restart_devil="${1:-false}"
+    local service="${1:-all}"
     local stop_args=()
 
-    if [ "$restart_devil" = "true" ]; then
-        stop_args+=(--restart-devil)
+    if [ "$service" != "all" ]; then
+        stop_args+=(--service "$service")
     fi
 
     echo "正在停止已有进程..."
@@ -114,50 +159,60 @@ sys.exit(0 if is_playlist_monitor_enabled(cfg) else 10)
 }
 
 start_services() {
+    local service="${1:-all}"
     local services_failed=0
     local webdav_status
 
-    if ! command -v devil >/dev/null 2>&1; then
-        echo "未检测到devil命令，使用python方式启动Web应用..."
+    if [ "$service" = "all" ] || [ "$service" = "app" ]; then
         start_service "Web应用" "app.py" || services_failed=1
-    else
-        echo "检测到devil命令，Web应用由Devil管理。"
     fi
 
-    start_service "下载器" "downloader.py" || services_failed=1
-    if ai_summary_status; then
-        start_service "AI总结Worker" "ai_summary_worker.py" || services_failed=1
-    else
-        ai_summary_status_code=$?
-        if [ "$ai_summary_status_code" -eq 10 ]; then
-            echo "AI总结尚未配置，已跳过启动AI总结Worker。"
+    if [ "$service" = "all" ] || [ "$service" = "downloader" ]; then
+        start_service "下载器" "downloader.py" || services_failed=1
+    fi
+    if [ "$service" = "all" ] || [ "$service" = "ai" ]; then
+        if ai_summary_status; then
+            start_service "AI总结Worker" "ai_summary_worker.py" || services_failed=1
         else
-            echo "无法读取AI总结配置，已跳过启动AI总结Worker。"
-            services_failed=1
+            ai_summary_status_code=$?
+            if [ "$ai_summary_status_code" -eq 10 ]; then
+                echo "AI总结尚未配置，已跳过启动AI总结Worker。"
+                [ "$service" = "all" ] || services_failed=1
+            else
+                echo "无法读取AI总结配置，已跳过启动AI总结Worker。"
+                services_failed=1
+            fi
         fi
     fi
-    if webdav_upload_status; then
-        start_service "上传器" "webdav_uploader.py" || services_failed=1
-    else
-        webdav_status=$?
-        if [ "$webdav_status" -eq 10 ]; then
-            echo "WebDAV上传已关闭，已跳过启动上传器。"
+    if [ "$service" = "all" ] || [ "$service" = "webdav" ]; then
+        if webdav_upload_status; then
+            start_service "上传器" "webdav_uploader.py" || services_failed=1
         else
-            echo "无法读取WebDAV上传配置，已跳过启动上传器。"
-            services_failed=1
+            webdav_status=$?
+            if [ "$webdav_status" -eq 10 ]; then
+                echo "WebDAV上传已关闭，已跳过启动上传器。"
+                [ "$service" = "all" ] || services_failed=1
+            else
+                echo "无法读取WebDAV上传配置，已跳过启动上传器。"
+                services_failed=1
+            fi
         fi
     fi
-    if playlist_monitor_status; then
-        start_service "播放列表监控" "playlist_monitor.py" || services_failed=1
-    else
-        playlist_monitor_status_code=$?
-        if [ "$playlist_monitor_status_code" -eq 11 ]; then
-            echo "播放列表监控已关闭，已跳过启动播放列表监控。"
-        elif [ "$playlist_monitor_status_code" -eq 10 ]; then
-            echo "OAuth 或播放列表尚未配置，已跳过启动播放列表监控。"
+    if [ "$service" = "all" ] || [ "$service" = "playlist" ]; then
+        if playlist_monitor_status; then
+            start_service "播放列表监控" "playlist_monitor.py" || services_failed=1
         else
-            echo "无法读取播放列表监控配置，已跳过启动播放列表监控。"
-            services_failed=1
+            playlist_monitor_status_code=$?
+            if [ "$playlist_monitor_status_code" -eq 11 ]; then
+                echo "播放列表监控已关闭，已跳过启动播放列表监控。"
+                [ "$service" = "all" ] || services_failed=1
+            elif [ "$playlist_monitor_status_code" -eq 10 ]; then
+                echo "OAuth 或播放列表尚未配置，已跳过启动播放列表监控。"
+                [ "$service" = "all" ] || services_failed=1
+            else
+                echo "无法读取播放列表监控配置，已跳过启动播放列表监控。"
+                services_failed=1
+            fi
         fi
     fi
 
@@ -166,20 +221,30 @@ start_services() {
         return 1
     fi
 
-    echo "所有已启用的服务启动完成！"
+    if [ "$service" = "all" ]; then
+        echo "所有已启用的服务启动完成！"
+    else
+        echo "指定服务启动完成：$service"
+    fi
 }
 
 main() {
     local action
+    local service
 
-    if [ "$#" -gt 1 ]; then
+    if [ "$#" -gt 2 ]; then
         show_usage
         return 2
     fi
 
+    if [ "$#" -eq 1 ] && { [ "$1" = "-l" ] || [ "$1" = "--list" ]; }; then
+        show_services
+        return 0
+    fi
+
     action="${1:-restart}"
     case "$action" in
-        start|stop|restart)
+        start|stop|restart|status)
             ;;
         -h|--help)
             show_usage
@@ -187,6 +252,17 @@ main() {
             ;;
         *)
             echo "无效操作: $action"
+            show_usage
+            return 2
+            ;;
+    esac
+
+    service="${2:-all}"
+    case "$service" in
+        all|app|downloader|ai|webdav|playlist)
+            ;;
+        *)
+            echo "无效服务: $service"
             show_usage
             return 2
             ;;
@@ -207,13 +283,18 @@ main() {
 
     case "$action" in
         start)
-            update_dependencies && start_services
+            update_dependencies && start_services "$service"
             ;;
         stop)
-            stop_services
+            stop_services "$service"
             ;;
         restart)
-            update_dependencies && stop_services true && start_services
+            update_dependencies && \
+                stop_services "$service" && \
+                start_services "$service"
+            ;;
+        status)
+            status_services "$service"
             ;;
     esac
 }

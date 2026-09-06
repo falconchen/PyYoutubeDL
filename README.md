@@ -63,10 +63,29 @@ vim config.json
 ./runner.sh start    # 只启动服务
 ./runner.sh stop     # 只停止本项目的 Python 服务
 ./runner.sh restart  # 先停止再启动
+./runner.sh status   # 列出全部服务的运行状态
 ./runner.sh          # 默认执行 restart
 ```
 
-`start` 和 `restart` 会使用项目虚拟环境中的 Python 启动 Web 应用、下载器和上传器，不依赖各脚本的 shebang。`stop` 不更新依赖；在 Devil 环境中，单独执行 `stop` 不会重启 Devil 管理的 Web 应用，`restart` 则保持原有的 Devil 重启行为。
+`start` 和 `restart` 会使用项目虚拟环境中的 Python 启动 Web 应用、下载器和上传器，不依赖各脚本的 shebang。`stop` 不更新依赖。
+
+也可以在动作后指定一个服务：
+
+```bash
+./runner.sh start downloader
+./runner.sh stop webdav
+./runner.sh restart app
+./runner.sh status app
+```
+
+支持的服务名为 `app`、`downloader`、`ai`、`webdav` 和 `playlist`。不提供服务名时仍操作全部服务。`status` 以当前项目的实际进程为准，显示“运行中”及 PID 或“已停止”，也可指定单个服务。显式启动 `ai`、`webdav` 或 `playlist` 时仍会检查对应配置；功能未启用或配置不完整时不会启动进程，并以非零状态退出。
+
+可随时列出全部服务名：
+
+```bash
+./runner.sh -l
+./runner.sh --list
+```
 
 现在 `runner.sh` 默认只负责启动、停止和重启服务，不会隐式升级依赖。需要明确更新依赖时执行：
 
@@ -74,13 +93,20 @@ vim config.json
 PYTUBEDL_UPDATE_DEPS=1 ./runner.sh restart
 ```
 
-使用 Supervisor 部署时，可运行专用维护脚本重启 Web 应用、下载器、AI 总结及 WebDAV 服务：
+使用 Supervisor 部署时，专用维护脚本提供与 `runner.sh` 一致的操作和服务名：
 
 ```bash
-./supervisor-runner.sh
+./supervisor-runner.sh start downloader
+./supervisor-runner.sh stop webdav
+./supervisor-runner.sh restart app
+./supervisor-runner.sh status
+./supervisor-runner.sh status app
+./supervisor-runner.sh -l
+./supervisor-runner.sh --list
+./supervisor-runner.sh  # 默认 restart 全部服务
 ```
 
-该脚本要求项目虚拟环境位于 `venv/`，并要求 `/usr/bin/supervisorctl` 可用。需要同时按 `requirements.txt` 更新依赖时执行 `PYTUBEDL_UPDATE_DEPS=1 ./supervisor-runner.sh`。定时执行时建议使用 `flock` 防止任务重叠，并将输出重定向到日志文件。
+该脚本要求项目虚拟环境位于 `venv/`，并要求 `/usr/bin/supervisorctl` 可用。支持的服务映射为 `app` → `pyyoutubedl-app`、`downloader` → `pyyoutubedl-downloader`、`ai` → `pyyoutubedl-ai-summary`、`webdav` → `pyyoutubedl-webdav`、`playlist` → `pyyoutubedl-playlist-monitor`。需要同时按 `requirements.txt` 更新依赖时，可对 `start` 或 `restart` 设置 `PYTUBEDL_UPDATE_DEPS=1`。定时执行时建议使用 `flock` 防止任务重叠，并将输出重定向到日志文件。
 
 ### 5. 两台 VPS 一键发布
 
@@ -122,7 +148,7 @@ systemctl restart pyyoutubedl
 python stop.py
 ```
 
-停止脚本只匹配当前项目目录中的目标脚本，先正常终止进程，5 秒后仍未退出时再强制终止。`runner.sh` 会使用 `python stop.py --restart-devil`，在 Devil 环境中显式重启由 Devil 管理的 Web 应用；直接运行 `python stop.py` 不会重启 Devil。
+停止脚本只匹配当前项目目录中的目标脚本，先正常终止进程，5 秒后仍未退出时再强制终止。
 
 ### 4. 设为开机自启
 

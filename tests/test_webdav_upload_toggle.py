@@ -114,6 +114,72 @@ start_services
         )
         self.assertNotIn('START:上传器', result.stdout)
 
+    def test_runner_starts_only_selected_service(self):
+        result = subprocess.run(
+            [
+                'bash',
+                '-c',
+                '''
+source ./runner.sh
+start_service() { echo "START:$2"; }
+start_services downloader
+''',
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        self.assertIn('START:downloader.py', result.stdout)
+        self.assertNotIn('START:app.py', result.stdout)
+        self.assertNotIn('START:webdav_uploader.py', result.stdout)
+
+    def test_runner_rejects_unknown_service(self):
+        result = subprocess.run(
+            ['./runner.sh', 'start', 'unknown'],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('无效服务: unknown', result.stdout)
+
+    def test_runner_lists_all_service_names(self):
+        for option in ('-l', '--list'):
+            with self.subTest(option=option):
+                result = subprocess.run(
+                    ['./runner.sh', option],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+
+                for service in ('app', 'downloader', 'ai', 'webdav', 'playlist'):
+                    self.assertRegex(result.stdout, rf'(?m)^  {service}\s', msg=option)
+
+    def test_runner_status_lists_all_services(self):
+        result = subprocess.run(
+            ['./runner.sh', 'status'],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        for service in ('app', 'downloader', 'ai', 'webdav', 'playlist'):
+            self.assertRegex(result.stdout, rf'(?m)^{service}\s', msg=service)
+
+    def test_runner_status_can_select_one_service(self):
+        result = subprocess.run(
+            ['./runner.sh', 'status', 'app'],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        self.assertRegex(result.stdout, r'(?m)^app\s')
+        self.assertNotRegex(result.stdout, r'(?m)^downloader\s')
+
     def test_disabled_main_does_not_initialize_webdav_clients(self):
         with (
             patch.dict(
