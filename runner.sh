@@ -50,6 +50,7 @@ start_service() {
 show_usage() {
     echo "用法: $0 [start|stop|restart|status] [app|downloader|ai|webdav|playlist]"
     echo "       $0 -l|--list"
+    echo "       $0 -u|--upgrade"
     echo "不提供操作时默认执行 restart；不提供服务时默认操作全部服务。"
 }
 
@@ -97,16 +98,26 @@ sys.exit(1 if has_errors else 0)
 PY
 }
 
+upgrade_dependencies() {
+    echo "正在升级 pip..."
+    if ! "$PYTHON_BIN" -m pip install --upgrade pip; then
+        echo "升级 pip 失败，已中止。"
+        return 1
+    fi
+
+    echo "正在升级 requirements.txt 中的依赖..."
+    if ! "$PYTHON_BIN" -m pip install --upgrade -r "$SCRIPT_DIR/requirements.txt"; then
+        echo "升级依赖失败，已中止。"
+        return 1
+    fi
+}
+
 update_dependencies() {
     if [ "${PYTUBEDL_UPDATE_DEPS:-0}" != "1" ]; then
         return 0
     fi
 
-    echo "正在按 requirements.txt 安装依赖..."
-    if ! "$PYTHON_BIN" -m pip install -r "$SCRIPT_DIR/requirements.txt"; then
-        echo "安装依赖失败，已中止启动。"
-        return 1
-    fi
+    upgrade_dependencies
 }
 
 stop_services() {
@@ -231,6 +242,7 @@ start_services() {
 main() {
     local action
     local service
+    local upgrade_requested=false
 
     if [ "$#" -gt 2 ]; then
         show_usage
@@ -242,7 +254,15 @@ main() {
         return 0
     fi
 
-    action="${1:-restart}"
+    if [ "$#" -eq 1 ] && { [ "$1" = "-u" ] || [ "$1" = "--upgrade" ]; }; then
+        upgrade_requested=true
+        action=restart
+        service=all
+    else
+        action="${1:-restart}"
+        service="${2:-all}"
+    fi
+
     case "$action" in
         start|stop|restart|status)
             ;;
@@ -257,7 +277,6 @@ main() {
             ;;
     esac
 
-    service="${2:-all}"
     case "$service" in
         all|app|downloader|ai|webdav|playlist)
             ;;
@@ -289,7 +308,11 @@ main() {
             stop_services "$service"
             ;;
         restart)
-            update_dependencies && \
+            if [ "$upgrade_requested" = "true" ]; then
+                upgrade_dependencies
+            else
+                update_dependencies
+            fi && \
                 stop_services "$service" && \
                 start_services "$service"
             ;;

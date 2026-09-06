@@ -64,6 +64,7 @@ vim config.json
 ./runner.sh stop     # 只停止本项目的 Python 服务
 ./runner.sh restart  # 先停止再启动
 ./runner.sh status   # 列出全部服务的运行状态
+./runner.sh -u       # 升级 pip 和全部依赖，然后重启全部服务
 ./runner.sh          # 默认执行 restart
 ```
 
@@ -87,11 +88,14 @@ vim config.json
 ./runner.sh --list
 ```
 
-现在 `runner.sh` 默认只负责启动、停止和重启服务，不会隐式升级依赖。需要明确更新依赖时执行：
+现在 `runner.sh` 默认只负责启动、停止和重启服务，不会隐式升级依赖。需要升级 pip 和 `requirements.txt` 中的全部依赖（包括 yt-dlp），然后重启全部服务时执行：
 
 ```bash
-PYTUBEDL_UPDATE_DEPS=1 ./runner.sh restart
+./runner.sh -u
+./runner.sh --upgrade
 ```
+
+环境变量写法 `PYTUBEDL_UPDATE_DEPS=1 ./runner.sh restart` 仍保留兼容，执行相同的升级流程。
 
 使用 Supervisor 部署时，专用维护脚本提供与 `runner.sh` 一致的操作和服务名：
 
@@ -103,10 +107,12 @@ PYTUBEDL_UPDATE_DEPS=1 ./runner.sh restart
 ./supervisor-runner.sh status app
 ./supervisor-runner.sh -l
 ./supervisor-runner.sh --list
+./supervisor-runner.sh -u
+./supervisor-runner.sh --upgrade
 ./supervisor-runner.sh  # 默认 restart 全部服务
 ```
 
-该脚本要求项目虚拟环境位于 `venv/`，并要求 `/usr/bin/supervisorctl` 可用。支持的服务映射为 `app` → `pyyoutubedl-app`、`downloader` → `pyyoutubedl-downloader`、`ai` → `pyyoutubedl-ai-summary`、`webdav` → `pyyoutubedl-webdav`、`playlist` → `pyyoutubedl-playlist-monitor`。需要同时按 `requirements.txt` 更新依赖时，可对 `start` 或 `restart` 设置 `PYTUBEDL_UPDATE_DEPS=1`。定时执行时建议使用 `flock` 防止任务重叠，并将输出重定向到日志文件。
+该脚本要求项目虚拟环境位于 `venv/`，并要求 `/usr/bin/supervisorctl` 可用。支持的服务映射为 `app` → `pyyoutubedl-app`、`downloader` → `pyyoutubedl-downloader`、`ai` → `pyyoutubedl-ai-summary`、`webdav` → `pyyoutubedl-webdav`、`playlist` → `pyyoutubedl-playlist-monitor`。`-u` / `--upgrade` 会升级 pip 和全部依赖后重启所有 Supervisor program；环境变量写法 `PYTUBEDL_UPDATE_DEPS=1 ./supervisor-runner.sh restart` 仍保留兼容。定时执行时建议使用 `flock` 防止任务重叠，并将输出重定向到日志文件。
 
 ### 5. 两台 VPS 一键发布
 

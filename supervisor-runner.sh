@@ -10,6 +10,7 @@ SUPERVISOR_PROGRAMS=()
 show_usage() {
     echo "用法: $0 [start|stop|restart|status] [app|downloader|ai|webdav|playlist]"
     echo "       $0 -l|--list"
+    echo "       $0 -u|--upgrade"
     echo "不提供操作时默认执行 restart；不提供服务时默认操作全部服务。"
 }
 
@@ -56,13 +57,19 @@ select_programs() {
     esac
 }
 
+upgrade_dependencies() {
+    echo "正在升级 pip..."
+    "$PYTHON_BIN" -m pip install --upgrade pip
+    echo "正在升级 requirements.txt 中的依赖..."
+    "$PYTHON_BIN" -m pip install --upgrade -r "$SCRIPT_DIR/requirements.txt"
+}
+
 update_dependencies() {
     if [ "${PYTUBEDL_UPDATE_DEPS:-0}" != "1" ]; then
         return 0
     fi
 
-    echo "正在按 requirements.txt 安装依赖..."
-    "$PYTHON_BIN" -m pip install -r "$SCRIPT_DIR/requirements.txt"
+    upgrade_dependencies
 }
 
 run_supervisor_action() {
@@ -77,6 +84,7 @@ run_supervisor_action() {
 main() {
     local action
     local service
+    local upgrade_requested=false
 
     if [ "$#" -gt 2 ]; then
         show_usage
@@ -88,7 +96,15 @@ main() {
         return 0
     fi
 
-    action="${1:-restart}"
+    if [ "$#" -eq 1 ] && { [ "$1" = "-u" ] || [ "$1" = "--upgrade" ]; }; then
+        upgrade_requested=true
+        action=restart
+        service=all
+    else
+        action="${1:-restart}"
+        service="${2:-all}"
+    fi
+
     case "$action" in
         start|stop|restart|status)
             ;;
@@ -103,7 +119,6 @@ main() {
             ;;
     esac
 
-    service="${2:-all}"
     if ! select_programs "$service"; then
         echo "无效服务: $service"
         show_usage
@@ -124,7 +139,11 @@ main() {
 
     case "$action" in
         start|restart)
-            update_dependencies
+            if [ "$upgrade_requested" = "true" ]; then
+                upgrade_dependencies
+            else
+                update_dependencies
+            fi
             run_supervisor_action "$action" "$service"
             ;;
         stop|status)
