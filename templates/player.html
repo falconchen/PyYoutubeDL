@@ -40,7 +40,7 @@
                         {% if video_files %}
                         <source src="{{ url_for('serve_file', filename=video_files[0]) }}" type="video/mp4">
                         {% for track in subtitle_tracks.get(video_files[0], []) %}
-                        <track kind="subtitles" src="{{ track.url }}" srclang="{{ track.language }}" label="{{ track.label }}">
+                        <track id="{{ track.id }}" kind="subtitles" src="{{ track.url }}" srclang="{{ track.language }}" label="{{ track.label }}">
                         {% endfor %}
                         {% endif %}
                     </video>
@@ -454,7 +454,8 @@
             });
             if (showingTrack) {
                 var matchingTrack = availableTracks.find(function (track) {
-                    return normalizeSubtitleLanguage(track.language)
+                    return track.id === showingTrack.id
+                        || normalizeSubtitleLanguage(track.language)
                         === normalizeSubtitleLanguage(showingTrack.language);
                 });
                 if (matchingTrack) {
@@ -465,7 +466,7 @@
         }
 
         function aiSummaryCacheKey(filename, track) {
-            return filename + ':' + (track ? track.stream_index : 'none');
+            return filename + ':' + (track ? track.id : 'none');
         }
 
         function resetAiSummaryContent() {
@@ -607,6 +608,8 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         filename: requestedFilename,
+                        subtitle_source: track.source_kind,
+                        subtitle_filename: track.subtitle_filename,
                         stream_index: track.stream_index
                     })
                 });
@@ -824,6 +827,7 @@
 
             (subtitle_tracks[filename] || []).forEach(function (track) {
                 player.addRemoteTextTrack({
+                    id: track.id,
                     kind: 'subtitles',
                     src: track.url,
                     srclang: track.language,

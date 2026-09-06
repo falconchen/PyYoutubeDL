@@ -339,17 +339,7 @@ def process_local_job(job):
     logger.info('开始读取本地媒体: job_id=%s', job['id'])
     filepath = safe_join(config['FILES_DIR'], job['filename'])
     if not filepath or not os.path.isfile(filepath):
-        raise JobFailure('video_not_found', '视频文件不存在')
-    tracks = app_module.get_embedded_subtitles(job['filename'])
-    selected = next(
-        (
-            track for track in tracks
-            if job['stream_index'] is None or track['stream_index'] == job['stream_index']
-        ),
-        None,
-    )
-    if not selected:
-        raise JobFailure('no_subtitles', '当前视频没有可用字幕')
+        raise JobFailure('media_not_found', '媒体文件不存在')
     media_id, title = resolve_local_media(job, filepath)
     cached = store.find_summary_for_media(
         config['AI_SUMMARY_DB_PATH'],
@@ -369,6 +359,56 @@ def process_local_job(job):
             cached['id'],
         )
         return
+
+    sidecar_tracks = [
+        track for track in app_module.get_local_summary_tracks(job['filename'])
+        if track['source_kind'] == 'sidecar'
+    ]
+    if sidecar_tracks:
+        selected = next(
+            (
+                track for track in sidecar_tracks
+                if track['subtitle_filename'] == job.get('subtitle_filename', '')
+            ),
+            sidecar_tracks[0],
+        )
+        subtitle_path = safe_join(
+            config['FILES_DIR'],
+            selected['subtitle_filename'],
+        )
+        if not subtitle_path or not os.path.isfile(subtitle_path):
+            raise JobFailure('subtitle_read_failed', '外挂字幕文件不存在')
+        logger.info(
+            '已选择字幕: job_id=%s language=%s kind=sidecar',
+            job['id'],
+            selected.get('language') or '',
+        )
+        logger.info('开始提取外挂字幕: job_id=%s', job['id'])
+        try:
+            subtitle_text = app_module.extract_sidecar_subtitle_text(subtitle_path)
+        except RuntimeError as exc:
+            raise JobFailure('subtitle_read_failed', str(exc)) from exc
+        if not subtitle_text:
+            raise JobFailure('empty_subtitles', '字幕中没有可总结的文本')
+        return (
+            media_id,
+            title,
+            selected.get('language') or '',
+            'sidecar',
+            selected.get('label') or selected.get('language') or '字幕',
+            subtitle_text,
+        )
+
+    tracks = app_module.get_embedded_subtitles(job['filename'])
+    selected = next(
+        (
+            track for track in tracks
+            if job['stream_index'] is None or track['stream_index'] == job['stream_index']
+        ),
+        tracks[0] if tracks else None,
+    )
+    if not selected:
+        raise JobFailure('no_subtitles', '当前视频没有可用字幕')
     logger.info(
         '已选择字幕: job_id=%s language=%s kind=embedded',
         job['id'],

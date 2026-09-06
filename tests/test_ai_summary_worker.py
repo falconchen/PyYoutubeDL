@@ -133,6 +133,57 @@ class TestAiSummaryWorker(unittest.TestCase):
             summary_tmp = tmp_dir / 'ai-summary'
             self.assertEqual(list(summary_tmp.iterdir()), [])
 
+    def test_local_job_prefers_selected_sidecar_subtitle(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            files_dir = root_path / 'files'
+            tmp_dir = root_path / 'tmp'
+            files_dir.mkdir()
+            tmp_dir.mkdir()
+            (files_dir / 'video.mp4').touch()
+            sidecar = files_dir / 'video.en.srt'
+            sidecar.write_text('subtitle', encoding='utf-8')
+            db_path = str(root_path / 'summary.sqlite3')
+            runtime = {
+                'AI_SUMMARY_DB_PATH': db_path,
+                'FILES_DIR': str(files_dir),
+                'TMP_DIR': str(tmp_dir),
+                'AI_API_BASE_URL': 'https://ai.example/v1/chat/completions',
+                'AI_API_MODEL': 'test-model',
+                'AI_API_TOKEN': 'provider-token',
+            }
+            store.init_db(db_path)
+            profile = store.summary_profile_key(runtime)
+            created = store.create_local_job(
+                db_path,
+                'video.mp4',
+                None,
+                'local:sidecar-video',
+                profile,
+                subtitle_source='sidecar',
+                subtitle_filename='video.en.srt',
+            )
+
+            with (
+                patch.dict(worker.config, runtime),
+                patch.dict(app_module.config, runtime),
+                patch('app.FILES_DIR', str(files_dir)),
+                patch('app.get_media_source_url', return_value=''),
+                patch('app.get_embedded_subtitles') as embedded,
+                patch(
+                    'app.extract_sidecar_subtitle_text',
+                    return_value='sidecar text',
+                ) as extract_sidecar,
+                patch('app.request_ai_summary', return_value='# summary'),
+            ):
+                self.assertTrue(worker.run_once())
+
+            job = store.get_job(db_path, created['job']['id'])
+            self.assertEqual(job['status'], 'completed')
+            self.assertEqual(job['summary']['subtitle_kind'], 'sidecar')
+            embedded.assert_not_called()
+            extract_sidecar.assert_called_once_with(str(sidecar))
+
 
 if __name__ == '__main__':
     unittest.main()

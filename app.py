@@ -85,6 +85,8 @@ DEFAULT_PROGRESS_PATTERN = re.compile(
     r'(?:\s+ETA\s+(?P<eta>\S+))?$'
 )
 SUBTITLE_EXTENSIONS = {'ass', 'lrc', 'srt', 'ssa', 'ttml', 'vtt'}
+VIDEO_SIDECAR_SUBTITLE_FORMATS = ('vtt', 'srt', 'ass', 'ssa', 'ttml')
+VIDEO_SIDECAR_LANGUAGE_PREFERENCES = ('zh-hans', 'zh-hant', 'zh', 'en')
 AUDIO_EXTENSIONS = {'aac', 'flac', 'm4a', 'mp3', 'ogg', 'opus', 'wav'}
 VIDEO_EXTENSIONS = {'avi', 'flv', 'mkv', 'mov', 'mp4', 'webm'}
 AUDIO_MIME_TYPES = {
@@ -708,6 +710,89 @@ def normalize_subtitle_language(language):
     return SUBTITLE_LANGUAGE_ALIASES.get(normalized, normalized)
 
 
+def _canonical_subtitle_language(language):
+    normalized = normalize_subtitle_language(language).replace('_', '-')
+    return {
+        'zh-hans': 'zh-Hans',
+        'zh-hant': 'zh-Hant',
+    }.get(normalized, normalized)
+
+
+def _subtitle_language_label(language):
+    if not language or language == 'und':
+        return '字幕'
+    if language == 'zh-Hans':
+        return '简体中文'
+    if language == 'zh-Hant':
+        return '繁体中文'
+    return SUBTITLE_LANGUAGE_LABELS.get(language, language)
+
+
+def get_sidecar_subtitles(filename):
+    """查找与视频严格同 stem 的外挂字幕，并按语言和格式去重排序。"""
+    video_stem, video_extension = os.path.splitext(filename)
+    if video_extension.lower() != '.mp4':
+        return []
+    try:
+        directory_entries = os.listdir(FILES_DIR)
+    except OSError as exc:
+        app.logger.warning("读取外挂字幕目录失败: %s (%s)", FILES_DIR, exc)
+        return []
+
+    candidates = []
+    for candidate in directory_entries:
+        candidate_stem, extension = os.path.splitext(candidate)
+        extension = extension.lower().lstrip('.')
+        if extension not in VIDEO_SIDECAR_SUBTITLE_FORMATS:
+            continue
+        if candidate_stem == video_stem:
+            language_suffix = ''
+        elif candidate_stem.startswith(f'{video_stem}.'):
+            language_suffix = candidate_stem[len(video_stem) + 1:]
+            if not language_suffix:
+                continue
+        else:
+            continue
+        candidate_path = safe_join(FILES_DIR, candidate)
+        if not candidate_path or not os.path.isfile(candidate_path):
+            continue
+
+        language = _canonical_subtitle_language(language_suffix)
+        normalized_language = language.lower()
+        try:
+            language_rank = VIDEO_SIDECAR_LANGUAGE_PREFERENCES.index(
+                normalized_language
+            ) + 1
+        except ValueError:
+            language_rank = len(VIDEO_SIDECAR_LANGUAGE_PREFERENCES) + 1
+        if not language_suffix:
+            language_rank = 0
+        candidates.append((
+            language_rank,
+            normalized_language,
+            VIDEO_SIDECAR_SUBTITLE_FORMATS.index(extension),
+            candidate.lower(),
+            candidate,
+            language,
+        ))
+
+    tracks = []
+    seen_languages = set()
+    for _, normalized_language, _, _, subtitle_filename, language in sorted(candidates):
+        if normalized_language in seen_languages:
+            continue
+        seen_languages.add(normalized_language)
+        tracks.append({
+            'id': f'sidecar:{subtitle_filename}',
+            'source_kind': 'sidecar',
+            'subtitle_filename': subtitle_filename,
+            'stream_index': None,
+            'language': language or 'und',
+            'label': _subtitle_language_label(language),
+        })
+    return tracks
+
+
 @lru_cache(maxsize=256)
 def _probe_embedded_subtitles(filepath, file_mtime_ns, file_size):
     """读取 MP4 的内嵌字幕流；文件属性参数用于自动失效缓存。"""
@@ -784,6 +869,19 @@ def get_embedded_subtitles(filename):
     )]
 
 
+def get_video_subtitle_tracks(filename):
+    """外挂字幕优先；没有外挂字幕时返回规范化的内嵌字幕轨道。"""
+    sidecar_tracks = get_sidecar_subtitles(filename)
+    if sidecar_tracks:
+        return sidecar_tracks
+    tracks = get_embedded_subtitles(filename)
+    for track in tracks:
+        track.setdefault('id', f"embedded:{track.get('stream_index')}")
+        track.setdefault('source_kind', 'embedded')
+        track.setdefault('subtitle_filename', '')
+    return tracks
+
+
 def extract_subtitle_text(filepath, stream_index):
     """把指定内嵌字幕流转换为适合发送给 AI 的纯文本。"""
     try:
@@ -801,7 +899,13 @@ def extract_subtitle_text(filepath, stream_index):
     except (subprocess.SubprocessError, OSError) as exc:
         raise RuntimeError("读取视频字幕失败") from exc
 
-    subtitle = result.stdout.decode("utf-8", errors="replace")
+    return subtitle_webvtt_to_text(result.stdout)
+
+
+def subtitle_webvtt_to_text(subtitle):
+    """清理 WebVTT 字节或文本，返回适合发送给 AI 的纯文本。"""
+    if isinstance(subtitle, bytes):
+        subtitle = subtitle.decode("utf-8", errors="replace")
     text_lines = []
     previous_line = None
     skip_note = False
@@ -827,6 +931,26 @@ def extract_subtitle_text(filepath, stream_index):
         subtitle_text = subtitle_text[:AI_SUMMARY_MAX_SUBTITLE_CHARS]
         subtitle_text += "\n（字幕内容过长，已截断）"
     return subtitle_text
+
+
+def convert_sidecar_subtitle_to_webvtt(filepath):
+    """使用 ffmpeg 将外挂字幕统一转换为 WebVTT。"""
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", filepath, "-f", "webvtt", "pipe:1"],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("找不到 ffmpeg，无法读取外挂字幕") from exc
+    except (subprocess.SubprocessError, OSError) as exc:
+        raise RuntimeError("读取外挂字幕失败") from exc
+    return result.stdout
+
+
+def extract_sidecar_subtitle_text(filepath):
+    return subtitle_webvtt_to_text(convert_sidecar_subtitle_to_webvtt(filepath))
 
 
 def request_ai_summary(filename, subtitle_label, subtitle_text, on_delta=None):
@@ -1370,6 +1494,74 @@ def find_audio_lyrics(filename, preferred_languages=None):
     }
 
 
+def get_audio_sidecar_subtitles(filename):
+    """返回音频所有可用于 AI 总结的同名旁挂歌词。"""
+    audio_stem, extension = os.path.splitext(filename)
+    if extension.lower().lstrip('.') not in AUDIO_EXTENSIONS:
+        return []
+    candidates = []
+    try:
+        directory_entries = os.listdir(FILES_DIR)
+    except OSError:
+        return []
+    format_order = {'lrc': 0, 'vtt': 1, 'srt': 2}
+    language_order = ('zh-hans', 'zh-cn', 'zh', 'zh-hant', 'zh-tw', 'en')
+    for candidate in directory_entries:
+        candidate_stem, candidate_extension = os.path.splitext(candidate)
+        candidate_extension = candidate_extension.lower().lstrip('.')
+        if candidate_extension not in LYRICS_EXTENSIONS:
+            continue
+        if candidate_stem == audio_stem:
+            language_suffix = ''
+        elif candidate_stem.startswith(f'{audio_stem}.'):
+            language_suffix = candidate_stem[len(audio_stem) + 1:]
+        else:
+            continue
+        candidate_path = safe_join(FILES_DIR, candidate)
+        if not candidate_path or not os.path.isfile(candidate_path):
+            continue
+        language = _canonical_subtitle_language(language_suffix)
+        normalized = language.lower()
+        try:
+            language_rank = language_order.index(normalized) + 1
+        except ValueError:
+            language_rank = len(language_order) + 1
+        if not language_suffix:
+            language_rank = 0
+        candidates.append((language_rank, normalized, format_order[candidate_extension], candidate.lower(), candidate, language))
+    tracks = []
+    seen = set()
+    for _, normalized, _, _, subtitle_filename, language in sorted(candidates):
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        tracks.append({
+            'id': f'sidecar:{subtitle_filename}',
+            'source_kind': 'sidecar',
+            'subtitle_filename': subtitle_filename,
+            'stream_index': None,
+            'language': language or 'und',
+            'label': _subtitle_language_label(language),
+        })
+    return tracks
+
+
+def get_local_summary_tracks(filename):
+    """返回本地视频或音频可用于 AI 总结的字幕轨道。"""
+    extension = os.path.splitext(filename)[1].lower().lstrip('.')
+    if extension in AUDIO_EXTENSIONS:
+        sidecars = get_audio_sidecar_subtitles(filename)
+        if sidecars:
+            return sidecars
+        tracks = get_embedded_subtitles(filename)
+        for track in tracks:
+            track.setdefault('id', f"embedded:{track.get('stream_index')}")
+            track.setdefault('source_kind', 'embedded')
+            track.setdefault('subtitle_filename', '')
+        return tracks
+    return get_video_subtitle_tracks(filename)
+
+
 def get_player_exclude_keywords():
     exclude_keywords = config.get("PLAYER_FILENAME_EXCLUDE_KEYWORDS", [])
     if not isinstance(exclude_keywords, list):
@@ -1614,13 +1806,19 @@ def player():
     video_metadata = {}
     for filename in video_files:
         video_metadata[filename] = get_video_metadata(filename)
-        tracks = get_embedded_subtitles(filename)
+        tracks = get_video_subtitle_tracks(filename)
         for track in tracks:
-            track["url"] = url_for(
-                "serve_subtitle",
-                filename=filename,
-                stream_index=track["stream_index"],
-            )
+            if track['source_kind'] == 'sidecar':
+                track["url"] = url_for(
+                    "serve_sidecar_subtitle",
+                    subtitle_filename=track['subtitle_filename'],
+                )
+            else:
+                track["url"] = url_for(
+                    "serve_subtitle",
+                    filename=filename,
+                    stream_index=track["stream_index"],
+                )
         subtitle_tracks[filename] = tracks
 
     return render_template(
@@ -1678,6 +1876,7 @@ def audio_player():
             'filename': filename,
             'url': url_for('serve_file', filename=filename),
             'lyrics': find_audio_lyrics(filename, preferred_languages),
+            'summary_tracks': get_local_summary_tracks(filename),
         })
         audio_items.append(metadata)
 
@@ -1685,6 +1884,7 @@ def audio_player():
         'audio_player.html',
         audio_items=audio_items,
         fallback_cover_url=fallback_cover_url,
+        ai_summary_configured=ai_summary_is_configured(),
         show_waline=config.get("SHOW_WALINE_ON_PLAYER", False),
     )
     
@@ -1712,7 +1912,7 @@ def serve_subtitle(filename, stream_index):
     filepath = safe_join(FILES_DIR, decoded_filename)
     if (
         not filepath
-        or not filepath.lower().endswith('.mp4')
+        or os.path.splitext(filepath)[1].lower().lstrip('.') not in ({'mp4'} | AUDIO_EXTENSIONS)
         or not os.path.isfile(filepath)
     ):
         abort(404)
@@ -1743,6 +1943,33 @@ def serve_subtitle(filename, stream_index):
     return Response(result.stdout, content_type="text/vtt; charset=utf-8")
 
 
+@app.route('/subtitles/sidecar/<path:subtitle_filename>.vtt')
+def serve_sidecar_subtitle(subtitle_filename):
+    """将有效的同名外挂字幕转换为浏览器可读取的 WebVTT。"""
+    decoded_filename = unquote(subtitle_filename)
+    if decoded_filename != os.path.basename(decoded_filename):
+        abort(404)
+    valid = any(
+        track['subtitle_filename'] == decoded_filename
+        for video_filename in os.listdir(FILES_DIR)
+        if video_filename.lower().endswith('.mp4')
+        for track in get_sidecar_subtitles(video_filename)
+    )
+    filepath = safe_join(FILES_DIR, decoded_filename)
+    if not valid or not filepath or not os.path.isfile(filepath):
+        abort(404)
+    try:
+        subtitle = convert_sidecar_subtitle_to_webvtt(filepath)
+    except RuntimeError as exc:
+        app.logger.error("转换外挂字幕失败: %s (%s)", filepath, exc)
+        return Response(
+            "subtitle conversion failed",
+            status=500,
+            content_type="text/plain; charset=utf-8",
+        )
+    return Response(subtitle, content_type="text/vtt; charset=utf-8")
+
+
 @app.route('/api/ai_summary', methods=['POST'])
 def api_ai_summary():
     """播放器兼容接口：命中持久化总结或创建本地字幕异步任务。"""
@@ -1763,6 +1990,8 @@ def api_ai_summary():
 
     filename = data.get("filename")
     stream_index = data.get("stream_index")
+    subtitle_source = data.get('subtitle_source')
+    subtitle_filename = data.get('subtitle_filename')
     if not isinstance(filename, str) or not filename:
         return ai_summary_api_response({"success": False, "message": "缺少视频文件名"}, 400)
     if stream_index is not None and (
@@ -1773,23 +2002,45 @@ def api_ai_summary():
     filepath = safe_join(FILES_DIR, filename)
     if (
         not filepath
-        or not filepath.lower().endswith('.mp4')
+        or os.path.splitext(filepath)[1].lower().lstrip('.') not in ({'mp4'} | AUDIO_EXTENSIONS)
         or not os.path.isfile(filepath)
     ):
-        return ai_summary_api_response({"success": False, "message": "视频文件不存在"}, 404)
+        return ai_summary_api_response({"success": False, "message": "媒体文件不存在"}, 404)
 
-    tracks = get_embedded_subtitles(filename)
+    tracks = get_local_summary_tracks(filename)
+    sidecar_tracks = [
+        track for track in tracks if track['source_kind'] == 'sidecar'
+    ]
     if not tracks:
-        return ai_summary_api_response({"success": False, "message": "当前视频没有可用字幕"}, 400)
-    if stream_index is None:
-        selected_track = tracks[0]
-    else:
+        return ai_summary_api_response({"success": False, "message": "当前媒体没有可用字幕或歌词"}, 400)
+    if subtitle_source is None:
+        # 兼容旧播放器：存在外挂字幕时忽略旧的内嵌流编号并使用首条外挂字幕。
+        if sidecar_tracks:
+            selected_track = sidecar_tracks[0]
+        elif stream_index is None:
+            selected_track = tracks[0]
+        else:
+            selected_track = next(
+                (track for track in tracks if track["stream_index"] == stream_index),
+                None,
+            )
+    elif subtitle_source == 'sidecar' and isinstance(subtitle_filename, str):
+        selected_track = next(
+            (
+                track for track in sidecar_tracks
+                if track['subtitle_filename'] == subtitle_filename
+            ),
+            None,
+        )
+    elif subtitle_source == 'embedded' and not sidecar_tracks:
         selected_track = next(
             (track for track in tracks if track["stream_index"] == stream_index),
             None,
         )
-        if selected_track is None:
-            return ai_summary_api_response({"success": False, "message": "所选字幕流不存在"}, 400)
+    else:
+        selected_track = None
+    if selected_track is None:
+        return ai_summary_api_response({"success": False, "message": "所选字幕不存在"}, 400)
 
     profile_key = ai_summary_store.summary_profile_key(config)
     source_url = get_media_source_url(filename)
@@ -1822,6 +2073,8 @@ def api_ai_summary():
         selected_track['stream_index'],
         normalized_key,
         profile_key,
+        subtitle_source=selected_track['source_kind'],
+        subtitle_filename=selected_track['subtitle_filename'],
     )
     if created['summary']:
         summary = created['summary']

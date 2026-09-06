@@ -452,6 +452,56 @@ class TestPlayerPage(unittest.TestCase):
         self.assertIn('player.addRemoteTextTrack({', html)
         self.assertIn('player.removeRemoteTextTrack(currentTracks[index]);', html)
 
+    def test_sidecar_subtitles_are_strictly_matched_sorted_and_deduplicated(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            for filename in (
+                'video.mp4',
+                'video.srt',
+                'video.zh-Hans.srt',
+                'video.zh-Hans.vtt',
+                'video.zh-Hant.ass',
+                'video.en.ttml',
+                'video.ja.ssa',
+                'video.lrc',
+                'video-extra.zh-Hans.srt',
+            ):
+                Path(files_dir, filename).touch()
+
+            with patch('app.FILES_DIR', files_dir):
+                tracks = app_module.get_sidecar_subtitles('video.mp4')
+
+        self.assertEqual(
+            [track['subtitle_filename'] for track in tracks],
+            [
+                'video.srt',
+                'video.zh-Hans.vtt',
+                'video.zh-Hant.ass',
+                'video.en.ttml',
+                'video.ja.ssa',
+            ],
+        )
+        self.assertEqual(
+            [track['language'] for track in tracks],
+            ['und', 'zh-Hans', 'zh-Hant', 'en', 'ja'],
+        )
+
+    def test_player_prefers_sidecars_without_probing_embedded_subtitles(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, 'video.mp4').touch()
+            Path(files_dir, 'video.zh-Hans.srt').touch()
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch('app.get_embedded_subtitles') as embedded,
+            ):
+                response = self.client.get('/player')
+
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        embedded.assert_not_called()
+        self.assertIn('id="sidecar:video.zh-Hans.srt"', html)
+        self.assertIn('/subtitles/sidecar/video.zh-Hans.srt.vtt', html)
+        self.assertNotIn('/subtitles/video.mp4/', html)
+
     def test_player_uses_accept_language_for_default_subtitle(self):
         with tempfile.TemporaryDirectory() as files_dir:
             filename = '带字幕.mp4'
@@ -651,6 +701,68 @@ class TestPlayerPage(unittest.TestCase):
         self.assertEqual(first.get_json()['status'], 'queued')
         self.assertEqual(first.get_json()['job_id'], second.get_json()['job_id'])
 
+    def test_ai_summary_creates_sidecar_job_for_selected_track(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, 'video.mp4').touch()
+            Path(files_dir, 'video.en.srt').touch()
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch.dict(
+                    app_module.config,
+                    {
+                        'AI_API_BASE_URL': 'https://ai.example/v1/chat/completions',
+                        'AI_API_MODEL': 'test-model',
+                        'AI_API_TOKEN': 'test-token',
+                    },
+                ),
+            ):
+                response = self.client.post(
+                    '/api/ai_summary',
+                    json={
+                        'filename': 'video.mp4',
+                        'subtitle_source': 'sidecar',
+                        'subtitle_filename': 'video.en.srt',
+                        'stream_index': None,
+                    },
+                )
+
+        self.assertEqual(response.status_code, 202)
+        job = ai_summary_store.get_job(
+            self.summary_db_path,
+            response.get_json()['job_id'],
+        )
+        self.assertEqual(job['subtitle_source'], 'sidecar')
+        self.assertEqual(job['subtitle_filename'], 'video.en.srt')
+        self.assertIsNone(job['stream_index'])
+
+    def test_ai_summary_rejects_unrelated_sidecar_filename(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, 'video.mp4').touch()
+            Path(files_dir, 'video.en.srt').touch()
+            Path(files_dir, 'other.en.srt').touch()
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch.dict(
+                    app_module.config,
+                    {
+                        'AI_API_BASE_URL': 'https://ai.example/v1/chat/completions',
+                        'AI_API_MODEL': 'test-model',
+                        'AI_API_TOKEN': 'test-token',
+                    },
+                ),
+            ):
+                response = self.client.post(
+                    '/api/ai_summary',
+                    json={
+                        'filename': 'video.mp4',
+                        'subtitle_source': 'sidecar',
+                        'subtitle_filename': 'other.en.srt',
+                    },
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['message'], '所选字幕不存在')
+
     def test_probe_distinguishes_simplified_and_traditional_chinese_tracks(self):
         probe_result = subprocess.CompletedProcess(
             args=['ffprobe'],
@@ -718,6 +830,56 @@ class TestPlayerPage(unittest.TestCase):
                 response = self.client.get('/subtitles/%E5%B8%A6%E5%AD%97%E5%B9%95.mp4/99.vtt')
 
         self.assertEqual(response.status_code, 404)
+
+    def test_sidecar_subtitle_route_converts_valid_file_to_webvtt(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, 'video.mp4').touch()
+            Path(files_dir, 'video.zh-Hans.srt').touch()
+            completed = subprocess.CompletedProcess(
+                args=['ffmpeg'],
+                returncode=0,
+                stdout=b'WEBVTT\n\n00:00.000 --> 00:01.000\ntext\n',
+                stderr=b'',
+            )
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch('app.subprocess.run', return_value=completed) as run,
+            ):
+                response = self.client.get(
+                    '/subtitles/sidecar/video.zh-Hans.srt.vtt'
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, 'text/vtt')
+        self.assertTrue(any(
+            argument.endswith('video.zh-Hans.srt')
+            for argument in run.call_args.args[0]
+        ))
+
+    def test_sidecar_subtitle_route_rejects_unrelated_file(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, 'video.mp4').touch()
+            Path(files_dir, 'other.srt').touch()
+            with patch('app.FILES_DIR', files_dir):
+                response = self.client.get('/subtitles/sidecar/other.srt.vtt')
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_sidecar_subtitle_route_reports_conversion_failure(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, 'video.mp4').touch()
+            Path(files_dir, 'video.srt').touch()
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch(
+                    'app.subprocess.run',
+                    side_effect=subprocess.CalledProcessError(1, ['ffmpeg']),
+                ),
+            ):
+                response = self.client.get('/subtitles/sidecar/video.srt.vtt')
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.get_data(as_text=True), 'subtitle conversion failed')
 
 
 if __name__ == '__main__':

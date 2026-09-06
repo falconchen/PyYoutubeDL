@@ -77,6 +77,18 @@
                         <i class="fas fa-info-circle"></i> 音频播完后将自动播放下一首
                     </div>
                 </div>
+                <section class="ai-summary-panel" aria-labelledby="ai-summary-title">
+                    <div class="ai-summary-header">
+                        <h3 id="ai-summary-title"><i class="fas fa-wand-magic-sparkles"></i> AI 总结</h3>
+                        <div class="ai-summary-actions">
+                            <button type="button" id="copy-ai-summary" class="ai-summary-button ai-summary-button-secondary" hidden><i class="fas fa-copy" aria-hidden="true"></i> 复制</button>
+                            <button type="button" id="toggle-ai-summary" class="ai-summary-button ai-summary-button-secondary" aria-controls="ai-summary-content" aria-expanded="false" hidden>展开</button>
+                            <button type="button" id="generate-ai-summary" class="ai-summary-button">生成总结</button>
+                        </div>
+                    </div>
+                    <p id="ai-summary-status" class="ai-summary-status" role="status" aria-live="polite"></p>
+                    <div id="ai-summary-content" class="ai-summary-content" hidden></div>
+                </section>
             </div>
 
             <div class="playlist-section">
@@ -120,6 +132,8 @@
     {% include '_site_footer.html' %}
 
     <script src="https://unpkg.com/video.js/dist/video.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@18.0.7/lib/marked.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.12/dist/purify.min.js"></script>
     <script>
         var Button = videojs.getComponent('Button');
         class DownloadButton extends Button {
@@ -152,6 +166,8 @@
         });
         var currentIndex = 0;
         var currentFilename = {{ (audio_items[0].filename if audio_items else '') | tojson }};
+        var aiSummaryConfigured = {{ ai_summary_configured | tojson }};
+        var aiSummaryResults = {};
         var playbackProgressPrefix = 'pyyoutubedl:audio-playback-progress:';
         var playbackEndThreshold = 3;
         var lastProgressSaveAt = 0;
@@ -188,6 +204,7 @@
             } else {
                 hideLyricsPanel();
             }
+            updateAiSummaryPanel(currentFilename);
             if (player.readyState() >= 1) {
                 restoreCurrentAudioProgress();
             }
@@ -546,6 +563,193 @@
             }
         }
 
+        function getAudioSummaryTrack(filename) {
+            var audioItem = findAudioItem(filename);
+            if (!audioItem || !audioItem.summary_tracks || !audioItem.summary_tracks.length) return null;
+            if (audioItem.lyrics) {
+                var selected = audioItem.summary_tracks.find(function (track) {
+                    return track.subtitle_filename === audioItem.lyrics.filename;
+                });
+                if (selected) return selected;
+            }
+            return audioItem.summary_tracks[0];
+        }
+
+        function audioSummaryCacheKey(filename, track) {
+            return filename + ':' + (track ? track.id : 'none');
+        }
+
+        function resetAiSummaryContent() {
+            var content = document.getElementById('ai-summary-content');
+            var copyButton = document.getElementById('copy-ai-summary');
+            var toggleButton = document.getElementById('toggle-ai-summary');
+            content.replaceChildren();
+            content.hidden = true;
+            content.classList.remove('is-collapsed');
+            copyButton.hidden = true;
+            toggleButton.hidden = true;
+            toggleButton.textContent = '展开';
+            toggleButton.setAttribute('aria-expanded', 'false');
+        }
+
+        function renderAiSummary(markdown, streaming) {
+            var content = document.getElementById('ai-summary-content');
+            var copyButton = document.getElementById('copy-ai-summary');
+            var toggleButton = document.getElementById('toggle-ai-summary');
+            try {
+                if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') throw new Error('Markdown 渲染组件未加载');
+                content.innerHTML = DOMPurify.sanitize(marked.parse(markdown, { gfm: true, breaks: true }), {
+                    FORBID_TAGS: ['img', 'svg', 'math', 'style'],
+                    FORBID_ATTR: ['style']
+                });
+            } catch (error) {
+                console.warn('Markdown 渲染失败，已回退为纯文本', error);
+                content.textContent = markdown;
+            }
+            content.hidden = false;
+            content.classList.remove('is-collapsed');
+            copyButton.hidden = Boolean(streaming);
+            toggleButton.hidden = Boolean(streaming);
+            toggleButton.textContent = '收起';
+            toggleButton.setAttribute('aria-expanded', 'true');
+        }
+
+        async function consumeAiSummaryStream(jobId, onMessage) {
+            var response = await fetch('/api/ai_summary/jobs/' + encodeURIComponent(jobId) + '/stream', {
+                headers: { 'Accept': 'application/x-ndjson' }
+            });
+            if (!response.ok || !response.body) throw new Error('无法连接总结流');
+            var reader = response.body.getReader();
+            var decoder = new TextDecoder();
+            var buffer = '';
+            var terminal = false;
+            while (true) {
+                var chunk = await reader.read();
+                buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done });
+                var lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (var index = 0; index < lines.length; index += 1) {
+                    if (!lines[index].trim()) continue;
+                    var message = JSON.parse(lines[index]);
+                    if (message.type !== 'keepalive') {
+                        onMessage(message);
+                        terminal = message.status === 'completed' || message.status === 'failed';
+                    }
+                }
+                if (chunk.done) break;
+            }
+            if (buffer.trim()) {
+                var finalMessage = JSON.parse(buffer);
+                onMessage(finalMessage);
+                terminal = finalMessage.status === 'completed' || finalMessage.status === 'failed';
+            }
+            if (!terminal) throw new Error('AI 总结流提前结束');
+        }
+
+        function updateAiSummaryPanel(filename) {
+            var button = document.getElementById('generate-ai-summary');
+            var status = document.getElementById('ai-summary-status');
+            var track = getAudioSummaryTrack(filename);
+            var cached = track ? aiSummaryResults[audioSummaryCacheKey(filename, track)] : null;
+            if (cached) renderAiSummary(cached); else resetAiSummaryContent();
+            if (!aiSummaryConfigured) {
+                button.disabled = true;
+                status.textContent = 'AI 总结尚未配置。';
+            } else if (!track) {
+                button.disabled = true;
+                status.textContent = filename ? '当前音频没有可用字幕或歌词。' : '暂无音频。';
+            } else {
+                button.disabled = false;
+                button.textContent = cached ? '重新显示' : '生成总结';
+                status.textContent = cached ? '已使用' + track.label + '生成总结。' : '将读取' + track.label + '并按需生成总结。';
+            }
+        }
+
+        async function generateAiSummary() {
+            var requestedFilename = currentFilename;
+            var track = getAudioSummaryTrack(requestedFilename);
+            if (!aiSummaryConfigured || !requestedFilename || !track) return updateAiSummaryPanel(requestedFilename);
+            var button = document.getElementById('generate-ai-summary');
+            var status = document.getElementById('ai-summary-status');
+            var cacheKey = audioSummaryCacheKey(requestedFilename, track);
+            if (aiSummaryResults[cacheKey]) return renderAiSummary(aiSummaryResults[cacheKey]);
+            button.disabled = true;
+            button.textContent = '生成中…';
+            status.textContent = '正在读取字幕或歌词并生成总结，请稍候…';
+            try {
+                var response = await fetch({{ url_for('api_ai_summary') | tojson }}, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        filename: requestedFilename,
+                        subtitle_source: track.source_kind,
+                        subtitle_filename: track.subtitle_filename,
+                        stream_index: track.stream_index
+                    })
+                });
+                var result = await response.json();
+                if (response.status === 202 && result.success && result.job_id) {
+                    await consumeAiSummaryStream(result.job_id, function (streamResult) {
+                        result = streamResult;
+                        if (streamResult.partial_markdown && currentFilename === requestedFilename) renderAiSummary(streamResult.partial_markdown, true);
+                        status.textContent = streamResult.status === 'generating' ? 'AI 正在流式生成总结…' : '正在准备字幕或歌词…';
+                    });
+                }
+                if (!response.ok || !result.success) throw new Error(result.message || (result.error && result.error.message) || '生成总结失败');
+                aiSummaryResults[cacheKey] = result.summary;
+                if (currentFilename === requestedFilename) {
+                    renderAiSummary(result.summary);
+                    status.textContent = '已使用' + result.subtitle + '生成总结。';
+                }
+            } catch (error) {
+                if (currentFilename === requestedFilename) status.textContent = error.message || '生成总结失败，请稍后重试。';
+            } finally {
+                if (currentFilename === requestedFilename) {
+                    button.disabled = false;
+                    button.textContent = aiSummaryResults[cacheKey] ? '重新显示' : '生成总结';
+                }
+            }
+        }
+
+        function fallbackCopyText(text) {
+            var textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            var copied = document.execCommand('copy');
+            textarea.remove();
+            if (!copied) throw new Error('浏览器拒绝复制');
+        }
+
+        async function copyAiSummary() {
+            var track = getAudioSummaryTrack(currentFilename);
+            var summary = track ? aiSummaryResults[audioSummaryCacheKey(currentFilename, track)] : null;
+            if (!summary) return;
+            try {
+                if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(summary);
+                else fallbackCopyText(summary);
+                document.getElementById('ai-summary-status').textContent = 'AI 总结已复制。';
+            } catch (error) {
+                document.getElementById('ai-summary-status').textContent = '复制失败，请手动选择总结内容。';
+            }
+        }
+
+        function toggleAiSummary() {
+            var content = document.getElementById('ai-summary-content');
+            var button = document.getElementById('toggle-ai-summary');
+            var expanded = content.classList.contains('is-collapsed');
+            content.classList.toggle('is-collapsed', !expanded);
+            button.textContent = expanded ? '收起' : '展开';
+            button.setAttribute('aria-expanded', String(expanded));
+        }
+
+        document.getElementById('generate-ai-summary').addEventListener('click', generateAiSummary);
+        document.getElementById('copy-ai-summary').addEventListener('click', copyAiSummary);
+        document.getElementById('toggle-ai-summary').addEventListener('click', toggleAiSummary);
+
         function updateCurrentAudioInfo(audioItem) {
             document.getElementById('current-audio-title').textContent = audioItem.title;
             var source = document.getElementById('current-audio-source');
@@ -792,6 +996,7 @@
             updatePoster(audioItem);
             loadLyrics(audioItem);
             updateCurrentAudioInfo(audioItem);
+            updateAiSummaryPanel(filename);
             updateActiveItem(filename);
             updatePlayerUrl(filename);
             player.play();

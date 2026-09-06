@@ -17,7 +17,7 @@ class TestAiSummaryStore(unittest.TestCase):
 
     def test_initializes_wal_schema(self):
         with store.connect(self.db_path) as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 3)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 4)
             self.assertEqual(
                 db.execute('PRAGMA journal_mode').fetchone()[0].lower(),
                 'wal',
@@ -34,9 +34,11 @@ class TestAiSummaryStore(unittest.TestCase):
             columns = {
                 row[1] for row in db.execute('PRAGMA table_info(ai_summary_jobs)')
             }
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 3)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 4)
         self.assertIn('partial_markdown', columns)
         self.assertIn('stream_revision', columns)
+        self.assertIn('subtitle_source', columns)
+        self.assertIn('subtitle_filename', columns)
 
     def test_repairs_utf8_bytes_decoded_as_latin_one(self):
         original = '简短概述：这是中文总结。'
@@ -89,6 +91,23 @@ class TestAiSummaryStore(unittest.TestCase):
         second = store.create_url_job(self.db_path, url, url, self.profile)
 
         self.assertEqual(first['job']['id'], second['job']['id'])
+
+    def test_local_job_persists_sidecar_locator(self):
+        created = store.create_local_job(
+            self.db_path,
+            'video.mp4',
+            None,
+            'local:video',
+            self.profile,
+            subtitle_source='sidecar',
+            subtitle_filename='video.zh-Hans.srt',
+        )
+
+        self.assertEqual(created['job']['subtitle_source'], 'sidecar')
+        self.assertEqual(
+            created['job']['subtitle_filename'],
+            'video.zh-Hans.srt',
+        )
 
     def test_claim_recovers_expired_lease(self):
         url = 'https://video.example/watch/1'

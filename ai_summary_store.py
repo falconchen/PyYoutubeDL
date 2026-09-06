@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 PROMPT_VERSION = 1
 YOUTUBE_HOSTS = {
     'youtube.com',
@@ -246,6 +246,8 @@ def init_db(db_path):
                     normalized_url TEXT NOT NULL,
                     filename TEXT NOT NULL DEFAULT '',
                     stream_index INTEGER,
+                    subtitle_source TEXT NOT NULL DEFAULT 'embedded',
+                    subtitle_filename TEXT NOT NULL DEFAULT '',
                     media_source_id INTEGER REFERENCES media_sources(id) ON DELETE SET NULL,
                     profile_key TEXT NOT NULL,
                     summary_id TEXT REFERENCES ai_summaries(id) ON DELETE SET NULL,
@@ -287,6 +289,20 @@ def init_db(db_path):
             db.execute('PRAGMA user_version = 2')
         if version == 2:
             _repair_stored_mojibake(db)
+            version = 3
+            db.execute('PRAGMA user_version = 3')
+        if version == 3:
+            columns = {
+                row['name'] for row in db.execute('PRAGMA table_info(ai_summary_jobs)')
+            }
+            if 'subtitle_source' not in columns:
+                db.execute(
+                    "ALTER TABLE ai_summary_jobs ADD COLUMN subtitle_source TEXT NOT NULL DEFAULT 'embedded'"
+                )
+            if 'subtitle_filename' not in columns:
+                db.execute(
+                    "ALTER TABLE ai_summary_jobs ADD COLUMN subtitle_filename TEXT NOT NULL DEFAULT ''"
+                )
             db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
         db.commit()
 
@@ -439,6 +455,8 @@ def create_local_job(
     normalized_key,
     profile_key,
     media_source_id=None,
+    subtitle_source='embedded',
+    subtitle_filename='',
 ):
     timestamp = now_ts()
     with connect(db_path) as db:
@@ -468,13 +486,15 @@ def create_local_job(
             """
             INSERT INTO ai_summary_jobs (
                 id, input_kind, normalized_url, filename, stream_index,
-                media_source_id, profile_key, status, next_attempt_at,
+                subtitle_source, subtitle_filename, media_source_id,
+                profile_key, status, next_attempt_at,
                 created_at, updated_at
-            ) VALUES (?, 'local_file', ?, ?, ?, ?, ?, 'queued', ?, ?, ?)
+            ) VALUES (?, 'local_file', ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)
             """,
             (
                 job_id, normalized_key, filename, stream_index,
-                media_source_id, profile_key, timestamp, timestamp, timestamp,
+                subtitle_source, subtitle_filename, media_source_id, profile_key,
+                timestamp, timestamp, timestamp,
             ),
         )
         job = db.execute('SELECT * FROM ai_summary_jobs WHERE id = ?', (job_id,)).fetchone()

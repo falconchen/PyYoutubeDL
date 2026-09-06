@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import app as app_module
+import ai_summary_store
 from app import app
 from config_util import DEFAULT_CONFIG
 
@@ -379,6 +380,66 @@ class TestAudioPlayerPage(unittest.TestCase):
             template.index('id="audio-visualizer"'),
             template.index('class="lyrics-panel"'),
         )
+
+    def test_audio_player_renders_ai_summary_for_sidecar_lyrics(self):
+        with tempfile.TemporaryDirectory() as root:
+            files_dir = Path(root) / 'files'
+            files_dir.mkdir()
+            (files_dir / 'song.mp3').touch()
+            (files_dir / 'song.zh-Hans.srt').write_text(
+                '1\n00:00:00,000 --> 00:00:01,000\n中文\n',
+                encoding='utf-8',
+            )
+            with (
+                patch('app.FILES_DIR', str(files_dir)),
+                patch.dict(app_module.config, {
+                    'AI_API_BASE_URL': 'https://ai.example/v1/chat/completions',
+                    'AI_API_MODEL': 'test-model',
+                    'AI_API_TOKEN': 'test-token',
+                }),
+            ):
+                response = self.client.get('/audio-player')
+
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('id="generate-ai-summary"', html)
+        self.assertIn('var aiSummaryConfigured = true;', html)
+        self.assertIn('sidecar:song.zh-Hans.srt', html)
+        self.assertIn('subtitle_filename: track.subtitle_filename', html)
+        self.assertIn('updateAiSummaryPanel(filename);', html)
+
+    def test_audio_ai_summary_creates_local_sidecar_job(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            files_dir = root_path / 'files'
+            files_dir.mkdir()
+            (files_dir / 'song.mp3').touch()
+            (files_dir / 'song.en.srt').touch()
+            db_path = str(root_path / 'summary.sqlite3')
+            ai_summary_store.init_db(db_path)
+            with (
+                patch('app.FILES_DIR', str(files_dir)),
+                patch('app.get_media_source_url', return_value=''),
+                patch.dict(app_module.config, {
+                    'AI_SUMMARY_DB_PATH': db_path,
+                    'AI_API_BASE_URL': 'https://ai.example/v1/chat/completions',
+                    'AI_API_MODEL': 'test-model',
+                    'AI_API_TOKEN': 'test-token',
+                }),
+            ):
+                response = self.client.post('/api/ai_summary', json={
+                    'filename': 'song.mp3',
+                    'subtitle_source': 'sidecar',
+                    'subtitle_filename': 'song.en.srt',
+                    'stream_index': None,
+                })
+
+            job = ai_summary_store.get_job(db_path, response.get_json()['job_id'])
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(job['filename'], 'song.mp3')
+        self.assertEqual(job['subtitle_source'], 'sidecar')
+        self.assertEqual(job['subtitle_filename'], 'song.en.srt')
 
     def test_default_cover_config_and_asset_exist(self):
         self.assertEqual(
