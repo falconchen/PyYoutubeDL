@@ -109,7 +109,7 @@ class TestPlayerPage(unittest.TestCase):
             html,
         )
         self.assertIn('tryCandidate(index + 1);', html)
-        self.assertIn('href="/audio-player"', html)
+        self.assertIn('id="audio-tab"', html)
         self.assertLess(html.index('class="player-nav"'), html.index('class="player-content"'))
         self.assertNotIn('class="footer-actions"', html)
 
@@ -122,7 +122,7 @@ class TestPlayerPage(unittest.TestCase):
         )
         css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
 
-        for page_template in (template, audio_template):
+        for page_template in (template,):
             self.assertIn('class="player-header-row"', page_template)
             self.assertLess(
                 page_template.index('class="player-header-row"'),
@@ -665,7 +665,7 @@ class TestPlayerPage(unittest.TestCase):
                 )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.get_json()['message'], '当前视频没有可用字幕')
+        self.assertEqual(response.get_json()['message'], '当前媒体没有可用字幕或歌词')
 
     def test_ai_summary_creates_and_reuses_async_local_job(self):
         with tempfile.TemporaryDirectory() as files_dir:

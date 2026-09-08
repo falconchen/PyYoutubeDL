@@ -191,14 +191,14 @@ class TestAudioPlayerPage(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('<source src="/files/requested%20song.m4a" type="audio/mp4">', html)
         self.assertLess(html.index('requested song'), html.index('older.mp3'))
-        self.assertNotIn('video.mp4', html)
+        self.assertNotIn('video.mp4', html.split('id="audio-list"', 1)[1].split('</aside>', 1)[0])
         self.assertIn('href="https://example.com/original-audio"', html)
         self.assertIn('>原始链接 <i', html)
         self.assertIn('id="current-audio-source"', html)
         self.assertIn('sourceLink.href = sourceUrl;', html)
         self.assertIn('id="current-audio-metadata"', html)
         self.assertIn('<dd>Album</dd>', html)
-        self.assertIn('href="/player"', html)
+        self.assertIn('id="video-tab"', html)
         self.assertLess(html.index('class="player-nav"'), html.index('class="player-content"'))
         self.assertNotIn('class="footer-actions', html)
         self.assertIn('aria-labelledby="lyrics-heading"\n                        hidden', html)
@@ -255,7 +255,7 @@ class TestAudioPlayerPage(unittest.TestCase):
     def test_audio_player_uses_poster_mode_and_race_safe_fallback(self):
         template = Path(app.template_folder, 'audio_player.html').read_text(
             encoding='utf-8',
-        )
+        ) + Path(app.template_folder, '_audio_controller.html').read_text(encoding='utf-8')
 
         self.assertIn('audioPosterMode: true', template)
         self.assertIn('pictureInPictureToggle: false', template)
@@ -269,13 +269,13 @@ class TestAudioPlayerPage(unittest.TestCase):
     def test_audio_player_uses_inline_playback_attributes(self):
         template = Path(app.template_folder, 'audio_player.html').read_text(
             encoding='utf-8',
-        )
+        ) + Path(app.template_folder, '_audio_controller.html').read_text(encoding='utf-8')
 
         self.assertIn('playsinline webkit-playsinline', template)
         self.assertIn('playsinline: true', template)
 
     def test_audio_player_renders_real_audio_spectrum_visualizer(self):
-        template = Path('templates/audio_player.html').read_text(encoding='utf-8')
+        template = Path('templates/audio_player.html').read_text(encoding='utf-8') + Path(app.template_folder, '_audio_controller.html').read_text(encoding='utf-8')
         css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
 
         self.assertIn('id="audio-visualizer"', template)
@@ -324,27 +324,25 @@ class TestAudioPlayerPage(unittest.TestCase):
     def test_audio_player_reuses_playback_download_and_auto_next_behaviors(self):
         template = Path(app.template_folder, 'audio_player.html').read_text(
             encoding='utf-8',
-        )
+        ) + Path(app.template_folder, '_audio_controller.html').read_text(encoding='utf-8')
 
         self.assertIn(
             'playbackRates: [0.5, 0.75, 1, 1.5, 2, 3]',
             template,
         )
-        self.assertIn("controlBar.addChild('DownloadButton'", template)
+        self.assertIn("controlBar.addChild('AudioDownloadButton'", template)
         self.assertIn('link.download = currentFilename;', template)
         self.assertIn("player.on('ended', function () {", template)
         self.assertIn("player.on('loadedmetadata', restoreCurrentAudioProgress);", template)
         self.assertIn("player.on('pause', saveCurrentAudioProgress);", template)
         self.assertIn("window.addEventListener('beforeunload', saveCurrentAudioProgress);", template)
-        self.assertLess(
-            template.index('playlist-section'),
-            template.index('audio-comment-container'),
-        )
+        shared = Path(app.template_folder, 'player.html').read_text(encoding='utf-8')
+        self.assertEqual(shared.count('id="waline"'), 1)
 
     def test_audio_player_loads_and_synchronizes_sidecar_lyrics(self):
         template = Path(app.template_folder, 'audio_player.html').read_text(
             encoding='utf-8',
-        )
+        ) + Path(app.template_folder, '_audio_controller.html').read_text(encoding='utf-8')
         css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
 
         self.assertIn('id="lyrics-content"', template)
@@ -456,7 +454,7 @@ class TestAudioPlayerPage(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('href="/player"', html)
-        self.assertIn('href="/audio-player"', html)
+        self.assertIn('打开媒体库', html)
 
 
 if __name__ == '__main__':

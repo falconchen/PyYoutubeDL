@@ -6,36 +6,39 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="{{ url_for('static', filename='images/favicon.png') }}">
     <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
-    <title>视频播放器 - YouTube 下载器</title>
+    <title>媒体库 - YouTube 下载器</title>
     <link rel="stylesheet" href="{{ 'style.css' | versioned }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link href="https://unpkg.com/video.js/dist/video-js.min.css" rel="stylesheet">
     <link rel="stylesheet" href="{{ 'player.css' | versioned }}">
+    <link rel="stylesheet" href="{{ 'refresh.css' | versioned }}">
 </head>
 
-<body class="player-page">
+{% set listen_mode = request.args.get("listen") == "1" %}
+<body class="player-page redesigned-page">
     <div class="container player-main-container">
         <div class="header player-header">
             <div class="player-header-row">
-                <h1><i class="fab fa-youtube"></i> 视频播放器</h1>
+                <h1><i class="fab fa-youtube"></i> 媒体库</h1>
                 <nav class="player-nav" aria-label="播放器导航">
                     <a href="{{ url_for('index') }}" class="btn-secondary">
                         <i class="fas fa-arrow-left" aria-hidden="true"></i> 返回下载页
                     </a>
-                    <a href="{{ url_for('audio_player') }}" class="btn-secondary">
-                        <i class="fas fa-headphones" aria-hidden="true"></i> 音频播放器
-                    </a>
+
                 </nav>
             </div>
         </div>
 
-        <div class="player-content">
+        <div class="library-intro"><span class="eyebrow">YOUR MEDIA LIBRARY</span><p>喜欢的内容，随时播放。</p></div>
+        <div class="library-layout">
+        <div class="library-stage">
+        <div class="player-content" id="video-panel" role="tabpanel" aria-labelledby="video-tab" {% if active_media != 'video' %}hidden{% endif %}>
             <div class="player-section">
                 <div class="video-wrapper">
                     {% set initial_video_metadata = video_metadata.get(video_files[0], {}) if video_files else {} %}
                     {% set initial_video_covers = initial_video_metadata.get('cover_candidates', []) %}
                     {% set initial_video_cover = initial_video_covers[1] if initial_video_covers|length > 1 else (initial_video_covers[0] if initial_video_covers else '') %}
-                    <video id="video-player" class="video-js vjs-big-play-centered vjs-16-9" controls preload="metadata" playsinline webkit-playsinline
+                    <{% if listen_mode %}audio{% else %}video{% endif %} id="video-player" class="video-js vjs-big-play-centered vjs-16-9" controls preload="metadata" playsinline webkit-playsinline
                         {% if initial_video_cover %}poster="{{ initial_video_cover }}"{% endif %}>
                         {% if video_files %}
                         <source src="{{ url_for('serve_file', filename=video_files[0]) }}" type="video/mp4">
@@ -43,9 +46,11 @@
                         <track id="{{ track.id }}" kind="subtitles" src="{{ track.url }}" srclang="{{ track.language }}" label="{{ track.label }}">
                         {% endfor %}
                         {% endif %}
-                    </video>
+                    </{% if listen_mode %}audio{% else %}video{% endif %}>
                 </div>
                 <div class="video-info-panel">
+                    <button type="button" id="background-listen-toggle" class="btn-secondary" aria-pressed="{{ 'true' if listen_mode else 'false' }}" {% if not video_files %}disabled{% endif %}>{{ '返回视频画面' if listen_mode else '后台听音频' }}</button>
+                    <p class="player-controls-hint">{{ '听音频模式：请点击播放后再锁屏。' if listen_mode else '锁屏听视频前，先切换到“后台听音频”。' }}</p>
                     <h2 id="current-video-title">正在播放: {{ initial_video_metadata.get('title', '暂无视频') }}</h2>
                     {% set initial_video_source_url = initial_video_metadata.get('source_url', '') %}
                     <p id="current-video-source" class="media-source" {% if not initial_video_source_url %}hidden{% endif %}>
@@ -89,23 +94,27 @@
                     <p id="ai-summary-status" class="ai-summary-status" role="status" aria-live="polite"></p>
                     <div id="ai-summary-content" class="ai-summary-content" hidden></div>
                 </section>
-                {% if show_waline %}
-                    <div class="comment-container player-comment-container">
-                        <div id="waline"></div>
-                    </div>
-                {% endif %}
+
             </div>
 
-            <div class="playlist-section">
-                <div class="playlist-header">
-                    <h3><i class="fas fa-list"></i> 播放列表 ({{ video_files|length }})</h3>
-                </div>
-                <div class="playlist-items scrollbar-custom" id="video-list">
+        </div>
+
+        {% include 'audio_player.html' %}
+        {% if show_waline %}
+        <div class="comment-container player-comment-container"><div id="waline"></div></div>
+        {% endif %}
+        </div>
+        <aside class="playlist-section" aria-label="播放列表">
+        <div class="media-tabs" data-player-url="{{ url_for('player') }}" role="tablist" aria-label="播放列表类型">
+            <button type="button" id="video-tab" role="tab" aria-controls="video-panel" aria-selected="{{ 'true' if active_media == 'video' else 'false' }}" tabindex="{{ 0 if active_media == 'video' else -1 }}" data-media="video"><i class="fas fa-video" aria-hidden="true"></i> 视频 <span>{{ video_files|length }}</span></button>
+            <button type="button" id="audio-tab" role="tab" aria-controls="audio-panel" aria-selected="{{ 'true' if active_media == 'audio' else 'false' }}" tabindex="{{ 0 if active_media == 'audio' else -1 }}" data-media="audio"><i class="fas fa-headphones" aria-hidden="true"></i> 音频 <span>{{ audio_items|length }}</span></button>
+        </div>
+                <div class="playlist-items scrollbar-custom" id="video-list" {% if active_media != 'video' %}hidden{% endif %}>
                     {% for file in video_files %}
                     {% set display_file = file[9:] if file|length > 9 and file[:8].isdigit() and file[8] == '-' else file %}
                     <button type="button" class="playlist-item {% if loop.first %}active{% endif %}"
                         data-filename="{{ file }}" {% if loop.first %}aria-current="true"{% endif %}
-                        onclick="switchVideo('{{ url_for('serve_file', filename=file) }}', '{{ file }}', this)">
+                        data-src="{{ url_for('serve_file', filename=file) }}" onclick="switchVideo(this.dataset.src, this.dataset.filename, this)">
                         <div class="item-icon">
                             <i class="fas fa-play"></i>
                         </div>
@@ -121,9 +130,31 @@
                     </div>
                     {% endif %}
                 </div>
-            </div>
+                <div class="playlist-items scrollbar-custom" id="audio-list" {% if active_media != 'audio' %}hidden{% endif %}>
+                    {% for audio in audio_items %}
+                    <button type="button" class="playlist-item {% if loop.first %}active{% endif %}"
+                        data-filename="{{ audio.filename }}" {% if loop.first %}aria-current="true"{% endif %}
+                        onclick="switchAudio(this)">
+                        <div class="item-icon">
+                            <i class="fas fa-play"></i>
+                        </div>
+                        <div class="item-details">
+                            <span class="item-name" title="{{ audio.title }}">{{ audio.title }}</span>
+                            {% if audio.artist %}
+                            <span class="item-subtitle">{{ audio.artist }}</span>
+                            {% endif %}
+                        </div>
+                    </button>
+                    {% endfor %}
+                    {% if not audio_items %}
+                    <div class="no-videos">
+                        <i class="fas fa-headphones"></i>
+                        <p>暂无下载音频</p>
+                    </div>
+                    {% endif %}
+                </div>
+        </aside>
         </div>
-
     </div>
 
     {% include '_site_footer.html' %}
@@ -131,6 +162,7 @@
     <script src="https://unpkg.com/video.js/dist/video.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked@18.0.7/lib/marked.umd.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.12/dist/purify.min.js"></script>
+    <script src="{{ 'background-playback.js' | versioned }}"></script>
     <script>
         var Button = videojs.getComponent('Button');
         class DownloadButton extends Button {
@@ -151,6 +183,8 @@
 
         var player = videojs('video-player', {
             playsinline: true,
+            audioPosterMode: {{ listen_mode | tojson }},
+            controlBar: { fullscreenToggle: {{ (not listen_mode) | tojson }}, pictureInPictureToggle: {{ (not listen_mode) | tojson }} },
             playbackRates: [0.5, 0.75, 1, 1.5, 2, 3]
         });
         var video_files = {{ video_files | tojson }};
@@ -168,6 +202,21 @@
         var applyingSubtitlePreference = false;
         var subtitlePreferenceApplySerial = 0;
         var videoPosterRequestSerial = 0;
+
+        BackgroundPlayback.attach(player, function () {
+            return videoMetadata[currentFilename] || { title: currentFilename };
+        });
+        document.getElementById('background-listen-toggle').addEventListener('click', function () {
+            saveCurrentVideoProgress();
+            player.pause();
+            var url = new URL(window.location.href);
+            url.pathname = {{ url_for('player') | tojson }};
+            url.searchParams.set('tab', 'video');
+            url.searchParams.set('file', currentFilename);
+            if (url.searchParams.get('listen') === '1') url.searchParams.delete('listen');
+            else url.searchParams.set('listen', '1');
+            window.location.assign(url.href);
+        });
 
         player.ready(function () {
             var controlBar = player.getChild('controlBar');
@@ -198,6 +247,8 @@
 
         function updatePlayerUrl(filename) {
             var url = new URL(window.location.href);
+            url.pathname = {{ url_for('player') | tojson }};
+            url.searchParams.set('tab', 'video');
             url.searchParams.set('file', filename);
             window.history.replaceState({ filename: filename }, '', url);
         }
@@ -737,8 +788,8 @@
             player.src({ type: "video/mp4", src: src });
             updateVideoPoster(filename);
             updateSubtitleTracks(filename);
-            player.play();
             currentFilename = filename;
+            player.play();
             updatePlayerUrl(filename);
             updateAiSummaryPanel(filename);
 
@@ -746,7 +797,7 @@
             updateCurrentVideoInfo(filename);
 
             // 更新列表状态
-            document.querySelectorAll('.playlist-item').forEach(function (item) {
+            document.querySelectorAll('#video-list .playlist-item').forEach(function (item) {
                 item.classList.remove('active');
                 item.removeAttribute('aria-current');
             });
@@ -845,7 +896,7 @@
                 var nextSrc = "{{ url_for('serve_file', filename='') }}" + encodeURIComponent(nextFile);
 
                 // 找到对应的 DOM 元素以便更新样式
-                var items = document.querySelectorAll('.playlist-item');
+                var items = document.querySelectorAll('#video-list .playlist-item');
                 switchVideo(nextSrc, nextFile, items[currentIndex], false);
             }
         });
@@ -889,6 +940,8 @@
 
         player.on('play', scrollToActive);
     </script>
+    {% include '_audio_controller.html' %}
+    <script src="{{ 'media-library.js' | versioned }}"></script>
     {% if show_waline %}
         <link rel="stylesheet" href="https://unpkg.com/@waline/client@v3/dist/waline.css">
         <script type="module">

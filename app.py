@@ -1821,38 +1821,23 @@ def player():
                 )
         subtitle_tracks[filename] = tracks
 
-    return render_template(
-        'player.html',
-        video_files=video_files,
-        video_metadata=video_metadata,
-        subtitle_tracks=subtitle_tracks,
-        browser_subtitle_languages=[
-            language
-            for language, quality in request.accept_languages
-            if quality > 0
-        ],
-        ai_summary_configured=ai_summary_is_configured(),
-        show_waline=config.get("SHOW_WALINE_ON_PLAYER", False),
-    )
-
-
-@app.route('/audio-player')
-def audio_player():
-    exclude_keywords = get_player_exclude_keywords()
     audio_files = [
         filename for filename in os.listdir(FILES_DIR)
         if os.path.splitext(filename)[1].lower().lstrip('.') in AUDIO_EXTENSIONS
         and not any(keyword in filename for keyword in exclude_keywords)
     ]
-    audio_files.sort(
-        key=lambda filename: os.path.getmtime(os.path.join(FILES_DIR, filename)),
-        reverse=True,
-    )
-
-    requested_file = request.args.get('file', '')
+    audio_files.sort(key=lambda f: os.path.getmtime(os.path.join(FILES_DIR, f)), reverse=True)
     if requested_file in audio_files:
         audio_files.remove(requested_file)
         audio_files.insert(0, requested_file)
+    if requested_file in video_files:
+        active_media = 'video'
+    elif requested_file in audio_files:
+        active_media = 'audio'
+    else:
+        active_media = 'audio' if (
+            request.args.get('tab') == 'audio' or request.path == '/audio-player'
+        ) else 'video'
 
     fallback_cover_url = config.get(
         'AUDIO_PLAYER_FALLBACK_COVER_URL',
@@ -1881,13 +1866,24 @@ def audio_player():
         audio_items.append(metadata)
 
     return render_template(
-        'audio_player.html',
+        'player.html',
+        video_files=video_files,
+        video_metadata=video_metadata,
+        subtitle_tracks=subtitle_tracks,
+        browser_subtitle_languages=preferred_languages,
+        active_media=active_media,
         audio_items=audio_items,
         fallback_cover_url=fallback_cover_url,
         ai_summary_configured=ai_summary_is_configured(),
         show_waline=config.get("SHOW_WALINE_ON_PLAYER", False),
     )
     
+@app.route('/audio-player')
+def audio_player():
+    """兼容已有音频链接，在统一播放页打开音频标签。"""
+    return player()
+
+
 @app.route('/files/<path:filename>')
 def serve_file(filename):
     decoded_filename = unquote(filename)  
