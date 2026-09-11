@@ -305,8 +305,8 @@ class TestTaskInfoAPI(unittest.TestCase):
         self.assertNotIn('task-log-reconnect', template)
         self.assertNotIn('实时连接中', template)
         self.assertNotIn('tail -f task logs', template)
-        self.assertIn('height: min(33vh, 360px);', css)
-        self.assertIn('background: rgba(17, 20, 24, 0.84);', css)
+        self.assertIn('height: min(33vh, 300px);', css)
+        self.assertIn('background: rgba(255, 255, 255, 0.94);', css)
 
     def test_task_log_drawer_defaults_to_closed_on_small_screens(self):
         template = Path(app.app.template_folder, 'index.html').read_text(
