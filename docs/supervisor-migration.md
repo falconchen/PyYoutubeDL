@@ -21,6 +21,7 @@ Supervisor 按 program 粒度管理、自带 autorestart 与日志落盘，更�
 | `deploy/supervisor/service-guard.sh` | 可选服务（ai / webdav / playlist）的启用判定守卫 |
 | `deploy/supervisor/install.sh` | 安装并切换，幂等，支持 `--dry-run` |
 | `supervisor-runner.sh` | 切换后的日常运维入口，参数与 `runner.sh` 一致 |
+| `deploy/supervisor/inet-http-server.conf.example` | Web 面板配置模板（可选，见下文） |
 
 ## 切换步骤
 
@@ -145,6 +146,34 @@ supervisor 日志放在 `logs/supervisor/` 子目录，不能直接放 `logs/`�
 `FLASK_DEBUG` 为 `true` 时 Werkzeug reloader 会 fork 出子进程（切换前 `app.py` 是两个进程），
 supervisor 只认父 PID，且 git 部署改动文件会触发 reloader 自重启，与 supervisor 的重启语义
 打架。已在 `config.json` 与 `config.sample.json` 中改为 `false`。
+
+## Web 面板（可选）
+
+Supervisor 自带 Web 面板，可在浏览器里查看状态、启停单个 program、读取日志。
+默认不启用，需要额外加一个 include 文件：
+
+```bash
+cp deploy/supervisor/inet-http-server.conf.example /etc/supervisor/conf.d/inet-http-server.conf
+vim /etc/supervisor/conf.d/inet-http-server.conf   # 填 port / username / password
+chmod 600 /etc/supervisor/conf.d/inet-http-server.conf
+systemctl restart supervisor
+```
+
+注意事项：
+
+- **必须重启 supervisord 本身**（`systemctl restart supervisor`），`reread` / `update`
+  不会创建监听套接字。重启会连带重启所有 program，操作前先确认没有进行中的下载和上传。
+- **配置要独立成文件**：不要写进 `/etc/supervisor/supervisord.conf`（apt 升级可能覆盖），
+  也不要写进 `pyyoutubedl.conf`（`install.sh` 每次都会重新渲染该文件）。
+- **`port` 要写具体地址**，不要用 `*:9002` 或 `0.0.0.0:9002` —— 那会连同所有 docker
+  网桥一起监听，等于把面板暴露给每个容器。机器有多个网段时，只有填写的那个可达。
+- **面板权限等同 root 操作服务**，且 supervisor 只有 HTTP Basic Auth、不支持 TLS，
+  密码在网络上明文传输。不要暴露到公网；最安全的做法是绑 `127.0.0.1` 再用
+  `ssh -L 9002:127.0.0.1:9002 <host>` 转发。
+- **端口先确认空闲**：`ss -lnt | grep 9002`。9001 常被 portainer 等占用。
+- 密码以 SHA1 存储：`printf '%s' '你的密码' | sha1sum`，把十六进制串填到 `{SHA}` 之后。
+
+`supervisorctl` 仍走 unix socket，不受面板配置影响。
 
 ## 回滚
 

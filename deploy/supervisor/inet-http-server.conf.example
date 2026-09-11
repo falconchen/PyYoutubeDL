@@ -1,0 +1,26 @@
+; Supervisor Web 面板配置模板。
+;
+; 用法：复制到 /etc/supervisor/conf.d/inet-http-server.conf，按下面说明填写
+; port 与 password，然后 chmod 600 并 systemctl restart supervisor。
+;
+; 独立成 include 文件，不要写进 /etc/supervisor/supervisord.conf ——
+; 那是发行版自带文件，apt 升级时可能被覆盖。
+; 也不要写进 pyyoutubedl.conf —— install.sh 每次都会重新渲染该文件。
+;
+; 安全要点：
+;   * 面板可启停进程、读取日志，权限等同 root 操作服务，切勿暴露到公网。
+;   * supervisor 只提供 HTTP Basic Auth 且不支持 TLS，密码在网络上明文传输。
+;   * port 要写具体的监听地址。写 *:9002 或 0.0.0.0:9002 会连同所有 docker
+;     网桥一起监听，等于把面板暴露给每个容器。
+;     - 最安全：127.0.0.1:9002，再用 ssh -L 9002:127.0.0.1:9002 转发访问；
+;     - 局域网：填本机对应网卡的 IP。机器有多个网段时，只有填写的那个可达。
+;   * 端口需先确认空闲：ss -lnt | grep 9002。9001 常被 portainer 等占用。
+;
+; 密码以 SHA1 存储，不要写明文。生成方式：
+;   printf '%s' '你的密码' | sha1sum
+; 取输出的十六进制串，填到 {SHA} 之后。
+
+[inet_http_server]
+port=127.0.0.1:9002
+username=CHANGE_ME
+password={SHA}CHANGE_ME_TO_SHA1_HEX
