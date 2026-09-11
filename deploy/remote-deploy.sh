@@ -46,7 +46,8 @@ restart_services() {
             pyyoutubedl-app \
             pyyoutubedl-downloader \
             pyyoutubedl-ai-summary \
-            pyyoutubedl-webdav
+            pyyoutubedl-webdav \
+            pyyoutubedl-playlist-monitor
     fi
 }
 

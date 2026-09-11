@@ -68,7 +68,7 @@
   },
   "FLASK_HOST": "0.0.0.0",
   "FLASK_PORT": 5100,
-  "FLASK_DEBUG": true,
+  "FLASK_DEBUG": false,
 
   // YouTube OAuth 授权与播放列表监控
   "FLASK_SECRET_KEY": "replace_with_a_long_random_string",

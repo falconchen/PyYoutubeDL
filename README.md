@@ -105,6 +105,17 @@ vim config.json
 
 环境变量写法 `PYTUBEDL_UPDATE_DEPS=1 ./runner.sh restart` 仍保留兼容，执行相同的升级流程。
 
+从 systemd 切换到 Supervisor（含配置模板与安装脚本）：
+
+```bash
+./deploy/supervisor/install.sh --dry-run   # 先看将要执行的操作
+./deploy/supervisor/install.sh             # 实际切换，需 root
+```
+
+Supervisor 的 program 定义在 `deploy/supervisor/pyyoutubedl.conf`（路径用 `__PROJECT_DIR__` 占位，由 `install.sh` 渲染到 `/etc/supervisor/conf.d/`）。ai / webdav / playlist 三个可选服务由 `deploy/supervisor/service-guard.sh` 读取 `config.json` 判定是否启动，未启用时状态停在 `EXITED` 而非 `FATAL`。完整的切换步骤、风险清单与回滚方式见 [docs/supervisor-migration.md](docs/supervisor-migration.md)。
+
+**切换后不要再使用 `runner.sh` 和 `stop.py`**：`stop.py` 会杀掉 Supervisor 托管的进程（随即被拉起，表现为「杀不掉」），`runner.sh restart` 会用 `nohup` 再起一套脱离 Supervisor 的进程并抢占端口和任务文件。统一改用 `supervisor-runner.sh`。
+
 使用 Supervisor 部署时，专用维护脚本提供与 `runner.sh` 一致的操作和服务名：
 
 ```bash
@@ -593,6 +604,7 @@ PyYoutubeDL/
 ├── runner.sh             # 启动脚本
 ├── supervisor-runner.sh  # Supervisor 部署维护脚本
 ├── deploy/               # 开发机与远端发布脚本
+│   └── supervisor/       # Supervisor program 配置、守卫脚本与安装脚本
 ├── stop.py               # 停止脚本
 ├── setup_pyyoutubedl_service.sh  # systemd 服务安装脚本
 ├── config.json           # 配置文件
