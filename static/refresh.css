@@ -71,3 +71,345 @@
 
 .redesigned-page .player-comment-container { width: 100%; max-width: none; min-width: 0; margin: 18px 0 0; --waline-bg-color: #fff; --waline-bg-color-light: #f5f4ef; --waline-border-color: #e0e5db; --waline-theme-color: #294e40; --waline-active-color: #203d32; }
 .redesigned-page .player-comment-container #waline { width: 100%; min-width: 0; }
+
+/* Download task card */
+.download-page .task-container {
+    width: min(720px, 90%);
+    max-width: 720px;
+    padding: clamp(20px, 4vw, 32px);
+    border-color: #e0e5dc;
+    box-shadow: 0 16px 48px rgba(37, 51, 47, .07);
+}
+
+.task-container-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.task-container-eyebrow {
+    display: block;
+    margin-bottom: 3px;
+    color: #89938c;
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .14em;
+}
+
+.download-page .task-container h3 {
+    gap: 8px;
+    margin: 0;
+    color: #25332f;
+    font-size: 1.15rem;
+    letter-spacing: -.02em;
+}
+
+.download-page .task-container h3 i {
+    color: #c44429;
+}
+
+.task-count {
+    flex: 0 0 auto;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: #eef2eb;
+    color: #607067;
+    font-size: .72rem;
+    font-weight: 650;
+}
+
+.download-page .task-info {
+    margin: 0;
+    background: transparent;
+}
+
+.download-page .task-url {
+    gap: 10px;
+    margin-bottom: 12px;
+    padding: 9px 10px;
+    border: 1px solid #d8e1d5;
+    border-radius: 10px;
+    background: #f2f6f0;
+    color: #52675e;
+    font-size: .82rem;
+}
+
+.download-page .task-url > i {
+    display: inline-flex;
+    flex: 0 0 30px;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: #e4ebe1;
+    color: #60776d;
+}
+
+.download-page .url-copy {
+    flex: 1 1 auto;
+    gap: 8px;
+    min-width: 0;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+.download-page .url-display {
+    max-width: none;
+    overflow: hidden;
+    color: #3e554c;
+    font-weight: 520;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.download-page .copy-btn {
+    display: inline-flex;
+    flex: 0 0 32px;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    margin-left: auto;
+    padding: 0;
+    border: 1px solid #d2ddd0;
+    border-radius: 8px;
+    background: #fff;
+    color: #294e40;
+    box-shadow: 0 1px 3px rgba(37, 51, 47, .06);
+}
+
+.download-page .copy-btn:hover {
+    border-color: #b9c9b5;
+    background: #e8efe5;
+    color: #203f34;
+}
+
+.download-page .copy-btn:active {
+    background: #dfe9dc;
+}
+
+.download-page .video-info {
+    align-items: center;
+    gap: 14px;
+    margin: 0 0 14px;
+    padding: 12px;
+    border: 1px solid #e2e6df;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: none;
+}
+
+.download-page .video-thumbnail {
+    width: 144px;
+    height: 81px;
+    border-radius: 8px;
+    background: #edf0eb;
+}
+
+.download-page .video-title {
+    color: #25332f;
+    font-size: .98rem;
+    line-height: 1.45;
+}
+
+.download-page .video-meta {
+    margin-top: 5px;
+    color: #7c8780;
+    font-size: .78rem;
+}
+
+.download-page .task-list {
+    display: grid;
+    gap: 10px;
+}
+
+.download-page .task-list li {
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid #e1e6df;
+    border-radius: 12px;
+    background: #fafbf9;
+}
+
+.download-page .task-list li:hover {
+    background: #f7f9f5;
+    border-color: #d5ddd2;
+}
+
+.download-page .task-summary {
+    gap: 8px;
+}
+
+.download-page .task-id {
+    min-width: 0;
+    overflow: hidden;
+    padding: 3px 7px;
+    background: #eff1ed;
+    color: #516058;
+    font-size: .75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.download-page .badge {
+    gap: 5px;
+    padding: 3px 8px;
+    font-size: .72rem;
+    font-weight: 650;
+}
+
+.download-page .badge.video,
+.download-page .badge.audio {
+    background: #eaf0ea;
+    color: #365b4d;
+}
+
+.download-page .task-status {
+    padding: 4px 9px;
+    background: #eef2eb;
+    color: #53685e;
+    font-size: .72rem;
+}
+
+.download-page .task-status.downloading {
+    background: #fff2df;
+    color: #8a5a16;
+}
+
+.download-page .task-status.completed {
+    background: #e8f3e9;
+    color: #2f6b3f;
+}
+
+.download-page .task-status.failed,
+.download-page .task-status.missing {
+    background: #fbeae6;
+    color: #a33e2e;
+}
+
+.download-page .progress-row {
+    gap: 10px;
+}
+
+.download-page .progress-stage {
+    min-width: 4.25rem;
+    color: #496157;
+    font-size: .74rem;
+}
+
+.download-page .progress-track {
+    height: 6px;
+    background: #e1e6df;
+}
+
+.download-page .progress-fill {
+    background: linear-gradient(90deg, #c45a3d, #315c4d);
+}
+
+.download-page .progress-percent {
+    min-width: 2.8rem;
+    color: #4e5a54;
+    font-size: .78rem;
+}
+
+.download-page .progress-details {
+    min-height: 0;
+    color: #77817b;
+    font-size: .75rem;
+    line-height: 1.5;
+}
+
+.download-page .task-player-link,
+.download-page .task-download-link {
+    padding: 5px 9px;
+    font-size: .72rem;
+}
+
+.download-page .task-player-link {
+    background: #315c4d;
+}
+
+.download-page .task-download-link {
+    background: #c45a3d;
+}
+
+@media (max-width: 480px) {
+    .download-page .task-container {
+        width: calc(100% - 24px);
+        padding: 18px 14px;
+    }
+
+    .download-page .task-url {
+        padding: 8px;
+    }
+
+    .download-page .task-url > i {
+        flex-basis: 28px;
+        width: 28px;
+        height: 28px;
+    }
+
+    .download-page .copy-btn {
+        flex-basis: 30px;
+        width: 30px;
+        height: 30px;
+    }
+
+    .task-container-header {
+        align-items: center;
+        margin-bottom: 16px;
+    }
+
+    .download-page .video-info {
+        flex-direction: row;
+        gap: 10px;
+        padding: 10px;
+    }
+
+    .download-page .video-thumbnail {
+        width: 104px;
+        height: 59px;
+        aspect-ratio: auto;
+    }
+
+    .download-page .video-title {
+        display: -webkit-box;
+        overflow: hidden;
+        font-size: .88rem;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+    }
+
+    .download-page .video-meta {
+        flex-direction: row;
+        gap: 8px;
+        margin-top: 3px;
+    }
+
+    .download-page .task-list li {
+        padding: 12px;
+    }
+
+    .download-page .task-summary {
+        flex-wrap: wrap;
+    }
+
+    .download-page .task-status,
+    .download-page .task-actions {
+        margin-left: auto;
+    }
+
+    .download-page .progress-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 6px 8px;
+    }
+
+    .download-page .progress-stage {
+        grid-column: 1 / -1;
+    }
+}

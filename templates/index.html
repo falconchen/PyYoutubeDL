@@ -67,14 +67,20 @@
         </div>
     </aside>
     <div class="container task-container">
-        <h3><i class="fas fa-tasks"></i> 任务已创建</h3>
+        <div class="task-container-header">
+            <div>
+                <span class="task-container-eyebrow">下载队列</span>
+                <h3><i class="fas fa-tasks" aria-hidden="true"></i> 任务进度</h3>
+            </div>
+            <span class="task-count">{{ tasks|length }} 项任务</span>
+        </div>
         <div class="task-info">
             <div class="task-url">
                 <i class="fas fa-link"></i>
                 <span class="url-text" style="display: none;">{{ url | escape }}</span>
                 <div class="url-copy">
                     <span class="url-display">已复制到剪贴板</span>
-                    <button class="copy-btn" type="button" title="复制链接">
+                    <button class="copy-btn" type="button" aria-label="复制链接" title="复制链接">
                         <i class="fas fa-copy"></i>
                     </button>
                 </div>
@@ -429,6 +435,7 @@
                 const taskActions = item.querySelector('.task-actions');
 
                 status.className = `task-status ${state}`;
+                item.dataset.state = state;
                 status.replaceChildren();
                 if (state === 'downloading') {
                     const spinner = document.createElement('i');
@@ -476,6 +483,10 @@
                 if (state === 'failed') detailParts.push('下载失败，请查看日志');
                 if (state === 'missing') detailParts.push(task.msg || '任务不存在');
                 details.textContent = detailParts.join(' · ') || '正在获取进度';
+                track.setAttribute(
+                    'aria-valuetext',
+                    `${stageText.textContent}，${percentText.textContent}，${details.textContent}`
+                );
 
                 if (state === 'completed' && task.player_url) {
                     playerLink.href = task.player_url;

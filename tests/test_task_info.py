@@ -351,6 +351,29 @@ class TestTaskInfoAPI(unittest.TestCase):
         self.assertIn('.task-actions .task-player-link span,', css)
         self.assertIn('.task-actions .task-download-link span {\n        display: none;', css)
 
+    def test_task_list_uses_compact_responsive_card_layout(self):
+        template = Path(app.app.template_folder, 'index.html').read_text(
+            encoding='utf-8',
+        )
+        css = Path(app.app.static_folder, 'refresh.css').read_text(
+            encoding='utf-8',
+        )
+
+        self.assertIn('class="task-container-header"', template)
+        self.assertIn('class="task-count">{{ tasks|length }} 项任务', template)
+        self.assertIn('aria-label="复制链接" title="复制链接"', template)
+        self.assertIn("item.dataset.state = state;", template)
+        self.assertIn("'aria-valuetext'", template)
+        self.assertIn('.download-page .task-container {', css)
+        self.assertIn('max-width: 720px;', css)
+        self.assertIn('.download-page .task-list li {', css)
+        self.assertIn('border-radius: 12px;', css)
+        self.assertIn('width: 104px;', css)
+        self.assertIn('grid-template-columns: minmax(0, 1fr) auto;', css)
+        self.assertIn('.download-page .url-copy {', css)
+        self.assertIn('max-width: none;', css)
+        self.assertIn('margin-left: auto;', css)
+
     def test_task_page_does_not_show_submitted_url_in_input(self):
         template = Path(app.app.template_folder, 'index.html').read_text(
             encoding='utf-8',
