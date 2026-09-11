@@ -161,8 +161,8 @@ chmod 700 deploy/deploy.sh deploy/remote-deploy.sh
 cd /path/to/PyYoutubeDL
 git log --oneline -5
 git reset --hard <已确认的旧 commit>
-systemctl restart pyyoutubedl
-# Supervisor 环境改用 ./supervisor-runner.sh
+./supervisor-runner.sh restart
+# systemd 环境改用 systemctl restart pyyoutubedl
 ```
 
 `/healthz` 只返回 `status` 和当前 Git commit，供部署检查和反向代理探活使用，不包含配置、令牌或任务数据。
@@ -177,13 +177,30 @@ python stop.py
 
 ### 4. 设为开机自启
 
-项目提供了 systemd 服务安装脚本，动态获取当前目录路径：
+推荐用 Supervisor 托管，按服务粒度管理，崩溃自动拉起：
+
+```bash
+sudo ./deploy/supervisor/install.sh --dry-run   # 先看将要执行的操作
+sudo ./deploy/supervisor/install.sh             # 实际安装并接管
+```
+
+安装后的常用命令：
+
+```bash
+./supervisor-runner.sh status              # 查看全部服务状态
+./supervisor-runner.sh restart downloader  # 只重启下载器
+supervisorctl tail -f pyyoutubedl-downloader   # 实时日志
+```
+
+服务日志落在 `logs/supervisor/<program>.log`，任务级日志仍在 `logs/<taskid>.log`。
+切换细节与风险清单见 [docs/supervisor-migration.md](docs/supervisor-migration.md)。
+
+<details>
+<summary>可选：改用 systemd 托管</summary>
 
 ```bash
 sudo bash setup_pyyoutubedl_service.sh
 ```
-
-服务安装后可使用的常用命令：
 
 ```bash
 systemctl start  pyyoutubedl    # 启动
@@ -191,6 +208,11 @@ systemctl stop   pyyoutubedl    # 停止
 systemctl status pyyoutubedl    # 查看状态
 journalctl -u pyyoutubedl -f    # 实时日志
 ```
+
+注意该 unit 是 `Type=oneshot`，只负责调用 `runner.sh` 拉起进程，systemd 本身不监管
+这些进程：worker 崩溃不会被拉起，也无法按服务粒度操作。两者只能择一启用。
+
+</details>
 
 ## 使用方式
 
@@ -491,9 +513,9 @@ grep OAUTH_AUTH_USERNAME config.json
 3. 重启服务使配置生效：
 
    ```bash
-   systemctl restart pyyoutubedl   # systemd 部署
+   ./supervisor-runner.sh restart   # Supervisor 部署
    # 或
-   ./runner.sh restart             # 脚本部署
+   ./runner.sh restart              # 脚本部署（未托管时）
    ```
 
 4. 妥善保存新密码明文——哈希不可逆，再次忘记只能重复上述步骤重置。
@@ -565,7 +587,7 @@ https://yter.cellmean.com/audio-player
 需要显示时把对应项改成 `true`，然后重启服务：
 
 ```bash
-systemctl restart pyyoutubedl.service
+./supervisor-runner.sh restart app
 ```
 
 评论数据按“域名 + 路径”隔离。客户端传给 Waline 的 `path` 形如：
