@@ -51,3 +51,12 @@ def test_empty_library_keeps_both_accessible_tabs():
         assert '暂无下载视频' in html
         assert '暂无下载音频' in html
         assert 'role="tablist"' in html
+
+
+def test_small_screens_hide_library_intro():
+    css = Path(app_module.app.static_folder, 'refresh.css').read_text(
+        encoding='utf-8',
+    )
+    mobile_css = css.split('@media (max-width: 480px)', 1)[1]
+
+    assert '.player-page .library-intro { display: none; }' in mobile_css

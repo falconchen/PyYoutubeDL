@@ -61,7 +61,7 @@
     .redesigned-page .player-header-row { gap: 8px; }
     .redesigned-page .player-header-row h1 { font-size: 22px; }
     .redesigned-page .player-nav .btn-secondary { font-size: .75rem; }
-    .library-intro { margin: 24px 0 18px; }
+    .player-page .library-intro { display: none; }
     .redesigned-page .video-info-panel, .redesigned-page .ai-summary-panel, .redesigned-page .player-comment-container { padding: 16px; }
 }
 .redesigned-page [hidden] { display: none !important; }
