@@ -1,6 +1,7 @@
 import unittest
 import json
 import subprocess
+import sys
 from unittest.mock import patch
 
 from app import app
@@ -48,6 +49,7 @@ class TestVideoInfoAPI(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         cmd = run.call_args.args[0]
+        self.assertEqual(cmd[:3], [sys.executable, '-m', 'yt_dlp'])
         for option in (
             '--sleep-requests',
             '--sleep-interval',
@@ -123,6 +125,7 @@ class TestVideoInfoAPI(unittest.TestCase):
             'thumbnail': 'https://img.example/thumb.jpg',
         })
         cmd = run.call_args.args[0]
+        self.assertEqual(cmd[:3], [sys.executable, '-m', 'yt_dlp'])
         self.assertIn('--print', cmd)
         self.assertIn('%(title)j\t%(uploader)j\t%(duration)j\t%(thumbnail)j', cmd)
         self.assertIn('--no-write-subs', cmd)

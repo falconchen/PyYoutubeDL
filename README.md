@@ -35,6 +35,14 @@ python -m pip install -r requirements-dev.txt
 python -m pytest tests/ -v
 ```
 
+Web 的视频信息接口、播放列表解析和下载器通过当前 Python 解释器的 `-m yt_dlp` 调用依赖，不要求 `yt-dlp` 命令出现在服务的 `PATH` 中。旧版本接口出现 `[Errno 2] No such file or directory: 'yt-dlp'` 时，表示服务找不到外部命令；更新代码后，确认服务使用项目虚拟环境，并验证：
+
+```bash
+./venv/bin/python -m yt_dlp --version
+```
+
+若提示 `No module named yt_dlp`，用 `./venv/bin/python -m pip install -r requirements.txt` 安装依赖，再按当前部署方式重启 Web 服务并重试接口。
+
 ### 2. 配置
 
 复制并编辑配置文件：

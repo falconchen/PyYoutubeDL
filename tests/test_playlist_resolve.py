@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import datetime
@@ -97,6 +98,7 @@ class TestResolvePlaylistUrls(unittest.TestCase):
             'https://www.youtube.com/watch?v=abcDEF12345',
         ])
         cmd = run.call_args.args[0]
+        self.assertEqual(cmd[:3], [sys.executable, '-m', 'yt_dlp'])
         self.assertIn('--flat-playlist', cmd)
         self.assertIn('%(id)s|%(webpage_url)s', cmd)
         self.assertNotIn('--playlist-end', cmd)
@@ -113,6 +115,7 @@ class TestResolvePlaylistUrls(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(len(urls), 2)
         cmd = run.call_args.args[0]
+        self.assertEqual(cmd[:3], [sys.executable, '-m', 'yt_dlp'])
         self.assertEqual(cmd[cmd.index('--playlist-end') + 1], '20')
 
     def test_skips_na_urls_and_blank_lines(self):

@@ -7,6 +7,7 @@ import time
 import json
 import re
 import subprocess
+import sys
 from functools import lru_cache
 from urllib.parse import parse_qs, unquote, urlparse
 import hashlib
@@ -245,7 +246,7 @@ def resolve_playlist_urls(url, conf_path, max_items=None):
         失败时 urls 为 None、error 为错误说明。
     """
     cmd = [
-        'yt-dlp',
+        sys.executable, '-m', 'yt_dlp',
         '--config-location', conf_path,
         '--flat-playlist',
     ]
@@ -2390,7 +2391,7 @@ def api_video_info():
         # 优先使用.local.conf文件，如果不存在则使用默认配置文件
         conf_path = local_conf_path if os.path.exists(local_conf_path) else default_conf_path
         cmd = [
-            'yt-dlp',
+            sys.executable, '-m', 'yt_dlp',
             '--config-location', conf_path,
             # 视频信息查询不继承下载配置中的 -t sleep 等限速等待设置。
             '--sleep-requests', '0',
@@ -2474,7 +2475,7 @@ def api_video_info_basic():
     try:
         conf_path = _pick_ytdlp_conf('video')
         cmd = [
-            'yt-dlp',
+            sys.executable, '-m', 'yt_dlp',
             '--config-location', conf_path,
             '--sleep-requests', '0',
             '--sleep-interval', '0',
