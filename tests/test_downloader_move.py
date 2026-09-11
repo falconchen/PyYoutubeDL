@@ -622,7 +622,7 @@ class TestDownloaderMove(unittest.TestCase):
                 'ja',
             )
 
-    def test_probe_uses_real_config_and_disables_configured_sleep(self):
+    def test_probe_uses_real_config_without_overriding_sleep(self):
         metadata = {
             'requested_subtitles': None,
             'subtitles': {'ja': [{'ext': 'vtt'}]},
@@ -644,9 +644,84 @@ class TestDownloaderMove(unittest.TestCase):
             cmd[cmd.index('--config-location') + 1],
             '/project/yt-dlp.local.conf',
         )
-        self.assertEqual(cmd[cmd.index('--sleep-subtitles') + 1], '0')
+        # 预检不得覆盖配置中的限速（conf 里的 `-t sleep`）：此前这里强制传入
+        # --sleep-* 0，抵消了节流，是 B 站 412 风控被触发的放大因素。
+        for flag in (
+            '--sleep-requests',
+            '--sleep-interval',
+            '--max-sleep-interval',
+            '--sleep-subtitles',
+        ):
+            self.assertNotIn(flag, cmd)
         self.assertIn('--simulate', cmd)
         self.assertIn('--dump-single-json', cmd)
+
+    def test_should_probe_subtitles_skips_login_only_domains(self):
+        cases = {
+            'https://b23.tv/Napo6ip': False,
+            'https://www.bilibili.com/video/BV11CYM6DEzV': False,
+            'https://bilibili.com/video/BV1': False,
+            'https://m.bilibili.com/video/BV1': False,
+            'https://www.youtube.com/watch?v=abc': True,
+            'https://example.com/video': True,
+            # 仅后缀相同的第三方域名不得被误判为 B 站
+            'https://notbilibili.com/x': True,
+            'https://evil-b23.tv.attacker.com/x': True,
+            '': True,
+            'not a url': True,
+        }
+        for url, expected in cases.items():
+            with self.subTest(url=url):
+                self.assertIs(downloader.should_probe_subtitles(url), expected)
+
+    def test_bilibili_download_skips_subtitle_probe(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            log_dir = root_path / 'logs'
+            tmp_dir = root_path / 'tmp'
+            log_dir.mkdir()
+            tmp_dir.mkdir()
+
+            for url, should_probe in (
+                ('https://b23.tv/Napo6ip', False),
+                ('https://example.com/media', True),
+            ):
+                with self.subTest(url=url):
+                    process = MagicMock()
+                    process.stdout = []
+                    process.returncode = 0
+
+                    with (
+                        patch.dict(
+                            downloader.config,
+                            {
+                                'LOG_DIR': str(log_dir),
+                                'TMP_DIR': str(tmp_dir),
+                            },
+                        ),
+                        patch(
+                            'downloader.subprocess.Popen',
+                            return_value=process,
+                        ) as popen,
+                        patch(
+                            'downloader.probe_subtitle_fallback',
+                            return_value=None,
+                        ) as probe,
+                        patch.object(
+                            self.handler, 'move_files', return_value=True
+                        ),
+                        patch('downloader.download_gate', MagicMock()),
+                    ):
+                        result = self.handler.download(
+                            url,
+                            'video-probe-skip',
+                            'video',
+                        )
+
+                    self.assertTrue(result)
+                    self.assertEqual(probe.called, should_probe)
+                    # 跳过预检不得影响主下载命令
+                    self.assertIn(url, popen.call_args.args[0])
 
 
 if __name__ == '__main__':

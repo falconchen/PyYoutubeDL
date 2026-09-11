@@ -10,6 +10,7 @@ import logging
 import tempfile
 import threading
 from logging.handlers import RotatingFileHandler
+from urllib.parse import urlsplit
 from concurrent.futures import ThreadPoolExecutor
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -48,6 +49,12 @@ NON_SUMMARY_SUBTITLE_LANGUAGES = {
     'live_chat',
     'danmaku',
 }
+# 这些站点的字幕需要登录，未配置 cookie 时预检必然空手而归，
+# 却要为每个任务多付出一整轮元数据请求，明显抬高触发风控（B 站 412）的概率。
+SUBTITLE_PROBE_SKIP_DOMAINS = (
+    'b23.tv',
+    'bilibili.com',
+)
 SUBTITLE_PROBE_TIMEOUT_SECONDS = 120
 ITEM_COMPLETE_PREFIX = 'PYDL_ITEM_COMPLETE|'
 SUBTITLE_OUTPUT_EXTENSIONS = {'.ass', '.lrc', '.srt', '.ssa', '.ttml', '.vtt'}
@@ -179,6 +186,24 @@ def _first_video_info(info):
     return info
 
 
+def should_probe_subtitles(url):
+    """判断该 URL 是否值得运行字幕预检。
+
+    预检会完整重跑一遍元数据提取；对已知取不到字幕的站点直接跳过，
+    可将这些任务的提取请求量减半。
+    """
+    try:
+        host = (urlsplit(url).hostname or '').lower()
+    except ValueError:
+        return True
+    if not host:
+        return True
+    return not any(
+        host == domain or host.endswith('.' + domain)
+        for domain in SUBTITLE_PROBE_SKIP_DOMAINS
+    )
+
+
 def probe_subtitle_fallback(url, conf_path):
     """使用实际 yt-dlp 配置预检字幕，仅在配置未匹配时返回回退项。"""
     cmd = _ytdlp_cmd() + [
@@ -186,10 +211,10 @@ def probe_subtitle_fallback(url, conf_path):
         '--simulate',
         '--skip-download',
         '--playlist-end', '1',
-        '--sleep-requests', '0',
-        '--sleep-interval', '0',
-        '--max-sleep-interval', '0',
-        '--sleep-subtitles', '0',
+        # 不再覆盖配置里的 sleep 设置：此前的 --sleep-requests 0 等参数会
+        # 抵消 conf 中 `-t sleep` 的限速，是全项目唯一主动取消节流的地方。
+        # 预检本就 --skip-download，download/subtitle 相关的 sleep 不会生效，
+        # 保留配置值实际只启用请求间隔，代价极小。
         '--dump-single-json',
         url,
     ]
@@ -548,7 +573,9 @@ class DownloadHandler(FileSystemEventHandler):
         )
 
         dynamic_subtitle_args = []
-        if mode == 'video':
+        if mode == 'video' and not should_probe_subtitles(url):
+            logger.info("该站点字幕需登录，跳过字幕预检: %s", url)
+        elif mode == 'video':
             subtitle_fallback = probe_subtitle_fallback(url, conf_path)
             if subtitle_fallback:
                 dynamic_subtitle_args = [
