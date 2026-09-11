@@ -179,31 +179,77 @@
         const copyBtn = document.querySelector('.copy-btn');
         const urlDisplay = document.querySelector('.url-display');
         
+        // navigator.clipboard 只在安全上下文（HTTPS / localhost）可用，
+        // 局域网 http 访问时需要回退到 execCommand。
+        function fallbackCopyText(text) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.setAttribute('readonly', '');
+            textarea.contentEditable = 'true';
+            textarea.style.position = 'fixed';
+            textarea.style.top = '0';
+            textarea.style.left = '0';
+            textarea.style.opacity = '0';
+            textarea.style.fontSize = '16px';
+            document.body.appendChild(textarea);
+            try {
+                if (/ipad|iphone|ipod/i.test(navigator.userAgent)) {
+                    const range = document.createRange();
+                    range.selectNodeContents(textarea);
+                    const selection = window.getSelection();
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                    textarea.setSelectionRange(0, text.length);
+                } else {
+                    textarea.select();
+                    textarea.setSelectionRange(0, text.length);
+                }
+                if (!document.execCommand('copy')) {
+                    throw new Error('浏览器拒绝复制');
+                }
+            } finally {
+                textarea.remove();
+            }
+        }
+
+        async function copyText(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(text);
+                return;
+            }
+            fallbackCopyText(text);
+        }
+
         if (copyBtn && urlText) {
+            const taskUrl = urlText.textContent.trim();
+            let restoreTimer = null;
+
             copyBtn.addEventListener('click', async () => {
                 try {
-                    await navigator.clipboard.writeText(urlText.textContent.trim());
+                    await copyText(taskUrl);
                     urlDisplay.textContent = '已复制到剪贴板';
                     urlDisplay.style.color = '#4CAF50';
                 } catch (err) {
                     console.error('复制失败:', err);
-                    urlDisplay.textContent = '复制失败';
+                    urlDisplay.textContent = '复制失败，请长按链接手动复制';
                     urlDisplay.style.color = '#f44336';
                 }
-                
+
                 // 隐藏复制按钮
                 copyBtn.style.display = 'none';
-                
+
                 // 2秒后恢复原状
-                setTimeout(() => {
-                    urlDisplay.textContent = urlText.textContent.trim();
+                if (restoreTimer !== null) window.clearTimeout(restoreTimer);
+                restoreTimer = window.setTimeout(() => {
+                    restoreTimer = null;
+                    urlDisplay.textContent = taskUrl;
                     urlDisplay.style.color = '';
                     copyBtn.style.display = '';
                 }, 2000);
             });
 
             // 初始化显示 URL
-            urlDisplay.textContent = urlText.textContent.trim();
+            urlDisplay.textContent = taskUrl;
         }
 
         const taskItems = Array.from(document.querySelectorAll('.task-item'));
