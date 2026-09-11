@@ -84,11 +84,27 @@ downloader 下载中被 SIGTERM，任务文件会停在 `.downloading`；`RESUME
 `/usr/bin/supervisorctl`（Debian apt 包的路径）。pip 安装会落在 `/usr/local/bin`，届时需要
 额外设置 `SUPERVISORCTL_BIN` 环境变量。
 
-### 5. PATH 必须显式配置
+### 5. PATH 与 locale 必须显式配置
 
-`app.py` 的字幕功能直接以 `ffmpeg` 调用外部程序（依赖 PATH），而 supervisord 继承的环境
-未必含完整 PATH。program 配置里已显式写入 `environment=PATH=...`，删掉会导致字幕接口静默
-返回 503。yt-dlp 不受影响——它走 `sys.executable -m yt_dlp`，不依赖 PATH。
+supervisord 传给子进程的环境比登录 shell 窄，而项目依赖 PATH 上的外部程序：
+
+- `app.py` 的字幕功能直接以 `ffmpeg` 调用外部程序；
+- **yt-dlp 会自动探测 PATH 上的 JS runtime（deno）来解 nsig / PO token**，deno 通常装在
+  `/root/.deno/bin`，不在标准目录里。漏掉它可能导致 YouTube 下载失败。
+
+`install.sh` 的 `build_path()` 会在标准目录之外，补上本机实际存在的
+`/root/.deno/bin`、`/root/.local/bin`、`/vol1/1000/Scripts/bin`，渲染进 program 的
+`environment=`。需要完全自定义时用 `SUPERVISOR_PATH` 环境变量覆盖：
+
+```bash
+SUPERVISOR_PATH="/opt/bin:/usr/bin:/bin" ./deploy/supervisor/install.sh
+```
+
+同时显式设置 `LANG=en_US.UTF-8`：`downloader.py` 以 `universal_newlines=True` 逐行读取
+yt-dlp 输出，其中包含中文标题，locale 退化会影响解码。
+
+注意 yt-dlp 本身走 `sys.executable -m yt_dlp`，不依赖 PATH 找 yt-dlp 可执行文件；
+代理也由 `yt-dlp.local.conf` 的 `--proxy` 指定，不依赖环境变量。
 
 ### 6. 子进程必须整组收敛
 

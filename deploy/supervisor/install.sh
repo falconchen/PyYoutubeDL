@@ -39,11 +39,32 @@ run() {
     fi
 }
 
+# supervisord 传给子进程的 PATH 不一定完整，而项目依赖 PATH 上的外部程序：
+# app.py 直接调 ffmpeg，yt-dlp 会自动探测 PATH 上的 JS runtime（deno）来解
+# nsig / PO token。这里在标准目录之外，补上本机实际存在的可选目录。
+# 可用 SUPERVISOR_PATH 环境变量整体覆盖。
+build_path() {
+    local path='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+    local extra
+
+    if [ -n "${SUPERVISOR_PATH:-}" ]; then
+        printf '%s' "$SUPERVISOR_PATH"
+        return 0
+    fi
+
+    for extra in /root/.deno/bin /root/.local/bin /vol1/1000/Scripts/bin; do
+        [ -d "$extra" ] && path="$extra:$path"
+    done
+    printf '%s' "$path"
+}
+
 render_conf() {
     local destination="$1"
+    local path
     [ -f "$TEMPLATE" ] || die "找不到配置模板: $TEMPLATE"
-    # PROJECT_DIR 是绝对路径且不含 | ，可安全用作 sed 分隔符
-    sed "s|__PROJECT_DIR__|$PROJECT_DIR|g" "$TEMPLATE" > "$destination"
+    path=$(build_path)
+    # PROJECT_DIR 与 PATH 均为绝对路径且不含 | ，可安全用作 sed 分隔符
+    sed -e "s|__PROJECT_DIR__|$PROJECT_DIR|g" -e "s|__PATH__|$path|g" "$TEMPLATE" > "$destination"
 }
 
 check_prerequisites() {
@@ -120,7 +141,9 @@ deploy_conf() {
     run mkdir -p "$PROJECT_DIR/logs/supervisor"
 
     if [ "$DRY_RUN" = 'true' ]; then
-        echo "  [dry-run] 渲染 $TEMPLATE -> $TARGET_CONF（PROJECT_DIR=$PROJECT_DIR）"
+        echo "  [dry-run] 渲染 $TEMPLATE -> $TARGET_CONF"
+        echo "            PROJECT_DIR=$PROJECT_DIR"
+        echo "            PATH=$(build_path)"
         return 0
     fi
     echo "  + 渲染 $TEMPLATE -> $TARGET_CONF"
@@ -128,10 +151,34 @@ deploy_conf() {
     chmod 644 "$TARGET_CONF"
 }
 
+# update 会按 autostart=true 自动拉起新增/变更的 program，因此只需补启动那些
+# 仍处于停止状态的（例如重复执行本脚本、或 program 配置未变化时）。
+start_stopped_programs() {
+    local program state stopped=()
+
+    for program in "${PROGRAMS[@]}"; do
+        state=$("$SUPERVISORCTL_BIN" status "$program" 2>/dev/null | awk '{print $2}')
+        case "$state" in
+            RUNNING|STARTING) ;;
+            *) stopped+=("$program") ;;
+        esac
+    done
+
+    if [ "${#stopped[@]}" -eq 0 ]; then
+        echo "  所有 program 均已由 update 拉起。"
+        return 0
+    fi
+    run "$SUPERVISORCTL_BIN" start "${stopped[@]}"
+}
+
 start_supervisor() {
     run "$SUPERVISORCTL_BIN" reread
     run "$SUPERVISORCTL_BIN" update
-    run "$SUPERVISORCTL_BIN" start "${PROGRAMS[@]}"
+    if [ "$DRY_RUN" = 'true' ]; then
+        echo "  [dry-run] 按需 start 仍处于停止状态的 program"
+    else
+        start_stopped_programs
+    fi
     run "$SUPERVISORCTL_BIN" status "${PROGRAMS[@]}"
 }
 
