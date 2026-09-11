@@ -207,6 +207,9 @@ def should_probe_subtitles(url):
 def probe_subtitle_fallback(url, conf_path):
     """使用实际 yt-dlp 配置预检字幕，仅在配置未匹配时返回回退项。"""
     cmd = _ytdlp_cmd() + [
+        # --ignore-config 屏蔽 /etc/yt-dlp.conf 等系统级配置，避免其参数
+        # （如 --retries 2）无声叠加到项目配置上；它不影响 --config-location。
+        '--ignore-config',
         '--config-location', conf_path,
         '--simulate',
         '--skip-download',
@@ -585,6 +588,7 @@ class DownloadHandler(FileSystemEventHandler):
         
         # 核心修改：添加 --newline 和 --progress 确保进度条被捕获
         cmd = _ytdlp_cmd() + [
+            '--ignore-config',   # 同上：只认项目配置，杜绝系统配置叠加
             '--config-location', conf_path,
             '--add-metadata',     # 视频和音频统一在运行时写入媒体元信息
             '--newline',           # 强制进度输出换行，以便逐行读取
