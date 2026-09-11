@@ -2,6 +2,7 @@ __pycache__/
 tmp/
 *.log
 *.bak
+*.bak-*
 *.out
 *.swp
 venv/
