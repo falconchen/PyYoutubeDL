@@ -127,10 +127,19 @@ stop_systemd() {
         echo "  未找到 ${SYSTEMD_UNIT}.service，跳过。"
         return 0
     fi
+
+    # 已经迁移过（unit 既非 enabled 也非 active）就不要再动进程：此时在跑的是
+    # supervisor 托管的进程，而 stop.py 按 cmdline 扫描，会把它们一并杀掉。
+    if ! systemctl is-enabled --quiet "$SYSTEMD_UNIT" 2>/dev/null \
+        && ! systemctl is-active --quiet "$SYSTEMD_UNIT" 2>/dev/null; then
+        echo "  ${SYSTEMD_UNIT}.service 已停用，跳过（避免误杀 supervisor 托管的进程）。"
+        return 0
+    fi
+
     # 必须 disable，否则下次开机 systemd 与 supervisor 会各拉起一套进程。
     run systemctl stop "$SYSTEMD_UNIT"
     run systemctl disable "$SYSTEMD_UNIT"
-    # 兜底清理 nohup 遗留进程及其 yt-dlp 子进程
+    # 兜底清理 runner.sh 用 nohup 遗留的进程及其 yt-dlp 子进程
     run "$PYTHON_BIN" "$PROJECT_DIR/stop.py"
 }
 
@@ -157,7 +166,8 @@ start_stopped_programs() {
     local program state stopped=()
 
     for program in "${PROGRAMS[@]}"; do
-        state=$("$SUPERVISORCTL_BIN" status "$program" 2>/dev/null | awk '{print $2}')
+        # supervisorctl status 对非 RUNNING 的 program 返回非零，set -e 下必须兜住
+        state=$("$SUPERVISORCTL_BIN" status "$program" 2>/dev/null | awk '{print $2}' || true)
         case "$state" in
             RUNNING|STARTING) ;;
             *) stopped+=("$program") ;;
