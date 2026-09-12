@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import json
 import logging
+import re
 import tempfile
 import threading
 from logging.handlers import RotatingFileHandler
@@ -58,6 +59,7 @@ SUBTITLE_PROBE_SKIP_DOMAINS = (
 SUBTITLE_PROBE_TIMEOUT_SECONDS = 120
 ITEM_COMPLETE_PREFIX = 'PYDL_ITEM_COMPLETE|'
 SUBTITLE_OUTPUT_EXTENSIONS = {'.ass', '.lrc', '.srt', '.ssa', '.ttml', '.vtt'}
+ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
 
 
 def _ytdlp_cmd():
@@ -67,6 +69,18 @@ def _ytdlp_cmd():
     保证与运行 downloader 的 Python 环境（项目 venv）保持一致。
     """
     return [sys.executable, '-m', 'yt_dlp']
+
+
+def extract_ytdlp_error(line):
+    """从 yt-dlp 输出行中提取适合通知展示的具体错误。"""
+    if not isinstance(line, str):
+        return None
+    cleaned = ANSI_ESCAPE_PATTERN.sub('', line).strip()
+    marker_index = cleaned.find('ERROR:')
+    if marker_index < 0:
+        return None
+    reason = cleaned[marker_index + len('ERROR:'):].strip()
+    return reason or None
 
 
 def _available_subtitle_languages(subtitle_map):
@@ -620,6 +634,7 @@ class DownloadHandler(FileSystemEventHandler):
         download_gate.acquire()
         moved_filepaths = []
         moved_file_sizes = {}
+        ytdlp_error = None
         try:
             # buffering=1 开启行级缓存
             with open(log_path, 'w', encoding='utf-8', buffering=1) as log_file:
@@ -634,6 +649,9 @@ class DownloadHandler(FileSystemEventHandler):
                 # 实时循环读取
                 for line in process.stdout:
                     stripped = line.rstrip('\n')
+                    error_detail = extract_ytdlp_error(stripped)
+                    if error_detail:
+                        ytdlp_error = error_detail
                     # 1. 实时写入任务专属日志文件
                     log_file.write(line)
                     # 2. 强制刷新，确保在 log 文件里能即时看到内容
@@ -669,7 +687,8 @@ class DownloadHandler(FileSystemEventHandler):
             return True
             
         except subprocess.CalledProcessError as e:
-            logger.error(f"下载失败: {url}，错误信息: {e}")
+            failure_reason = ytdlp_error or f"yt-dlp 退出码 {e.returncode}"
+            logger.error(f"下载失败: {url}，原因: {failure_reason}")
             # 下载失败时删除临时目录
             if os.path.exists(task_tmp_dir):
                 try:
@@ -681,7 +700,7 @@ class DownloadHandler(FileSystemEventHandler):
             
             bark_notify(config['BARK_DEVICE_TOKEN'],
                         title="下载失败",
-                        content=f"{url} 下载失败，错误信息: {e}")
+                        content=f"URL: {url}\n原因: {failure_reason}")
             return False
 
     def _move_paths(self, paths):

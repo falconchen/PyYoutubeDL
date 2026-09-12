@@ -13,6 +13,67 @@ class TestDownloaderMove(unittest.TestCase):
     def setUp(self):
         self.handler = downloader.DownloadHandler(executor=None)
 
+    def test_extract_ytdlp_error_removes_prefix_and_ansi(self):
+        line = (
+            '\x1b[31mERROR: [html5] item: Requested format is not available'
+            '\x1b[0m'
+        )
+
+        self.assertEqual(
+            downloader.extract_ytdlp_error(line),
+            '[html5] item: Requested format is not available',
+        )
+        self.assertIsNone(downloader.extract_ytdlp_error('WARNING: retrying'))
+
+    def test_download_failure_bark_reports_ytdlp_root_cause(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            log_dir = root_path / 'logs'
+            tmp_dir = root_path / 'tmp'
+            log_dir.mkdir()
+            tmp_dir.mkdir()
+            process = MagicMock(
+                stdout=[
+                    '[generic] Downloading webpage\n',
+                    'ERROR: [html5] item: Requested format is not available\n',
+                ],
+                returncode=1,
+            )
+
+            with (
+                patch.dict(
+                    downloader.config,
+                    {
+                        'LOG_DIR': str(log_dir),
+                        'TMP_DIR': str(tmp_dir),
+                        'BARK_DEVICE_TOKEN': 'test-token',
+                    },
+                ),
+                patch('downloader.subprocess.Popen', return_value=process),
+                patch('downloader.probe_subtitle_fallback', return_value=None),
+                patch('downloader.download_gate', MagicMock()),
+                patch('downloader.bark_notify') as notify,
+            ):
+                result = self.handler.download(
+                    'https://example.com/video',
+                    'failed-task',
+                    'video',
+                )
+
+            self.assertFalse(result)
+            notify.assert_called_once_with(
+                'test-token',
+                title='下载失败',
+                content=(
+                    'URL: https://example.com/video\n'
+                    '原因: [html5] item: Requested format is not available'
+                ),
+            )
+            self.assertNotIn(
+                'returned non-zero exit status',
+                notify.call_args.kwargs['content'],
+            )
+
     def test_existing_file_is_renamed_instead_of_overwritten(self):
         with tempfile.TemporaryDirectory() as root:
             root_path = Path(root)
