@@ -1782,3 +1782,31 @@
     font-size: 12px;
     color: #9aa8ba;
 }
+
+
+/* 未登录时的示例任务条目 */
+
+.dl-task-demo {
+    cursor: default;
+}
+
+.dl-task-demo:hover {
+    background: transparent;
+}
+
+.dl-task-demo .dl-task-icon {
+    background: #f1f5fa;
+    color: #9aa8ba;
+}
+
+.dl-task-demo .dl-task-title {
+    color: #65748a;
+}
+
+.dl-task-hint {
+    margin: auto;
+    padding: 20px;
+    font-size: 13px;
+    color: #9aa8ba;
+    text-align: center;
+}

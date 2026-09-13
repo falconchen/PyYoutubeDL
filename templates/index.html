@@ -46,6 +46,12 @@
                     <a class="dl-mode" data-view="download" href="{{ url_for('index') }}">下载器</a>
                     <a class="dl-mode" data-view="library" href="{{ url_for('player') }}">媒体库</a>
                 </nav>
+                {% if not current_user %}
+                <a class="dl-header-link" href="{{ url_for('login') }}">
+                    <svg class="dl-icon" aria-hidden="true"><use href="#i-log-in"></use></svg>
+                    <span>登录 / 注册</span>
+                </a>
+                {% else %}
                 <details class="dl-account">
                     <summary class="dl-header-link">
                         <svg class="dl-icon" aria-hidden="true"><use href="#i-user"></use></svg>
@@ -74,6 +80,7 @@
                         </form>
                     </div>
                 </details>
+                {% endif %}
             </div>
         </div>
     </header>
@@ -140,10 +147,35 @@
                     <h2>任务列表</h2>
                     <p>下载任务会显示在这里</p>
                 </div>
-                <span class="dl-task-count">{{ tasks|length }} 个任务</span>
+                <span class="dl-task-count">{% if current_user %}{{ tasks|length }} 个任务{% else %}支持的站点{% endif %}</span>
             </div>
             <div class="dl-task-scroll">
             <ul class="dl-task-list">
+                {#- 未登录时用示例条目说明支持哪些站点；dropload.js 的 render()
+                    在匿名状态下不会替换这段标记，两处内容需保持一致。 -#}
+                {% if not current_user %}
+                {% for demo in [
+                    ('YouTube 视频', '视频 MP4', 'video'),
+                    ('YouTube 音频', '音频 MP3', 'audio'),
+                    ('Bilibili 视频', '视频 MP4', 'video'),
+                    ('小红书视频', '视频 MP4', 'video'),
+                    ('Vimeo 视频', '视频 MP4', 'video'),
+                ] %}
+                <li class="dl-task dl-task-demo" data-state="demo">
+                    <span class="dl-task-icon">
+                        <svg class="dl-icon" aria-hidden="true"><use href="#i-{% if demo[2] == 'audio' %}music{% else %}video{% endif %}"></use></svg>
+                    </span>
+                    <div class="dl-task-body">
+                        <p class="dl-task-title">{{ demo[0] }}</p>
+                        <div class="dl-task-meta">
+                            <span class="dl-task-format">{{ demo[1] }}</span>
+                            <span>·</span>
+                            <span class="dl-task-state">示例</span>
+                        </div>
+                    </div>
+                </li>
+                {% endfor %}
+                {% endif %}
                 {% for task in tasks %}
                 <li class="dl-task" data-task="{{ task }}" data-state="queued" role="button" tabindex="0">
                     <span class="dl-task-icon"><svg class="dl-icon" aria-hidden="true"><use href="#i-download"></use></svg></span>
@@ -160,7 +192,11 @@
                 </li>
                 {% endfor %}
             </ul>
+            {% if current_user %}
             <p class="dl-task-empty"{% if tasks %} hidden{% endif %}>还没有任务，粘贴链接开始下载。</p>
+            {% else %}
+            <p class="dl-task-hint">粘贴链接即可开始，入队时会提示登录。</p>
+            {% endif %}
             </div>
         </aside>
         </div>
@@ -280,7 +316,7 @@
         </script>
     {% endif %}
 
-    <script id="dl-bootstrap" type="application/json">{{ {'tasks': tasks, 'url': url, 'view': view, 'tab': tab, 'file': requested_file} | tojson }}</script>
+    <script id="dl-bootstrap" type="application/json">{{ {'tasks': tasks, 'url': url, 'view': view, 'tab': tab, 'file': requested_file, 'signedIn': current_user is not none, 'loginUrl': url_for('login')} | tojson }}</script>
     <script src="{{ url_for('static', filename='zwplayer/zwplayer.js') }}" defer></script>
     <script src="{{ 'dropload.js' | versioned }}" defer></script>
 </body>

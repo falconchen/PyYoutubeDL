@@ -141,9 +141,45 @@ def current_user():
     return user
 
 
+PENDING_TASK_KEY = 'pending_task'
+
+
+def remember_pending_task(url, types):
+    """记住匿名访客想创建的任务，登录或注册成功后立刻补建。"""
+    session[PENDING_TASK_KEY] = {'url': url, 'types': list(types)}
+
+
+def consume_pending_task(user):
+    """取出并执行登录前暂存的任务；没有则返回 None。
+
+    Returns:
+        tuple | None: (任务 ID 列表, 原始 URL)；解析失败或无暂存时为 None。
+    """
+    pending = session.pop(PENDING_TASK_KEY, None)
+    if not isinstance(pending, dict):
+        return None
+    url = extract_url(pending.get('url'))
+    types = [t for t in (pending.get('types') or []) if t in {'video', 'audio'}]
+    if not url or not types:
+        return None
+
+    urls, error = expand_task_urls(url)
+    if error:
+        app.logger.warning('登录后补建任务失败: %s', error)
+        return None
+
+    task_ids = create_tasks(urls, types)
+    user_store.record_tasks(USER_DB_PATH, task_ids, user['id'], url=url)
+    return task_ids, url
+
+
 def login_user(user):
+    # session.clear() 会一并清掉待建任务，所以先取出来再放回去
+    pending = session.get(PENDING_TASK_KEY)
     session.clear()
     session[SESSION_USER_KEY] = user['id']
+    if pending is not None:
+        session[PENDING_TASK_KEY] = pending
     session.permanent = True
 
 
@@ -1725,12 +1761,16 @@ def render_index_page(
 
 
 @app.route('/', methods=['GET', 'POST'])
-@login_required
 def index():
     if request.method == 'POST':
         types = request.form.getlist('type')
         # 从分享文本中提取URL
         url = extract_url(request.form.get('url'))
+
+        if url and types and current_user() is None:
+            # 未登录：先记住这次提交，登录或注册成功后自动补建
+            remember_pending_task(url, types)
+            return redirect(url_for('login', next=url_for('index')))
 
         if not url:
             return render_index_page(
@@ -1749,9 +1789,11 @@ def index():
                 status=400,
             )
 
+        # 走到这里必定已登录：上面对匿名提交已重定向到登录页
+        submitter = current_user()
         task_ids = create_tasks(urls, types)
         user_store.record_tasks(
-            USER_DB_PATH, task_ids, request.user['id'], url=url
+            USER_DB_PATH, task_ids, submitter['id'], url=url
         )
 
         # 构建重定向URL，包含所有参数
@@ -1794,6 +1836,12 @@ def login():
             error = '账号已被停用'
         else:
             login_user(user)
+            created = consume_pending_task(user)
+            if created:
+                task_ids, pending_url = created
+                return redirect(
+                    url_for('index', tasks=','.join(task_ids), url=pending_url)
+                )
             return redirect(safe_next_url(request.form.get('next')))
 
     return render_template(
@@ -1837,6 +1885,12 @@ def register():
                 if user['status'] == user_store.STATUS_ACTIVE:
                     adopt_legacy_data(user['id'])
                     login_user(user)
+                    created = consume_pending_task(user)
+                    if created:
+                        task_ids, pending_url = created
+                        return redirect(
+                            url_for('index', tasks=','.join(task_ids), url=pending_url)
+                        )
                     return redirect(url_for('index'))
                 return render_template('login.html', mode='pending'), 200
 
@@ -2207,6 +2261,12 @@ def _complete_google_login(creds, sub, email, name, avatar):
 
     _store_google_credentials(user['id'], creds)
     login_user(user)
+    created = consume_pending_task(user)
+    if created:
+        task_ids, pending_url = created
+        return redirect(
+            url_for('index', tasks=','.join(task_ids), url=pending_url)
+        )
     return redirect(url_for('index'))
 
 
@@ -2375,7 +2435,6 @@ def api_media_list():
 
 
 @app.route('/player')
-@login_required
 def player():
     """媒体库入口，与首页同页；保留原路径以兼容既有播放链接。"""
     return render_index_page(
@@ -2385,7 +2444,6 @@ def player():
 
 
 @app.route('/audio-player')
-@login_required
 def audio_player():
     """兼容已有音频链接，在媒体库中打开音频标签。"""
     return render_index_page(view='library', tab='audio')
@@ -2678,7 +2736,6 @@ def api_ai_summary_job_stream(job_id):
     return ai_summary_job_stream(job_id)
 
 @app.route('/api/add_task', methods=['POST'])
-@login_required
 def api_add_task():
     data = request.get_json() if request.is_json else request.form
     url = data.get('url')
@@ -2693,6 +2750,17 @@ def api_add_task():
         # 支持表单传递的字符串类型
         types = [types]
 
+    user = current_user()
+    if user is None:
+        # 首页对匿名开放，真正入队时才要求登录；这次提交先暂存。
+        remember_pending_task(url, types)
+        return jsonify({
+            "success": False,
+            "msg": "请先登录后再添加任务",
+            "login_required": True,
+            "login_url": url_for('login'),
+        }), 401
+
     # 播放列表展开为逐集 URL，再逐个创建任务
     urls, error = expand_task_urls(url)
     if error:
@@ -2700,7 +2768,7 @@ def api_add_task():
 
     # 使用新的辅助函数创建任务
     tasks = create_tasks(urls, types)
-    user_store.record_tasks(USER_DB_PATH, tasks, request.user['id'], url=url)
+    user_store.record_tasks(USER_DB_PATH, tasks, user['id'], url=url)
 
     if len(urls) > 1:
         msg = f"播放列表已解析为 {len(urls)} 个视频，共创建 {len(tasks)} 个任务"

@@ -95,6 +95,8 @@
     var currentMedia = null;
     var zwplayer = null;
     var libraryLoading = false;
+    var signedIn = false;
+    var loginUrl = '/login';
     var lastFocused = null;
 
     function readStore() {
@@ -284,6 +286,13 @@
     }
 
     function render() {
+        // 未登录时任务列表由模板渲染的示例条目占位，这里不接管，
+        // 也不展示 localStorage 里上一个会话留下的任务。
+        if (!signedIn) {
+            if (emptyElement) emptyElement.hidden = true;
+            return;
+        }
+
         var existing = Object.create(null);
         Array.prototype.forEach.call(listElement.children, function (item) {
             existing[item.dataset.task] = item;
@@ -811,9 +820,20 @@
             if (mediaLibrary) selectInitialMedia(preferredFile);
             return;
         }
+        if (!signedIn) {
+            playlistEmpty.hidden = false;
+            playlistEmpty.textContent = '登录后查看你的媒体库。';
+            renderNowPlaying(null);
+            return;
+        }
         libraryLoading = true;
         try {
             var response = await fetch('/api/media_list');
+            if (response.status === 401) {
+                playlistEmpty.hidden = false;
+                playlistEmpty.textContent = '登录后查看你的媒体库。';
+                return;
+            }
             if (!response.ok) throw new Error('HTTP ' + response.status);
             var data = await response.json();
             if (!data.success) throw new Error(data.msg || '读取媒体列表失败');
@@ -947,6 +967,11 @@
                 body: JSON.stringify({ url: url, types: types })
             });
             var data = await response.json();
+            if (response.status === 401 && data.login_required) {
+                // 服务端已记住这次提交，登录或注册成功后会自动入队
+                window.location.href = data.login_url || loginUrl;
+                return;
+            }
             if (!response.ok || !data.success) {
                 throw new Error(data.msg || '创建任务失败，请稍后重试');
             }
@@ -987,7 +1012,10 @@
     }
 
     function bootstrap() {
-        var payload = { tasks: [], url: '', view: 'download', tab: 'video', file: '' };
+        var payload = {
+            tasks: [], url: '', view: 'download', tab: 'video', file: '',
+            signedIn: false, loginUrl: '/login'
+        };
         var node = document.getElementById('dl-bootstrap');
         if (node) {
             try {
@@ -1012,11 +1040,14 @@
             typeBoxes[0].checked = true;
         }
 
+        // 登录态要先确定，后面的轮询与媒体库加载都依赖它
+        signedIn = Boolean(payload.signedIn);
+        loginUrl = payload.loginUrl || '/login';
+        if (payload.tab === 'audio') libraryTab = 'audio';
+
         syncSubmitState();
         render();
-        if (tasks.length) pollTasks();
-
-        if (payload.tab === 'audio') libraryTab = 'audio';
+        if (signedIn && tasks.length) pollTasks();
         setView(payload.view, payload.file);
     }
 

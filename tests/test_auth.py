@@ -125,19 +125,20 @@ class TestLoginBehaviour(AuthTestCase):
     def test_disabling_a_user_invalidates_the_existing_session(self):
         self.register('first@example.com')
         user = user_store.get_user_by_email(self.db_path, 'first@example.com')
-        self.assertEqual(self.client.get('/').status_code, 200)
+        self.assertEqual(self.client.get('/api/media_list').status_code, 200)
 
         user_store.set_status(self.db_path, user['id'], user_store.STATUS_DISABLED)
 
-        # 停用后旧 cookie 立即失效，不需要等待会话过期
-        self.assertEqual(self.client.get('/').status_code, 302)
+        # 停用后旧 cookie 立即失效；首页对匿名开放，故改看受保护接口
+        self.assertEqual(self.client.get('/api/media_list').status_code, 401)
+        self.assertNotIn('退出登录', self.client.get('/').get_data(as_text=True))
 
     def test_logout_clears_the_session(self):
         self.register('first@example.com')
 
         self.client.post('/logout')
 
-        self.assertEqual(self.client.get('/').status_code, 302)
+        self.assertEqual(self.client.get('/api/media_list').status_code, 401)
 
     def test_login_only_redirects_to_local_paths(self):
         self.register('first@example.com')
@@ -292,3 +293,98 @@ class TestLegacyAdoption(AuthTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestAnonymousHomepage(AuthTestCase):
+    def test_homepage_is_visible_without_signing_in(self):
+        response = self.client.get('/')
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('把链接变成文件', html)
+        self.assertIn('登录 / 注册', html)
+        self.assertNotIn('dl-account-menu', html)
+
+    def test_anonymous_task_panel_lists_supported_sources(self):
+        html = self.client.get('/').get_data(as_text=True)
+
+        # 未登录时用示例条目说明支持哪些站点，而不是空状态
+        for label in [
+            'YouTube 视频', 'YouTube 音频', 'Bilibili 视频', '小红书视频', 'Vimeo 视频',
+        ]:
+            self.assertIn(label, html)
+        self.assertIn('支持的站点', html)
+        self.assertNotIn('还没有任务', html)
+
+    def test_signed_in_task_panel_has_no_demo_rows(self):
+        self.register('first@example.com')
+
+        html = self.client.get('/').get_data(as_text=True)
+
+        self.assertNotIn('dl-task-demo', html)
+        self.assertIn('还没有任务', html)
+
+    def test_adding_a_task_prompts_login_and_remembers_the_submission(self):
+        response = self.client.post(
+            '/api/add_task',
+            json={'url': 'https://example.com/v', 'types': ['video']},
+        )
+        payload = response.get_json()
+
+        self.assertEqual(response.status_code, 401)
+        self.assertTrue(payload['login_required'])
+        self.assertEqual(payload['login_url'], '/login')
+        with self.client.session_transaction() as session:
+            self.assertEqual(
+                session[app_module.PENDING_TASK_KEY],
+                {'url': 'https://example.com/v', 'types': ['video']},
+            )
+
+    def test_pending_task_is_created_right_after_registering(self):
+        self.client.post(
+            '/api/add_task',
+            json={'url': 'https://example.com/v', 'types': ['video']},
+        )
+
+        with patch(
+            'app.expand_task_urls', return_value=(['https://example.com/v'], None)
+        ):
+            response = self.register('first@example.com')
+
+        owner = user_store.get_user_by_email(self.db_path, 'first@example.com')
+        created = user_store.user_task_ids(self.db_path, owner['id'])
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(created), 1)
+        # 注册后直接跳到带任务的首页，用户不必重新粘贴链接
+        self.assertIn(created[0], response.headers['Location'])
+        with self.client.session_transaction() as session:
+            self.assertNotIn(app_module.PENDING_TASK_KEY, session)
+
+    def test_pending_task_is_created_right_after_logging_in(self):
+        self.register('first@example.com')
+        self.client.post('/logout')
+
+        self.client.post(
+            '/api/add_task',
+            json={'url': 'https://example.com/later', 'types': ['audio']},
+        )
+        with patch(
+            'app.expand_task_urls', return_value=(['https://example.com/later'], None)
+        ):
+            response = self.login('first@example.com')
+
+        owner = user_store.get_user_by_email(self.db_path, 'first@example.com')
+        created = user_store.user_task_ids(self.db_path, owner['id'])
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(created), 1)
+        self.assertTrue(created[0].startswith('a'))
+
+    def test_form_submission_without_session_redirects_to_login(self):
+        response = self.client.post(
+            '/', data={'url': 'https://example.com/v', 'type': ['video']}
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/login', response.headers['Location'])
+        with self.client.session_transaction() as session:
+            self.assertIn(app_module.PENDING_TASK_KEY, session)

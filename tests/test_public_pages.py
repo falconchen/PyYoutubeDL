@@ -53,11 +53,13 @@ class TestAuthEntryPoints(unittest.TestCase):
         self.client = app.test_client()
         app.testing = True
 
-    def test_anonymous_index_redirects_to_login(self):
+    def test_anonymous_index_shows_login_entry_instead_of_redirecting(self):
         response = self.client.get('/')
+        html = response.get_data(as_text=True)
 
-        self.assertEqual(response.status_code, 302)
-        self.assertIn('/login', response.headers['Location'])
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('登录 / 注册', html)
+        self.assertIn('href="/login"', html)
 
     def test_login_page_renders_without_session(self):
         response = self.client.get('/login')
