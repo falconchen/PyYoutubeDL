@@ -1,0 +1,768 @@
+/* DropLoad 下载页交互：任务入队、进度轮询与任务日志抽屉。 */
+(function () {
+    'use strict';
+
+    var TASKS_KEY = 'dropload.tasks';
+    var TYPES_KEY = 'selectedTypes';
+    // /api/task_log 最多接受 20 个任务，本地列表保持同一上限。
+    var MAX_TASKS = 20;
+    var TASK_POLL_MS = 2000;
+    var LOG_POLL_MS = 1500;
+    var TASK_ID_PATTERN = /^[va][A-Za-z0-9_-]{1,127}$/;
+    var METADATA_TIMEOUT_MS = 30000;
+    var METADATA_MAX_ATTEMPTS = 2;
+    var METADATA_RETRY_DELAY_MS = 1500;
+
+    var STATE_LABELS = {
+        queued: '等待处理',
+        downloading: '处理中...',
+        completed: '已完成',
+        failed: '下载失败',
+        missing: '未找到'
+    };
+    var STAGE_LABELS = {
+        queued: '已入队',
+        starting: '准备下载',
+        downloading: '下载文件',
+        download_subtitles: '下载字幕',
+        download_video: '下载视频',
+        download_audio: '下载音频',
+        download_media: '下载音视频',
+        merge_media: '合并音视频',
+        embed_subtitles: '嵌入字幕',
+        extract_audio: '转换音频',
+        write_metadata: '写入信息',
+        postprocessing: '处理文件',
+        completed: '下载完成',
+        failed: '下载失败',
+        missing: '未找到'
+    };
+    var ACTIVE_STATES = ['queued', 'downloading'];
+
+    var form = document.querySelector('.dl-form');
+    var urlInput = document.querySelector('.dl-input');
+    var submitButton = document.querySelector('.dl-submit');
+    var typeBoxes = Array.prototype.slice.call(
+        document.querySelectorAll('.dl-format input[type="checkbox"]')
+    );
+    var heroSection = document.querySelector('.dl-hero-inner');
+    var listElement = document.querySelector('.dl-task-list');
+    var emptyElement = document.querySelector('.dl-task-empty');
+    var countElement = document.querySelector('.dl-task-count');
+    var overlay = document.querySelector('.dl-drawer-overlay');
+    var drawerTitle = document.querySelector('.dl-drawer-title');
+    var drawerFormat = document.querySelector('.dl-drawer-format');
+    var drawerStatus = document.querySelector('.dl-drawer-status');
+    var drawerLog = document.querySelector('.dl-drawer-log');
+    var drawerClose = document.querySelector('.dl-drawer-close');
+    var drawerThumbWrap = document.querySelector('.dl-drawer-thumb');
+    var drawerThumb = document.querySelector('.dl-drawer-thumb img');
+    var drawerVideoTitle = document.querySelector('.dl-drawer-video-title');
+    var drawerUploader = document.querySelector('.dl-drawer-uploader');
+    var drawerDuration = document.querySelector('.dl-drawer-duration');
+    var drawerUrlText = document.querySelector('.dl-drawer-url-text');
+    var drawerCopy = document.querySelector('.dl-drawer-copy');
+    var drawerSummary = document.querySelector('.dl-drawer-summary');
+
+    if (!form || !listElement) return;
+
+    /** 任务本地缓存：{id, url}，最新的在前。 */
+    var tasks = [];
+    /** 最近一次 /api/task_info 返回的任务详情，按任务 ID 索引。 */
+    var taskInfo = Object.create(null);
+    var taskTimer = null;
+    var logTimer = null;
+    /** 视频元数据缓存，按源 URL 索引，避免重复调用较慢的解析接口。 */
+    var metadata = Object.create(null);
+    var openTaskId = null;
+    var lastFocused = null;
+
+    function readStore() {
+        try {
+            var raw = JSON.parse(window.localStorage.getItem(TASKS_KEY) || '[]');
+            if (!Array.isArray(raw)) return [];
+            return raw
+                .filter(function (item) {
+                    return item && TASK_ID_PATTERN.test(item.id);
+                })
+                .map(function (item) {
+                    return { id: item.id, url: typeof item.url === 'string' ? item.url : '' };
+                })
+                .slice(0, MAX_TASKS);
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function writeStore() {
+        try {
+            window.localStorage.setItem(TASKS_KEY, JSON.stringify(tasks.slice(0, MAX_TASKS)));
+        } catch (error) {
+            /* 隐私模式下写入失败不影响当前会话的列表展示 */
+        }
+    }
+
+    function addTasks(ids, url) {
+        var added = ids.filter(function (id) {
+            return TASK_ID_PATTERN.test(id) && !tasks.some(function (task) {
+                return task.id === id;
+            });
+        });
+        if (!added.length) return added;
+        tasks = added
+            .map(function (id) {
+                return { id: id, url: url || '' };
+            })
+            .concat(tasks)
+            .slice(0, MAX_TASKS);
+        writeStore();
+        return added;
+    }
+
+    function removeTask(id) {
+        tasks = tasks.filter(function (task) {
+            return task.id !== id;
+        });
+        delete taskInfo[id];
+        writeStore();
+    }
+
+    function formatLabel(taskId, info) {
+        var type = (info && info.type) || (taskId.charAt(0) === 'v' ? 'video' : 'audio');
+        return type === 'audio' ? '音频 MP3' : '视频 MP4';
+    }
+
+    function stateIcon(state) {
+        if (state === 'completed') return '#i-check';
+        if (state === 'downloading') return '#i-clock';
+        if (state === 'failed' || state === 'missing') return '#i-alert';
+        return '#i-download';
+    }
+
+    function icon(href, extraClass) {
+        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'dl-icon' + (extraClass ? ' ' + extraClass : ''));
+        svg.setAttribute('aria-hidden', 'true');
+        var use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+        use.setAttribute('href', href);
+        svg.appendChild(use);
+        return svg;
+    }
+
+    function formatBytes(value) {
+        var size = Number(value);
+        if (!isFinite(size) || size < 0) return '';
+        var units = ['B', 'K', 'M', 'G', 'T'];
+        var index = 0;
+        while (size >= 1024 && index < units.length - 1) {
+            size /= 1024;
+            index += 1;
+        }
+        return size.toFixed(index === 0 ? 0 : 1) + units[index];
+    }
+
+    function statusText(taskId) {
+        var info = taskInfo[taskId];
+        if (!info) return STATE_LABELS.queued;
+        var state = info.state || 'missing';
+        var progress = info.progress || {};
+        if (state === 'downloading') {
+            var percent = Number(progress.percent) || 0;
+            var stage = STAGE_LABELS[progress.stage] || STATE_LABELS.downloading;
+            return stage + ' ' + percent.toFixed(percent % 1 === 0 ? 0 : 1) + '%';
+        }
+        if (state === 'completed') {
+            var size = formatBytes(progress.final_size_bytes);
+            return size ? STATE_LABELS.completed + ' · ' + size : STATE_LABELS.completed;
+        }
+        return STATE_LABELS[state] || state;
+    }
+
+    function buildRow(task) {
+        var item = document.createElement('li');
+        item.className = 'dl-task';
+        item.dataset.task = task.id;
+        item.dataset.state = 'queued';
+        item.setAttribute('role', 'button');
+        item.setAttribute('tabindex', '0');
+
+        var iconWrap = document.createElement('span');
+        iconWrap.className = 'dl-task-icon';
+        iconWrap.appendChild(icon('#i-download'));
+
+        var body = document.createElement('div');
+        body.className = 'dl-task-body';
+
+        var title = document.createElement('p');
+        title.className = 'dl-task-title';
+
+        var meta = document.createElement('div');
+        meta.className = 'dl-task-meta';
+        var formatSpan = document.createElement('span');
+        formatSpan.className = 'dl-task-format';
+        var dot = document.createElement('span');
+        dot.textContent = '·';
+        var stateSpan = document.createElement('span');
+        stateSpan.className = 'dl-task-state';
+        meta.append(formatSpan, dot, stateSpan);
+
+        var progress = document.createElement('div');
+        progress.className = 'dl-task-progress';
+        var fill = document.createElement('div');
+        fill.className = 'dl-task-progress-fill';
+        progress.appendChild(fill);
+
+        var actions = document.createElement('div');
+        actions.className = 'dl-task-actions';
+
+        body.append(title, meta, progress, actions);
+        item.append(iconWrap, body);
+        return item;
+    }
+
+    function renderRow(item, task) {
+        var info = taskInfo[task.id];
+        var state = (info && info.state) || 'queued';
+        var progress = (info && info.progress) || {};
+        var url = (info && info.url) || task.url || task.id;
+        var percent = state === 'completed'
+            ? 100
+            : Math.max(0, Math.min(100, Number(progress.percent) || 0));
+
+        item.dataset.state = state;
+
+        var iconWrap = item.querySelector('.dl-task-icon');
+        iconWrap.replaceChildren(
+            icon(stateIcon(state), state === 'downloading' ? 'dl-spin' : '')
+        );
+
+        var title = item.querySelector('.dl-task-title');
+        title.textContent = url;
+        title.title = url;
+
+        item.querySelector('.dl-task-format').textContent = formatLabel(task.id, info);
+        item.querySelector('.dl-task-state').textContent = statusText(task.id);
+        item.querySelector('.dl-task-progress-fill').style.width = percent + '%';
+
+        var actions = item.querySelector('.dl-task-actions');
+        actions.replaceChildren();
+        if (info && info.download_url) {
+            var download = document.createElement('a');
+            download.className = 'dl-task-action';
+            download.href = info.download_url;
+            download.setAttribute('download', '');
+            download.append(icon('#i-download'), document.createTextNode(' 下载文件'));
+            actions.appendChild(download);
+        }
+        if (info && info.player_url) {
+            var play = document.createElement('a');
+            play.className = 'dl-task-action';
+            play.href = info.player_url;
+            play.append(icon('#i-play-circle'), document.createTextNode(' 播放'));
+            actions.appendChild(play);
+        }
+    }
+
+    function render() {
+        var existing = Object.create(null);
+        Array.prototype.forEach.call(listElement.children, function (item) {
+            existing[item.dataset.task] = item;
+        });
+
+        var rows = tasks.map(function (task) {
+            var item = existing[task.id] || buildRow(task);
+            renderRow(item, task);
+            return item;
+        });
+        listElement.replaceChildren.apply(listElement, rows);
+
+        if (emptyElement) emptyElement.hidden = tasks.length > 0;
+        if (countElement) countElement.textContent = tasks.length + ' 个任务';
+        if (openTaskId) renderDrawerMeta();
+    }
+
+    function hasActiveTasks() {
+        return tasks.some(function (task) {
+            var info = taskInfo[task.id];
+            return !info || ACTIVE_STATES.indexOf(info.state) !== -1;
+        });
+    }
+
+    function scheduleTaskPoll() {
+        if (taskTimer !== null) window.clearTimeout(taskTimer);
+        if (!tasks.length || !hasActiveTasks()) {
+            taskTimer = null;
+            return;
+        }
+        taskTimer = window.setTimeout(pollTasks, TASK_POLL_MS);
+    }
+
+    async function pollTasks() {
+        if (!tasks.length) return;
+        try {
+            var response = await fetch('/api/task_info', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tasks: tasks.map(function (task) {
+                        return task.id;
+                    })
+                })
+            });
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            var data = await response.json();
+            if (!data.success) throw new Error(data.msg || '查询任务失败');
+
+            data.tasks.forEach(function (info) {
+                if (info.exists === false && info.state === 'missing') {
+                    // 任务文件已被清理，不再保留在本地列表中。
+                    removeTask(info.task);
+                    if (openTaskId === info.task) closeDrawer();
+                    return;
+                }
+                taskInfo[info.task] = info;
+                var stored = tasks.find(function (task) {
+                    return task.id === info.task;
+                });
+                if (stored && info.url && stored.url !== info.url) {
+                    stored.url = info.url;
+                    writeStore();
+                }
+            });
+            render();
+        } catch (error) {
+            console.warn('获取任务进度失败:', error);
+        }
+        scheduleTaskPoll();
+    }
+
+    /* 任务详情抽屉 */
+
+    function formatElapsed(value) {
+        var parsed = Number(value);
+        if (!isFinite(parsed) || parsed < 0) return '';
+        var total = Math.round(parsed);
+        return [Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60]
+            .map(function (part) {
+                return String(part).padStart(2, '0');
+            })
+            .join(':');
+    }
+
+    function summaryText(progress) {
+        var parts = [];
+        var finalSize = formatBytes(progress.final_size_bytes);
+        var elapsed = formatElapsed(progress.elapsed_seconds);
+        var averageSpeed = formatBytes(progress.average_speed_bytes_per_second);
+        if (finalSize && elapsed) parts.push(finalSize + ' in ' + elapsed);
+        else if (finalSize) parts.push(finalSize);
+        if (averageSpeed) parts.push(averageSpeed + '/s');
+        return parts.join(' · ');
+    }
+
+    function setThumbnail(url, alt) {
+        if (!url || !drawerThumb || !drawerThumbWrap) return;
+        drawerThumb.src = url;
+        drawerThumb.alt = alt || '视频缩略图';
+        drawerThumb.hidden = false;
+        drawerThumbWrap.classList.remove('is-placeholder');
+        drawerThumb.addEventListener('error', function () {
+            drawerThumb.hidden = true;
+            drawerThumbWrap.classList.add('is-placeholder');
+        }, { once: true });
+    }
+
+    function resetMetadataView() {
+        drawerThumb.hidden = true;
+        drawerThumb.removeAttribute('src');
+        drawerThumbWrap.classList.add('is-placeholder');
+        drawerVideoTitle.textContent = '正在获取标题…';
+        drawerUploader.textContent = '元数据加载中';
+        drawerDuration.textContent = '';
+    }
+
+    function renderMetadata(data) {
+        if (!data) return;
+        setThumbnail(data.thumbnail, data.title || '视频缩略图');
+        drawerVideoTitle.textContent = data.title || '标题未知';
+        drawerUploader.replaceChildren(
+            icon('#i-user'),
+            document.createTextNode(' ' + (data.uploader || data.platform || '未知平台'))
+        );
+        var totalSeconds = Math.round(Number(data.duration) || 0);
+        var minutes = Math.floor(totalSeconds / 60);
+        var seconds = totalSeconds % 60;
+        drawerDuration.textContent = totalSeconds > 0
+            ? minutes + ':' + String(seconds).padStart(2, '0')
+            : '';
+        if (data.title) renderDrawerMeta();
+    }
+
+    function updateMetadata(url, attempt) {
+        attempt = attempt || 1;
+        if (!url) return;
+        var cached = metadata[url];
+        if (cached && cached.state === 'ready') {
+            renderMetadata(cached.data);
+            return;
+        }
+        if (cached && cached.state === 'pending') return;
+        metadata[url] = { state: 'pending' };
+
+        var controller = new AbortController();
+        var timeout = window.setTimeout(function () {
+            controller.abort();
+        }, METADATA_TIMEOUT_MS);
+
+        fetch('/api/video_info_basic', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: url }),
+            signal: controller.signal
+        })
+            .then(function (response) {
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                return response.json();
+            })
+            .then(function (data) {
+                if (!data.success) throw new Error(data.msg || '元数据查询失败');
+                metadata[url] = { state: 'ready', data: data };
+                if (currentTaskUrl() === url) renderMetadata(data);
+            })
+            .catch(function (error) {
+                metadata[url] = { state: 'failed' };
+                var isServerError = /^HTTP 5\d\d$/.test(error.message || '');
+                var isRetryable = error.name === 'AbortError'
+                    || error.name === 'TypeError'
+                    || isServerError;
+                if (isRetryable && attempt < METADATA_MAX_ATTEMPTS) {
+                    if (currentTaskUrl() === url) {
+                        drawerVideoTitle.textContent = '正在重试获取标题…';
+                        drawerUploader.textContent = '元数据加载较慢，正在重试';
+                    }
+                    window.setTimeout(function () {
+                        updateMetadata(url, attempt + 1);
+                    }, METADATA_RETRY_DELAY_MS);
+                    return;
+                }
+                console.warn('获取视频信息失败:', error);
+                if (currentTaskUrl() !== url) return;
+                if (drawerVideoTitle.textContent === '正在获取标题…'
+                    || drawerVideoTitle.textContent === '正在重试获取标题…') {
+                    drawerVideoTitle.textContent = '标题稍后显示';
+                }
+                drawerUploader.textContent = '元数据暂时不可用';
+            })
+            .finally(function () {
+                window.clearTimeout(timeout);
+            });
+    }
+
+    function currentTaskUrl() {
+        if (!openTaskId) return '';
+        var info = taskInfo[openTaskId];
+        var stored = tasks.find(function (task) {
+            return task.id === openTaskId;
+        });
+        return (info && (info.source_url || info.url)) || (stored && stored.url) || '';
+    }
+
+    function renderDrawerMeta() {
+        var info = taskInfo[openTaskId];
+        var stored = tasks.find(function (task) {
+            return task.id === openTaskId;
+        });
+        if (!stored) return;
+
+        var url = currentTaskUrl() || stored.id;
+        var cached = metadata[url];
+        var title = cached && cached.state === 'ready' && cached.data.title
+            ? cached.data.title
+            : url;
+
+        drawerTitle.textContent = title;
+        drawerTitle.title = title;
+        drawerUrlText.textContent = url;
+        drawerUrlText.title = url;
+        drawerFormat.textContent = formatLabel(openTaskId, info);
+        drawerStatus.textContent = statusText(openTaskId);
+
+        var summary = info && info.state === 'completed'
+            ? summaryText(info.progress || {})
+            : '';
+        drawerSummary.textContent = summary;
+        drawerSummary.hidden = !summary;
+    }
+
+    function renderLog(text) {
+        var lines = String(text || '').split('\n').filter(function (line) {
+            return line.trim() !== '';
+        });
+        if (!lines.length) {
+            drawerLog.replaceChildren(document.createTextNode('等待下载日志…'));
+            return;
+        }
+        var nearBottom = drawerLog.scrollHeight - drawerLog.scrollTop
+            - drawerLog.clientHeight < 48;
+        drawerLog.replaceChildren.apply(drawerLog, lines.map(function (line, index) {
+            var row = document.createElement('p');
+            var number = document.createElement('span');
+            number.className = 'dl-log-index';
+            number.textContent = String(index + 1).padStart(2, '0');
+            row.append(number, document.createTextNode(line));
+            return row;
+        }));
+        if (nearBottom) drawerLog.scrollTop = drawerLog.scrollHeight;
+    }
+
+    function scheduleLogPoll() {
+        if (logTimer !== null) window.clearTimeout(logTimer);
+        logTimer = null;
+        if (!openTaskId) return;
+        var info = taskInfo[openTaskId];
+        if (info && ACTIVE_STATES.indexOf(info.state) === -1) return;
+        logTimer = window.setTimeout(pollLog, LOG_POLL_MS);
+    }
+
+    async function pollLog() {
+        var taskId = openTaskId;
+        if (!taskId) return;
+        try {
+            var response = await fetch('/api/task_log', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tasks: [taskId] })
+            });
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            var data = await response.json();
+            if (!data.success) throw new Error(data.msg || '读取日志失败');
+            if (openTaskId === taskId) renderLog(data.text);
+        } catch (error) {
+            console.warn('获取任务日志失败:', error);
+        }
+        scheduleLogPoll();
+    }
+
+    function openDrawer(taskId) {
+        openTaskId = taskId;
+        lastFocused = document.activeElement;
+        overlay.hidden = false;
+        resetMetadataView();
+        renderDrawerMeta();
+
+        var info = taskInfo[taskId];
+        // task_info 为 YouTube 链接提供的封面可以先行展示，无需等待元数据接口。
+        if (info && info.thumbnail) setThumbnail(info.thumbnail);
+        updateMetadata(currentTaskUrl());
+
+        drawerLog.replaceChildren(document.createTextNode('正在读取日志…'));
+        drawerClose.focus();
+        pollLog();
+    }
+
+    function closeDrawer() {
+        if (logTimer !== null) window.clearTimeout(logTimer);
+        logTimer = null;
+        openTaskId = null;
+        overlay.hidden = true;
+        if (lastFocused && document.contains(lastFocused)) lastFocused.focus();
+        lastFocused = null;
+    }
+
+    /* navigator.clipboard 仅在安全上下文可用，局域网 http 访问需回退到 execCommand。 */
+    function fallbackCopyText(value) {
+        var textarea = document.createElement('textarea');
+        textarea.value = value;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.top = '0';
+        textarea.style.left = '0';
+        textarea.style.opacity = '0';
+        textarea.style.fontSize = '16px';
+        document.body.appendChild(textarea);
+        try {
+            textarea.select();
+            textarea.setSelectionRange(0, value.length);
+            if (!document.execCommand('copy')) throw new Error('浏览器拒绝复制');
+        } finally {
+            textarea.remove();
+        }
+    }
+
+    async function copyText(value) {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(value);
+            return;
+        }
+        fallbackCopyText(value);
+    }
+
+    var copyResetTimer = null;
+    drawerCopy.addEventListener('click', async function () {
+        var value = drawerUrlText.textContent;
+        if (!value) return;
+        try {
+            await copyText(value);
+            drawerCopy.title = '已复制到剪贴板';
+        } catch (error) {
+            console.error('复制失败:', error);
+            drawerCopy.title = '复制失败，请长按链接手动复制';
+        }
+        drawerCopy.classList.add('is-copied');
+        if (copyResetTimer !== null) window.clearTimeout(copyResetTimer);
+        copyResetTimer = window.setTimeout(function () {
+            copyResetTimer = null;
+            drawerCopy.title = '复制链接';
+            drawerCopy.classList.remove('is-copied');
+        }, 2000);
+    });
+
+    listElement.addEventListener('click', function (event) {
+        var item = event.target.closest('.dl-task');
+        if (!item || event.target.closest('a')) return;
+        openDrawer(item.dataset.task);
+    });
+
+    listElement.addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        var item = event.target.closest('.dl-task');
+        if (!item || event.target.closest('a')) return;
+        event.preventDefault();
+        openDrawer(item.dataset.task);
+    });
+
+    overlay.addEventListener('click', function (event) {
+        if (event.target === overlay) closeDrawer();
+    });
+    drawerClose.addEventListener('click', closeDrawer);
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && openTaskId) closeDrawer();
+    });
+
+    /* 表单 */
+
+    function selectedTypes() {
+        return typeBoxes.filter(function (box) {
+            return box.checked;
+        }).map(function (box) {
+            return box.value;
+        });
+    }
+
+    function syncSubmitState() {
+        submitButton.disabled = !urlInput.value.trim() || selectedTypes().length === 0;
+    }
+
+    function showError(message) {
+        var element = heroSection.querySelector('.dl-error');
+        if (!message) {
+            if (element) element.remove();
+            return;
+        }
+        if (!element) {
+            element = document.createElement('div');
+            element.className = 'dl-error';
+            element.setAttribute('role', 'alert');
+            form.after(element);
+        }
+        element.textContent = message;
+    }
+
+    form.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        var url = urlInput.value.trim();
+        var types = selectedTypes();
+        if (!url || !types.length) return;
+
+        try {
+            window.localStorage.setItem(TYPES_KEY, JSON.stringify(types));
+        } catch (error) {
+            /* 忽略存储失败 */
+        }
+
+        submitButton.disabled = true;
+        submitButton.replaceChildren(
+            icon('#i-loader', 'dl-spin'),
+            document.createTextNode(' 正在创建任务…')
+        );
+        showError('');
+
+        try {
+            var response = await fetch('/api/add_task', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: url, types: types })
+            });
+            var data = await response.json();
+            if (!response.ok || !data.success) {
+                throw new Error(data.msg || '创建任务失败，请稍后重试');
+            }
+            addTasks(data.tasks || [], url);
+            urlInput.value = '';
+            render();
+            scheduleTaskPoll();
+            pollTasks();
+        } catch (error) {
+            showError(error.message || '创建任务失败，请稍后重试');
+        } finally {
+            submitButton.replaceChildren(
+                icon('#i-plus'),
+                document.createTextNode(' 加入队列')
+            );
+            syncSubmitState();
+        }
+    });
+
+    urlInput.addEventListener('input', syncSubmitState);
+    typeBoxes.forEach(function (box) {
+        box.addEventListener('change', syncSubmitState);
+    });
+
+    /* 初始化 */
+
+    function restoreTypes() {
+        var saved;
+        try {
+            saved = JSON.parse(window.localStorage.getItem(TYPES_KEY) || 'null');
+        } catch (error) {
+            saved = null;
+        }
+        if (!Array.isArray(saved)) return;
+        typeBoxes.forEach(function (box) {
+            box.checked = saved.indexOf(box.value) !== -1;
+        });
+    }
+
+    function bootstrap() {
+        var payload = { tasks: [], url: '' };
+        var node = document.getElementById('dl-bootstrap');
+        if (node) {
+            try {
+                payload = JSON.parse(node.textContent) || payload;
+            } catch (error) {
+                /* 保持默认值 */
+            }
+        }
+
+        tasks = readStore();
+        // 服务端重定向带来的任务（无 JS 提交路径）合并进本地列表。
+        addTasks(payload.tasks || [], payload.url || '');
+
+        if (!typeBoxes.some(function (box) {
+            return box.checked;
+        })) {
+            restoreTypes();
+        }
+        if (!typeBoxes.some(function (box) {
+            return box.checked;
+        })) {
+            typeBoxes[0].checked = true;
+        }
+
+        syncSubmitState();
+        render();
+        if (tasks.length) pollTasks();
+    }
+
+    bootstrap();
+})();

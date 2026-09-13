@@ -1,6 +1,6 @@
 # 统一媒体库 UI
 
-首页与播放页采用暖灰背景、深绿操作按钮和卡片布局。首页的「打开媒体库」进入 `/player`，视频／音频标签位于播放列表顶部，替代原列表标题，以紧凑样式切换播放器及对应播放列表；桌面双栏，小屏单栏。
+播放页采用暖灰背景、深绿操作按钮和卡片布局。视频／音频标签位于播放列表顶部，替代原列表标题，以紧凑样式切换播放器及对应播放列表；桌面双栏，小屏单栏。首页已改为 DropLoad 设计稿（见下文「首页：DropLoad 下载页」），媒体库入口移到首页顶栏。
 
 ## 路由与兼容
 
@@ -32,3 +32,42 @@ git diff --check
 ## 音频字幕自动滚动
 
 `syncLyrics()` 仅使用 `lyricsContent.scrollTo()` 将当前语句居中到字幕容器；不要对语句调用 `scrollIntoView()`，它会连带滚动页面，让正在查看评论的用户跳回播放器。字幕高亮和减少动态效果设置保持原行为。
+
+## 首页：DropLoad 下载页
+
+首页按 `DropLoad/`（v0 生成的 Next.js 设计稿）重做，但仍是 Flask + Jinja 页面，不引入 Node 构建。设计稿只作参考，未接入运行时。
+
+### 结构
+
+- `templates/index.html`：整页结构，图标以内联 SVG sprite（`<symbol>` + `<use>`）提供，替代原来的 Font Awesome CDN。
+- `static/dropload.css`：纯 CSS 实现设计稿的间距、配色与断点（640px / 1024px），仅在首页使用，不影响 `style.css`、`refresh.css` 和播放页。
+- `static/dropload.js`：任务入队、进度轮询和任务详情抽屉。
+
+左栏为链接输入与格式勾选，右栏为任务列表；桌面端 `minmax(0, 1fr) 390px` 双栏，小屏单栏且任务列表限高 420px。
+
+### 数据流
+
+页面复用既有接口，未新增后端路由：
+
+- 提交走 `POST /api/add_task`，返回的任务 ID 直接插入右栏列表，不再整页跳转。
+- 列表状态轮询 `POST /api/task_info`，2 秒一次，全部任务进入 `completed` / `failed` 后停止。
+- 抽屉日志轮询 `POST /api/task_log`，只请求当前任务，1.5 秒一次，任务结束后停止。
+- 抽屉的标题、封面、作者和时长来自 `POST /api/video_info_basic`，按源 URL 缓存，保留 30 秒超时与一次重试；`task_info` 给出的 YouTube 封面先行占位。
+
+任务 ID 存在 `localStorage` 的 `dropload.tasks`（最多 20 条，与 `/api/task_log` 的上限一致），刷新后列表仍在。轮询发现任务文件已被清理（`state` 为 `missing`）时从本地列表移除。`<form method="post">` 保留，未启用 JS 时仍走原来的 `POST /` 重定向流程，重定向带回的任务 ID 会并入本地列表。
+
+### 与设计稿的差异
+
+- 设计稿的邮箱／密码注册登录（better-auth + Postgres）未实现，顶栏按钮仍指向既有的 YouTube OAuth（`/oauth/start`），未授权显示「登录」，已授权显示「重新授权」。
+- 播放器部分按要求未改动，`/player`、`/audio-player` 及其模板保持原样。
+- 任务行增加了细进度条、失败状态和「下载文件／播放」链接，这些是原首页已有的能力，设计稿中没有。
+- 原首页的复制链接、视频元数据卡片和下载日志侧栏合并进了任务详情抽屉，点击任务行打开，Esc 或点击遮罩关闭。
+
+### 验证
+
+```bash
+venv/bin/python -m pytest tests/test_task_info.py tests/test_public_pages.py tests/test_audio_player.py -q
+node --check static/dropload.js
+```
+
+浏览器检查：桌面双栏与小屏单栏、任务入队后列表即时更新、抽屉的元数据与日志、375px 下顶栏和格式行无横向溢出。

@@ -248,139 +248,124 @@ class TestTaskInfoAPI(unittest.TestCase):
         self.assertNotIn('elapsed_seconds', progress)
         self.assertNotIn('average_speed_bytes_per_second', progress)
 
-    def test_completed_template_uses_final_summary_fields(self):
-        template = Path(app.app.template_folder, 'index.html').read_text(
+    def read_asset(self, *parts):
+        if parts[0] == 'templates':
+            return Path(app.app.template_folder, *parts[1:]).read_text(
+                encoding='utf-8',
+            )
+        return Path(app.app.static_folder, *parts[1:]).read_text(
             encoding='utf-8',
         )
 
-        self.assertIn("if (state === 'completed')", template)
-        self.assertIn('progress.final_size_bytes', template)
-        self.assertIn('progress.elapsed_seconds', template)
-        self.assertIn('progress.average_speed_bytes_per_second', template)
-        self.assertIn('detailParts.push(`${finalSize} in ${elapsed}`);', template)
-        self.assertIn('fas fa-spinner fa-spin', template)
-        self.assertIn("state === 'downloading'", template)
+    def test_completed_summary_uses_final_summary_fields(self):
+        script = self.read_asset('static', 'dropload.js')
 
-    def test_video_duration_template_rounds_fractional_seconds(self):
-        template = Path(app.app.template_folder, 'index.html').read_text(
-            encoding='utf-8',
-        )
+        self.assertIn("state === 'completed'", script)
+        self.assertIn('progress.final_size_bytes', script)
+        self.assertIn('progress.elapsed_seconds', script)
+        self.assertIn('progress.average_speed_bytes_per_second', script)
+        self.assertIn("parts.push(finalSize + ' in ' + elapsed);", script)
+        self.assertIn("state === 'downloading' ? 'dl-spin' : ''", script)
+
+    def test_video_duration_rounds_fractional_seconds(self):
+        script = self.read_asset('static', 'dropload.js')
 
         self.assertIn(
-            'const totalSeconds = Math.round(Number(data.duration) || 0);',
-            template,
+            'var totalSeconds = Math.round(Number(data.duration) || 0);',
+            script,
         )
-        self.assertIn('const minutes = Math.floor(totalSeconds / 60);', template)
-        self.assertIn('const seconds = totalSeconds % 60;', template)
+        self.assertIn('var minutes = Math.floor(totalSeconds / 60);', script)
+        self.assertIn('var seconds = totalSeconds % 60;', script)
 
-    def test_video_metadata_template_retries_slow_requests(self):
-        template = Path(app.app.template_folder, 'index.html').read_text(
-            encoding='utf-8',
-        )
+    def test_video_metadata_retries_slow_requests(self):
+        script = self.read_asset('static', 'dropload.js')
 
-        self.assertIn('const METADATA_TIMEOUT_MS = 30000;', template)
-        self.assertIn('const METADATA_MAX_ATTEMPTS = 2;', template)
-        self.assertIn("fetch('/api/video_info_basic'", template)
-        self.assertNotIn("fetch('/api/video_info',", template)
-        self.assertIn('setThumbnail(data.thumbnail, data.title || \'视频缩略图\')', template)
-        self.assertIn('thumbnail.hidden = false;', template)
-        self.assertIn('const sourceUrls = data.tasks', template)
-        self.assertIn('sourceUrls.every(url => url === sourceUrls[0])', template)
-        self.assertIn('(data.tasks.length === 1 || hasSharedSource)', template)
-        self.assertIn('error.name === \'AbortError\'', template)
-        self.assertIn('正在重试获取标题…', template)
-        self.assertIn('updateMetadata(url, attempt + 1)', template)
-
-    def test_task_log_drawer_is_compact(self):
-        template = Path(app.app.template_folder, 'index.html').read_text(
-            encoding='utf-8',
-        )
-        css = Path(app.app.static_folder, 'style.css').read_text(
-            encoding='utf-8',
-        )
-
-        self.assertIn('class="task-log-output"', template)
-        self.assertNotIn('task-log-pause', template)
-        self.assertNotIn('task-log-clear', template)
-        self.assertNotIn('task-log-reconnect', template)
-        self.assertNotIn('实时连接中', template)
-        self.assertNotIn('tail -f task logs', template)
-        self.assertIn('height: min(33vh, 300px);', css)
-        self.assertIn('background: rgba(255, 255, 255, 0.94);', css)
-
-    def test_task_log_drawer_defaults_to_closed_on_small_screens(self):
-        template = Path(app.app.template_folder, 'index.html').read_text(
-            encoding='utf-8',
-        )
-
-        self.assertIn('aria-expanded="false"', template)
+        self.assertIn('var METADATA_TIMEOUT_MS = 30000;', script)
+        self.assertIn('var METADATA_MAX_ATTEMPTS = 2;', script)
+        self.assertIn("fetch('/api/video_info_basic'", script)
+        self.assertNotIn("fetch('/api/video_info',", script)
         self.assertIn(
-            "window.matchMedia('(max-width: 480px)').matches",
-            template,
+            "setThumbnail(data.thumbnail, data.title || '视频缩略图');",
+            script,
         )
-        self.assertIn('setTaskLogOpen(!isSmallScreen);', template)
+        self.assertIn('drawerThumb.hidden = false;', script)
+        self.assertIn("error.name === 'AbortError'", script)
+        self.assertIn('正在重试获取标题…', script)
+        self.assertIn('updateMetadata(url, attempt + 1);', script)
 
-    def test_task_url_precedes_video_info_and_stays_inline_on_small_screens(self):
-        template = Path(app.app.template_folder, 'index.html').read_text(
-            encoding='utf-8',
-        )
-        css = Path(app.app.static_folder, 'style.css').read_text(
-            encoding='utf-8',
-        )
+    def test_video_metadata_is_requested_once_per_source_url(self):
+        # 元数据接口较慢，抽屉反复打开同一任务时必须命中缓存。
+        script = self.read_asset('static', 'dropload.js')
+
+        self.assertIn("cached.state === 'ready'", script)
+        self.assertIn("cached.state === 'pending'", script)
+        self.assertIn("metadata[url] = { state: 'pending' };", script)
+
+    def test_task_detail_drawer_opens_from_task_row(self):
+        template = self.read_asset('templates', 'index.html')
+        script = self.read_asset('static', 'dropload.js')
+
+        self.assertIn('<div class="dl-drawer-overlay" hidden>', template)
+        self.assertIn('aria-label="关闭任务详情"', template)
+        self.assertIn('openDrawer(item.dataset.task);', script)
+        self.assertIn("event.key === 'Escape'", script)
+        self.assertNotIn('task-log-toggle', template)
+
+    def test_task_detail_drawer_shows_only_current_task_log(self):
+        template = self.read_asset('templates', 'index.html')
+        script = self.read_asset('static', 'dropload.js')
+        css = self.read_asset('static', 'dropload.css')
+
+        self.assertIn('class="dl-drawer-log"', template)
+        self.assertIn('tasks: [taskId]', script)
+        self.assertIn('max-width: 460px;', css)
+        self.assertIn('background: #101827;', css)
+
+    def test_drawer_orders_preview_url_status_then_log(self):
+        template = self.read_asset('templates', 'index.html')
+        css = self.read_asset('static', 'dropload.css')
 
         self.assertLess(
-            template.index('<div class="task-url">'),
-            template.index('<div class="video-info">'),
+            template.index('class="dl-drawer-info"'),
+            template.index('class="dl-drawer-url"'),
         )
-        self.assertIn('.task-url {\n    display: flex;', css)
-        self.assertIn('.url-copy {\n    display: flex;\n    flex: 1;', css)
-        self.assertIn('flex: 0 0 auto;', css)
-        self.assertIn('max-width: none;', css)
-
-    def test_mobile_task_actions_are_icon_only_and_stay_on_summary_row(self):
-        template = Path(app.app.template_folder, 'index.html').read_text(
-            encoding='utf-8',
+        self.assertLess(
+            template.index('class="dl-drawer-url"'),
+            template.index('class="dl-drawer-meta"'),
         )
-        css = Path(app.app.static_folder, 'style.css').read_text(
-            encoding='utf-8',
+        self.assertLess(
+            template.index('class="dl-drawer-meta"'),
+            template.index('class="dl-drawer-log"'),
         )
-
-        self.assertIn('aria-label="播放" title="播放"', template)
-        self.assertIn('aria-label="下载" title="下载"', template)
-        self.assertIn('.task-summary {\n        flex-wrap: nowrap;', css)
-        self.assertIn('.task-actions .task-player-link span,', css)
-        self.assertIn('.task-actions .task-download-link span {\n        display: none;', css)
-
-    def test_task_list_uses_compact_responsive_card_layout(self):
-        template = Path(app.app.template_folder, 'index.html').read_text(
-            encoding='utf-8',
-        )
-        css = Path(app.app.static_folder, 'refresh.css').read_text(
-            encoding='utf-8',
-        )
-
-        self.assertIn('class="task-container-header"', template)
-        self.assertIn('class="task-count">{{ tasks|length }} 项任务', template)
         self.assertIn('aria-label="复制链接" title="复制链接"', template)
-        self.assertIn("item.dataset.state = state;", template)
-        self.assertIn("'aria-valuetext'", template)
-        self.assertIn('.download-page .task-container {', css)
-        self.assertIn('max-width: 720px;', css)
-        self.assertIn('.download-page .task-list li {', css)
-        self.assertIn('border-radius: 12px;', css)
-        self.assertIn('width: 104px;', css)
-        self.assertIn('grid-template-columns: minmax(0, 1fr) auto;', css)
-        self.assertIn('.download-page .url-copy {', css)
-        self.assertIn('max-width: none;', css)
-        self.assertIn('margin-left: auto;', css)
+        # 链接始终单行显示，超出部分省略，不撑开抽屉。
+        self.assertIn('.dl-drawer-url-text {', css)
+        self.assertIn('text-overflow: ellipsis;', css)
+
+    def test_completed_task_row_links_to_download_and_player(self):
+        script = self.read_asset('static', 'dropload.js')
+
+        self.assertIn('info.download_url', script)
+        self.assertIn('info.player_url', script)
+        self.assertIn("' 下载文件'", script)
+        self.assertIn("' 播放'", script)
+
+    def test_task_list_uses_responsive_two_column_layout(self):
+        template = self.read_asset('templates', 'index.html')
+        css = self.read_asset('static', 'dropload.css')
+
+        self.assertIn('class="dl-task-count">{{ tasks|length }} 个任务', template)
+        self.assertIn('.dl-task-list {', css)
+        # 小屏单栏、任务列表限高；桌面右侧固定宽度栏。
+        self.assertIn('max-height: 420px;', css)
+        self.assertIn('grid-template-columns: minmax(0, 1fr) 390px;', css)
 
     def test_task_page_does_not_show_submitted_url_in_input(self):
-        template = Path(app.app.template_folder, 'index.html').read_text(
-            encoding='utf-8',
-        )
+        template = self.read_asset('templates', 'index.html')
 
         self.assertIn('value="{{ \'\' if tasks else url }}"', template)
-        self.assertIn('{{ url | escape }}', template)
+        # 服务端渲染的任务 ID 通过 JSON 交给前端，避免再次内联 URL 文本。
+        self.assertIn("{{ {'tasks': tasks, 'url': url} | tojson }}", template)
 
     def test_completed_task_is_always_100_percent(self):
         task_id = 'v20260723120000QwE'
