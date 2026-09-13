@@ -20,6 +20,7 @@ from config_util import (
 from log_util import setup_logger
 
 import task_queue
+import user_store
 import youtube_auth
 
 from googleapiclient.errors import HttpError
@@ -64,6 +65,7 @@ class PlaylistMonitor:
             timezone=config.get("TIMEZONE", "UTC"),
         )
         self.url_dir = config["URLS_DIR"]
+        self.user_db = config["USER_DB_PATH"]
         self.timezone = config.get("TIMEZONE", "Asia/Shanghai")
         self._stop = False
         # 状态跟踪：只在上轮状态变化时输出一次提示日志，避免每轮重复刷屏
@@ -155,36 +157,54 @@ class PlaylistMonitor:
         if not is_playlist_monitor_enabled(self.config):
             return {"state": "disabled"}
 
-        if youtube_auth.fail_lock_exists(self.config):
-            return {"state": "fail_lock"}
-
-        creds = youtube_auth.get_credentials(self.config, notify=self.notify)
-        if creds is None:
+        self.user_db = self.config["USER_DB_PATH"]
+        user_store.init_db(self.user_db)
+        accounts = user_store.users_with_google_token(self.user_db)
+        if not accounts:
             return {"state": "no_token"}
-
-        service = youtube_auth.build_youtube_service(self.config, creds)
-        # 若尚未保存用户信息（例如本功能上线前已授权），补拉一次头像/名称
-        if not youtube_auth.load_user_profile(self.config):
-            profile = youtube_auth.fetch_user_profile(self.config, creds)
-            if profile:
-                youtube_auth.save_user_profile(self.config, profile)
 
         playlists = self.config.get("MONITOR_PLAYLISTS") or {}
         dispatched = 0
-        for playlist_id, types in playlists.items():
-            if not playlist_id:
+        monitoring = False
+        for account in accounts:
+            store = user_store.UserTokenStore(self.user_db, account["id"])
+            if store.failed():
+                self.logger.info(
+                    "用户 %s 的 Google 授权已失效，等待重新绑定。", account["email"]
+                )
                 continue
             try:
-                dispatched += self._process_playlist(
-                    service,
-                    playlist_id,
-                    [t for t in (types or []) if t in ALLOWED_TYPES],
+                creds = youtube_auth.get_credentials(
+                    self.config, store=store, notify=self.notify
                 )
-            except HttpError as exc:
-                self._handle_http_error(exc, playlist_id)
+            except RuntimeError as exc:
+                self.logger.warning(
+                    "用户 %s 刷新令牌失败: %s", account["email"], exc
+                )
+                continue
+            if creds is None:
+                continue
+
+            monitoring = True
+            service = youtube_auth.build_youtube_service(self.config, creds)
+            for playlist_id, types in playlists.items():
+                if not playlist_id:
+                    continue
+                try:
+                    dispatched += self._process_playlist(
+                        service,
+                        playlist_id,
+                        [t for t in (types or []) if t in ALLOWED_TYPES],
+                        account["id"],
+                    )
+                except HttpError as exc:
+                    self._handle_http_error(exc, playlist_id)
+
+        if not monitoring:
+            return {"state": "no_token"}
         return {"state": "monitoring", "dispatched": dispatched}
 
-    def _process_playlist(self, service, playlist_id, types):
+    def _process_playlist(self, service, playlist_id, types, user_id):
         max_items = self._valid_max_items(
             self.config.get("PLAYLIST_MAX_ITEMS_PER_RUN", 10)
         )
@@ -197,7 +217,7 @@ class PlaylistMonitor:
         dispatched = 0
         for item in items:
             try:
-                if self._consume_item(service, item, types):
+                if self._consume_item(service, item, types, user_id):
                     dispatched += 1
             except HttpError as exc:
                 self.logger.warning(
@@ -210,7 +230,7 @@ class PlaylistMonitor:
                 self.logger.exception("处理条目异常: %s", exc)
         return dispatched
 
-    def _consume_item(self, service, item, types):
+    def _consume_item(self, service, item, types, user_id):
         snippet = item.get("snippet") or {}
         resource_id = snippet.get("resourceId") or {}
         if resource_id.get("kind") != "youtube#video":
@@ -232,6 +252,8 @@ class PlaylistMonitor:
         task_ids = task_queue.create_tasks(
             [url], types, self.url_dir, self.timezone
         )
+        # 监控下发的任务归属于授权该播放列表的用户
+        user_store.record_tasks(self.user_db, task_ids, user_id, url=url)
         self.logger.info("已下发下载 %s (%s): %s", title, ",".join(types), url)
         label = describe_types(types)
         # Bark 通知标注下载类型：视频 / 音频 / 视频+音频

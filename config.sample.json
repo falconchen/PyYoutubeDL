@@ -68,6 +68,14 @@
   },
   "FLASK_HOST": "0.0.0.0",
   "FLASK_PORT": 5100,
+
+  // 多用户：账号、身份绑定与 Google 令牌存放在这个 SQLite 库
+  "USER_DB_PATH": "./data/users.sqlite3",
+  // 是否允许自助注册。首个账号不受此开关限制（它会成为管理员），
+  // 其余注册者一律进入待审批，需管理员在 /admin 放行
+  "REGISTRATION_OPEN": true,
+  // HTTPS 部署时置为 true，给会话 cookie 加上 Secure
+  "SESSION_COOKIE_SECURE": false,
   "FLASK_DEBUG": false,
 
   // YouTube OAuth 授权与播放列表监控

@@ -8,7 +8,7 @@ import json
 import re
 import subprocess
 import sys
-from functools import lru_cache
+from functools import lru_cache, wraps
 from urllib.parse import parse_qs, unquote, urlparse
 import hashlib
 import hmac
@@ -21,6 +21,7 @@ from requests.auth import HTTPBasicAuth
 from log_util import setup_logger
 import ai_summary_store
 import task_queue
+import user_store
 import youtube_auth
 import click
 from flask.cli import with_appcontext
@@ -64,6 +65,16 @@ app.logger = logger
 app.secret_key = config.get("FLASK_SECRET_KEY") or os.urandom(24)
 if not config.get("FLASK_SECRET_KEY"):
     app.logger.warning("FLASK_SECRET_KEY 未配置，OAuth state 会话在多 worker 部署下可能失效，请在 config.json 中设置稳定密钥。")
+
+USER_DB_PATH = config["USER_DB_PATH"]
+user_store.init_db(USER_DB_PATH)
+
+# 会话 cookie 的基本加固；HTTPS 部署时由 SESSION_COOKIE_SECURE 打开 Secure。
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=bool(config.get('SESSION_COOKIE_SECURE', False)),
+)
 
 URLS_DIR = config["URLS_DIR"]
 FILES_DIR = config["FILES_DIR"]
@@ -110,6 +121,80 @@ AI_SUMMARY_MAX_SUBTITLE_CHARS = 120000
 os.makedirs(URLS_DIR, exist_ok=True)
 os.makedirs(FILES_DIR, exist_ok=True)
 ai_summary_store.init_db(config["AI_SUMMARY_DB_PATH"])
+
+
+# --- 认证与授权 ---------------------------------------------------------
+
+SESSION_USER_KEY = 'user_id'
+
+
+def current_user():
+    """返回当前登录用户；未登录、已删除或被停用时返回 None。"""
+    user_id = session.get(SESSION_USER_KEY)
+    if not user_id:
+        return None
+    user = user_store.get_user(USER_DB_PATH, user_id)
+    if not user or user['status'] != user_store.STATUS_ACTIVE:
+        # 账号被停用或删除后，旧 cookie 不应继续有效。
+        session.pop(SESSION_USER_KEY, None)
+        return None
+    return user
+
+
+def login_user(user):
+    session.clear()
+    session[SESSION_USER_KEY] = user['id']
+    session.permanent = True
+
+
+def wants_json():
+    """接口请求返回 401 JSON，页面请求重定向到登录页。"""
+    return (
+        request.path.startswith('/api/')
+        or request.accept_mimetypes.best == 'application/json'
+    )
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        user = current_user()
+        if user is None:
+            if wants_json():
+                return jsonify({"success": False, "msg": "需要登录"}), 401
+            return redirect(url_for('login', next=request.full_path))
+        request.user = user
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def admin_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        user = current_user()
+        if user is None:
+            if wants_json():
+                return jsonify({"success": False, "msg": "需要登录"}), 401
+            return redirect(url_for('login', next=request.full_path))
+        if user['role'] != user_store.ROLE_ADMIN:
+            if wants_json():
+                return jsonify({"success": False, "msg": "需要管理员权限"}), 403
+            abort(403)
+        request.user = user
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def safe_next_url(candidate):
+    """只接受本站相对路径，避免 open redirect。"""
+    if not candidate:
+        return url_for('index')
+    parsed = urlparse(candidate)
+    if parsed.scheme or parsed.netloc or not candidate.startswith('/'):
+        return url_for('index')
+    return candidate
 
 
 @app.route('/healthz', methods=['GET'])
@@ -1616,9 +1701,17 @@ def render_index_page(
     status=200,
 ):
     """渲染单页（下载器 + 媒体库），三个入口共用同一个模板。"""
-    youtube_user = youtube_auth.load_user_profile(config)
+    user = current_user()
     html = render_template(
         'index.html',
+        current_user=user,
+        google_identity=(
+            user_store.get_identity_for_user(
+                USER_DB_PATH, user_store.PROVIDER_GOOGLE, user['id']
+            )
+            if user
+            else None
+        ),
         url=url,
         types=types or [],
         tasks=tasks or [],
@@ -1627,13 +1720,12 @@ def render_index_page(
         tab=tab,
         requested_file=request.args.get('file', ''),
         show_waline=config.get("SHOW_WALINE_ON_INDEX", False),
-        youtube_user=youtube_user,
-        is_authorized=bool(youtube_user) or bool(youtube_auth.load_token(config)),
     )
     return (html, status) if status != 200 else html
 
 
 @app.route('/', methods=['GET', 'POST'])
+@login_required
 def index():
     if request.method == 'POST':
         types = request.form.getlist('type')
@@ -1658,6 +1750,9 @@ def index():
             )
 
         task_ids = create_tasks(urls, types)
+        user_store.record_tasks(
+            USER_DB_PATH, task_ids, request.user['id'], url=url
+        )
 
         # 构建重定向URL，包含所有参数
         redirect_url = url_for(
@@ -1677,6 +1772,117 @@ def index():
         view=requested_view,
         tab='audio' if request.args.get('tab') == 'audio' else 'video',
     )
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user() is not None:
+        return redirect(safe_next_url(request.args.get('next')))
+
+    error = ''
+    email = ''
+    if request.method == 'POST':
+        email = request.form.get('email', '')
+        password = request.form.get('password', '')
+        user = user_store.get_user_by_email(USER_DB_PATH, email)
+        if not user or not user_store.verify_password(user, password):
+            # 不区分「邮箱不存在」和「密码错误」，避免探测已注册邮箱。
+            error = '邮箱或密码不正确'
+        elif user['status'] == user_store.STATUS_PENDING:
+            error = '账号正在等待管理员审批'
+        elif user['status'] != user_store.STATUS_ACTIVE:
+            error = '账号已被停用'
+        else:
+            login_user(user)
+            return redirect(safe_next_url(request.form.get('next')))
+
+    return render_template(
+        'login.html',
+        mode='login',
+        error=error,
+        email=email,
+        next_url=request.values.get('next', ''),
+        registration_open=bool(config.get('REGISTRATION_OPEN', True)),
+        google_enabled=google_oauth_configured(),
+    ), (400 if error else 200)
+
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if current_user() is not None:
+        return redirect(url_for('index'))
+
+    first_user = user_store.user_count(USER_DB_PATH) == 0
+    if not first_user and not config.get('REGISTRATION_OPEN', True):
+        abort(403)
+
+    error = ''
+    email = request.form.get('email', '')
+    display_name = request.form.get('display_name', '')
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        if len(password) < 8:
+            error = '密码至少 8 位'
+        else:
+            try:
+                user = user_store.create_user(
+                    USER_DB_PATH,
+                    email,
+                    password=password,
+                    display_name=display_name,
+                )
+            except ValueError as exc:
+                error = str(exc)
+            else:
+                if user['status'] == user_store.STATUS_ACTIVE:
+                    adopt_legacy_data(user['id'])
+                    login_user(user)
+                    return redirect(url_for('index'))
+                return render_template('login.html', mode='pending'), 200
+
+    return render_template(
+        'login.html',
+        mode='register',
+        error=error,
+        email=email,
+        display_name=display_name,
+        first_user=first_user,
+        google_enabled=google_oauth_configured(),
+    ), (400 if error else 200)
+
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
+
+@app.route('/admin', methods=['GET'])
+@admin_required
+def admin():
+    return render_template(
+        'admin.html',
+        users=user_store.list_users(USER_DB_PATH),
+        current_user_id=request.user['id'],
+    )
+
+
+@app.route('/admin/users/<user_id>/status', methods=['POST'])
+@admin_required
+def admin_set_status(user_id):
+    status = request.form.get('status', '')
+    if user_id == request.user['id']:
+        # 防止管理员把自己锁在外面
+        abort(400)
+    target = user_store.get_user(USER_DB_PATH, user_id)
+    if not target:
+        abort(404)
+    try:
+        user_store.set_status(USER_DB_PATH, user_id, status)
+    except ValueError:
+        abort(400)
+    app.logger.info('管理员 %s 将用户 %s 状态改为 %s', request.user['email'], target['email'], status)
+    return redirect(url_for('admin'))
 
 
 @app.route('/about')
@@ -1729,20 +1935,164 @@ def _oauth_basic_auth_check():
     )
 
 
+def adopt_legacy_data(user_id):
+    """把单用户时代的遗留数据归到首个管理员名下。
+
+    包括：URLS_DIR 中已有的任务文件、FILES_DIR 中已有的媒体文件，以及原
+    先保存在 GOOGLE_OAUTH_TOKEN_FILE 的全局 Google 令牌。只在首个账号
+    创建时调用一次；重复执行是安全的（归属表按主键忽略冲突）。
+    """
+    adopted_tasks = 0
+    try:
+        for entry in os.listdir(URLS_DIR):
+            task_id, extension = os.path.splitext(entry)
+            if extension not in {'.txt', '.downloading', '.ok', '.fail'}:
+                continue
+            if not TASK_ID_PATTERN.fullmatch(task_id):
+                continue
+            url = ''
+            try:
+                with open(os.path.join(URLS_DIR, entry), 'r', encoding='utf-8') as f:
+                    url = f.read().strip()
+            except OSError:
+                pass
+            user_store.record_tasks(
+                USER_DB_PATH,
+                [task_id],
+                user_id,
+                url=url,
+                media_type='video' if task_id[0] == 'v' else 'audio',
+            )
+            adopted_tasks += 1
+    except OSError as exc:
+        app.logger.warning('接管历史任务失败: %s', exc)
+
+    adopted_files = 0
+    try:
+        for filename in os.listdir(FILES_DIR):
+            if os.path.isfile(os.path.join(FILES_DIR, filename)):
+                user_store.record_media(USER_DB_PATH, filename, user_id)
+                adopted_files += 1
+    except OSError as exc:
+        app.logger.warning('接管历史文件失败: %s', exc)
+
+    legacy_token = youtube_auth.load_token(config)
+    if legacy_token and not user_store.load_google_token(USER_DB_PATH, user_id):
+        user_store.UserTokenStore(USER_DB_PATH, user_id).save(legacy_token)
+        app.logger.info('已接管历史 Google 令牌')
+
+    app.logger.info(
+        '首个管理员接管历史数据：任务 %s 个，文件 %s 个',
+        adopted_tasks,
+        adopted_files,
+    )
+
+
+def sync_media_ownership():
+    """依据任务结果文件补齐媒体归属。
+
+    下载器不感知用户，它只写 `<task>.result.json`。这里把其中的文件名
+    与任务归属对应起来补进 media_owners，未知来源的文件（历史遗留、
+    播放列表监控产物）归到首个管理员，避免出现任何人都看不到的孤儿文件。
+    """
+    known = user_store.media_owner_map(USER_DB_PATH)
+    fallback = user_store.first_admin_id(USER_DB_PATH)
+
+    for result_path in glob.glob(os.path.join(URLS_DIR, '*.result.json')):
+        task_id = os.path.basename(result_path)[: -len('.result.json')]
+        owner = user_store.task_owner(USER_DB_PATH, task_id)
+        if not owner:
+            continue
+        try:
+            with open(result_path, 'r', encoding='utf-8') as f:
+                result = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        for filename in result.get('files', []):
+            if isinstance(filename, str) and filename not in known:
+                user_store.record_media(USER_DB_PATH, filename, owner, task_id)
+                known[filename] = owner
+
+    if not fallback:
+        return known
+    try:
+        entries = os.listdir(FILES_DIR)
+    except OSError:
+        return known
+    for filename in entries:
+        if filename not in known and os.path.isfile(
+            os.path.join(FILES_DIR, filename)
+        ):
+            user_store.record_media(USER_DB_PATH, filename, fallback)
+            known[filename] = fallback
+    return known
+
+
+def owned_tasks(task_ids, user_id):
+    """过滤出属于该用户的任务，防止用任务 ID 越权读取他人进度与日志。"""
+    return [
+        task_id
+        for task_id in task_ids
+        if user_store.task_owner(USER_DB_PATH, task_id) == user_id
+    ]
+
+
+def google_oauth_configured():
+    return bool(
+        config.get('GOOGLE_OAUTH_CLIENT_ID')
+        and config.get('GOOGLE_OAUTH_CLIENT_SECRET')
+        and config.get('GOOGLE_OAUTH_REDIRECT_URI')
+    )
+
+
+def fetch_google_userinfo(credentials):
+    """用已授权凭据读取 Google 账号的 sub / email / 名称 / 头像。"""
+    response = requests.get(
+        'https://www.googleapis.com/oauth2/v3/userinfo',
+        headers={'Authorization': f'Bearer {credentials.token}'},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def oauth_result(ok, message, status=200):
+    return render_template('oauth_result.html', ok=ok, message=message), status
+
+
 @app.route('/oauth/start')
 def oauth_start():
+    """Google 授权入口。
+
+    intent=login  仅申请身份 scope，用于 Google 登录/注册。
+    intent=bind   申请 YouTube 与 Drive scope，需要先登录，用于把 Google
+                  账号绑定到当前用户，供播放列表监控和后续的 Drive 上传使用。
+    """
     auth_error = _oauth_basic_auth_check()
     if auth_error is not None:
         return auth_error
 
-    flow = youtube_auth.build_oauth_flow(config)
+    if not google_oauth_configured():
+        return oauth_result(False, 'Google OAuth 未配置，请联系管理员。', 503)
+
+    intent = 'bind' if request.args.get('intent') == 'bind' else 'login'
+    if intent == 'bind' and current_user() is None:
+        return redirect(url_for('login', next=request.full_path))
+
+    scopes = (
+        youtube_auth.FULL_SCOPES if intent == 'bind' else youtube_auth.LOGIN_SCOPES
+    )
+    flow = youtube_auth.build_oauth_flow(config, scopes=scopes)
     state = hashlib.sha256(os.urandom(32)).hexdigest()
     authorization_url, state = flow.authorization_url(
         access_type='offline',
         prompt='consent',
         state=state,
+        include_granted_scopes='true',
     )
     session['oauth_state'] = state
+    session['oauth_intent'] = intent
+    session['oauth_scopes'] = scopes
     # PKCE：authorization_url 会生成 code_verifier 并放入 code_challenge，
     # 回调换取令牌时必须带上同一个 code_verifier，故一并存入会话
     session['oauth_code_verifier'] = flow.code_verifier
@@ -1753,79 +2103,162 @@ def oauth_start():
 def oauth_callback():
     error = request.args.get('error')
     if error:
-        return render_template(
-            'oauth_result.html',
-            ok=False,
-            message=f"授权被取消或失败：{error}",
-        ), 400
+        return oauth_result(False, f'授权被取消或失败：{error}', 400)
 
     state = request.args.get('state')
     if not state or state != session.pop('oauth_state', None):
-        return render_template(
-            'oauth_result.html',
-            ok=False,
-            message="OAuth state 校验失败，请重新发起授权。",
-        ), 400
+        return oauth_result(False, 'OAuth state 校验失败，请重新发起授权。', 400)
 
     code = request.args.get('code')
     if not code:
-        return render_template(
-            'oauth_result.html',
-            ok=False,
-            message="缺少授权码，请重新发起授权。",
-        ), 400
+        return oauth_result(False, '缺少授权码，请重新发起授权。', 400)
+
+    intent = session.pop('oauth_intent', 'login')
+    scopes = session.pop('oauth_scopes', None)
 
     # 恢复 /oauth/start 时生成的 PKCE code_verifier，否则换取令牌会报
     # invalid_grant: Missing code verifier
-    flow = youtube_auth.build_oauth_flow(config)
+    flow = youtube_auth.build_oauth_flow(config, scopes=scopes)
     flow.code_verifier = session.pop('oauth_code_verifier', None)
     if not flow.code_verifier:
-        return render_template(
-            'oauth_result.html',
-            ok=False,
-            message="缺少 PKCE code_verifier（会话可能已丢失），请重新发起授权。",
-        ), 400
+        return oauth_result(
+            False, '缺少 PKCE code_verifier（会话可能已丢失），请重新发起授权。', 400
+        )
 
     try:
         flow.fetch_token(code=code)
         creds = flow.credentials
     except Exception as exc:
-        return render_template(
-            'oauth_result.html',
-            ok=False,
-            message=f"换取令牌失败：{exc}",
-        ), 400
+        return oauth_result(False, f'换取令牌失败：{exc}', 400)
 
-    if not creds.refresh_token:
-        return render_template(
-            'oauth_result.html',
-            ok=False,
-            message="未返回 refresh_token，请重新授权并同意离线访问。",
-        ), 400
-
-    youtube_auth.save_token(config, json.loads(creds.to_json()))
-    youtube_auth.clear_fail_lock(config)
-    # 拉取当前用户信息（头像/名称）用于主页展示；失败不阻断授权成功
     try:
-        profile = youtube_auth.fetch_user_profile(config, creds)
-        if profile:
-            youtube_auth.save_user_profile(config, profile)
-        else:
-            app.logger.warning("未获取到 YouTube 用户信息（可能没有频道）。")
+        userinfo = fetch_google_userinfo(creds)
     except Exception as exc:
-        app.logger.warning("获取 YouTube 用户信息失败: %s", exc)
+        app.logger.warning('读取 Google 用户信息失败: %s', exc)
+        return oauth_result(False, f'读取 Google 账号信息失败：{exc}', 400)
+
+    google_sub = userinfo.get('sub', '')
+    if not google_sub:
+        return oauth_result(False, 'Google 未返回账号标识，请重试。', 400)
+
+    google_email = userinfo.get('email', '')
+    google_name = userinfo.get('name', '') or google_email
+    google_avatar = userinfo.get('picture', '')
+
+    if intent == 'bind':
+        return _complete_google_bind(
+            creds, google_sub, google_email, google_name, google_avatar
+        )
+    return _complete_google_login(
+        creds, google_sub, google_email, google_name, google_avatar
+    )
+
+
+def _store_google_credentials(user_id, creds):
+    """保存令牌。Google 只在首次同意时返回 refresh_token，重新授权时若
+    缺失则保留已有的那一份，避免把可用的离线凭据覆盖掉。"""
+    token = json.loads(creds.to_json())
+    if not token.get('refresh_token'):
+        existing = user_store.UserTokenStore(USER_DB_PATH, user_id).load() or {}
+        if existing.get('refresh_token'):
+            token['refresh_token'] = existing['refresh_token']
+    user_store.UserTokenStore(USER_DB_PATH, user_id).save(token)
+    return token
+
+
+def _complete_google_login(creds, sub, email, name, avatar):
+    identity = user_store.get_identity(USER_DB_PATH, user_store.PROVIDER_GOOGLE, sub)
+    if identity:
+        user = user_store.get_user(USER_DB_PATH, identity['user_id'])
+    else:
+        # 同邮箱的已有账号直接绑定，避免一个人产生两个账号。
+        user = user_store.get_user_by_email(USER_DB_PATH, email) if email else None
+        if user is None:
+            if not email:
+                return oauth_result(False, 'Google 账号没有可用邮箱，无法注册。', 400)
+            first_user = user_store.user_count(USER_DB_PATH) == 0
+            if not first_user and not config.get('REGISTRATION_OPEN', True):
+                return oauth_result(False, '本站已关闭注册，请联系管理员。', 403)
+            try:
+                user = user_store.create_user(
+                    USER_DB_PATH,
+                    email,
+                    display_name=name,
+                    provider=user_store.PROVIDER_GOOGLE,
+                )
+            except ValueError as exc:
+                return oauth_result(False, str(exc), 400)
+            if user['status'] == user_store.STATUS_ACTIVE:
+                adopt_legacy_data(user['id'])
+        user_store.link_identity(
+            USER_DB_PATH,
+            user_store.PROVIDER_GOOGLE,
+            sub,
+            user['id'],
+            email=email,
+            display_name=name,
+            avatar_url=avatar,
+        )
+
+    if user['status'] == user_store.STATUS_PENDING:
+        return oauth_result(False, '账号已创建，正在等待管理员审批。', 200)
+    if user['status'] != user_store.STATUS_ACTIVE:
+        return oauth_result(False, '账号已被停用，请联系管理员。', 403)
+
+    _store_google_credentials(user['id'], creds)
+    login_user(user)
+    return redirect(url_for('index'))
+
+
+def _complete_google_bind(creds, sub, email, name, avatar):
+    user = current_user()
+    if user is None:
+        return redirect(url_for('login'))
+
+    try:
+        user_store.link_identity(
+            USER_DB_PATH,
+            user_store.PROVIDER_GOOGLE,
+            sub,
+            user['id'],
+            email=email,
+            display_name=name,
+            avatar_url=avatar,
+        )
+    except ValueError as exc:
+        return oauth_result(False, str(exc), 409)
+
+    token = _store_google_credentials(user['id'], creds)
+    if not token.get('refresh_token'):
+        return oauth_result(
+            False,
+            '未返回 refresh_token，请在 Google 账号页面移除本应用的授权后重新绑定。',
+            400,
+        )
+
     try:
         import bark_util
-        device_token = config.get("BARK_DEVICE_TOKEN")
+
+        device_token = config.get('BARK_DEVICE_TOKEN')
         if device_token:
-            bark_util.bark_notify(device_token, "YouTube 授权成功", "播放列表监控已就绪")
+            bark_util.bark_notify(
+                device_token, 'Google 绑定成功', f"{user['email']} 已授权"
+            )
     except Exception:
         pass
-    return render_template(
-        'oauth_result.html',
-        ok=True,
-        message="YouTube 授权成功，令牌已保存，播放列表监控已就绪。",
+
+    return oauth_result(True, 'Google 绑定成功，播放列表监控与 Drive 授权已就绪。')
+
+
+@app.route('/account/google/unbind', methods=['POST'])
+@login_required
+def google_unbind():
+    user_store.unlink_identity(
+        USER_DB_PATH, user_store.PROVIDER_GOOGLE, request.user['id']
     )
+    user_store.delete_google_token(USER_DB_PATH, request.user['id'])
+    return redirect(url_for('index'))
+
 
 NUMERIC_FILENAME_PREFIX_PATTERN = re.compile(r'^\d+-')
 
@@ -1843,15 +2276,21 @@ def media_display_title(probed_title, fallback_name):
     return strip_numeric_filename_prefix(fallback_name)
 
 
-def build_media_library_items():
-    """列出媒体库需要的视频与音频条目，按修改时间倒序。"""
+def build_media_library_items(user_id=None):
+    """列出媒体库需要的视频与音频条目，按修改时间倒序。
+
+    传入 user_id 时只返回该用户拥有的文件；归属表由 sync_media_ownership()
+    依据任务结果维护。
+    """
     exclude_keywords = get_player_exclude_keywords()
+    owners = sync_media_ownership() if user_id else {}
 
     def listed(predicate):
         names = [
             filename for filename in os.listdir(FILES_DIR)
             if predicate(filename)
             and not any(keyword in filename for keyword in exclude_keywords)
+            and (user_id is None or owners.get(filename) == user_id)
         ]
         names.sort(
             key=lambda name: os.path.getmtime(os.path.join(FILES_DIR, name)),
@@ -1924,10 +2363,11 @@ def build_media_library_items():
 
 
 @app.route('/api/media_list', methods=['GET'])
+@login_required
 def api_media_list():
     """媒体库列表接口，供首页的媒体库模式异步加载。"""
     try:
-        videos, audios = build_media_library_items()
+        videos, audios = build_media_library_items(request.user['id'])
     except OSError as exc:
         app.logger.error("读取媒体库目录失败: %s", exc)
         return jsonify({"success": False, "msg": "读取媒体目录失败"}), 500
@@ -1935,6 +2375,7 @@ def api_media_list():
 
 
 @app.route('/player')
+@login_required
 def player():
     """媒体库入口，与首页同页；保留原路径以兼容既有播放链接。"""
     return render_index_page(
@@ -1944,12 +2385,27 @@ def player():
 
 
 @app.route('/audio-player')
+@login_required
 def audio_player():
     """兼容已有音频链接，在媒体库中打开音频标签。"""
     return render_index_page(view='library', tab='audio')
+def require_media_access(filename):
+    """媒体私有：只有文件归属者本人可以播放或下载。"""
+    user = current_user()
+    if user is None:
+        abort(401)
+    owner = user_store.media_owner(USER_DB_PATH, filename)
+    if owner is None:
+        # 归属未登记的文件先补齐，再判断，避免刚下载完就 404。
+        owner = sync_media_ownership().get(filename)
+    if owner != user['id']:
+        abort(404)
+
+
 @app.route('/files/<path:filename>')
 def serve_file(filename):
-    decoded_filename = unquote(filename)  
+    decoded_filename = unquote(filename)
+    require_media_access(decoded_filename)
     return send_from_directory(FILES_DIR, decoded_filename)
 
 
@@ -1957,6 +2413,7 @@ def serve_file(filename):
 def download_file(filename):
     """以附件方式下载 FILES_DIR 中的媒体文件。"""
     decoded_filename = unquote(filename)
+    require_media_access(decoded_filename)
     return send_from_directory(
         FILES_DIR,
         decoded_filename,
@@ -1965,9 +2422,11 @@ def download_file(filename):
 
 
 @app.route('/subtitles/<path:filename>/<int:stream_index>.vtt')
+@login_required
 def serve_subtitle(filename, stream_index):
     """将 MP4 内嵌字幕流转换为浏览器可读取的 WebVTT。"""
     decoded_filename = unquote(filename)
+    require_media_access(decoded_filename)
     filepath = safe_join(FILES_DIR, decoded_filename)
     if (
         not filepath
@@ -2003,6 +2462,7 @@ def serve_subtitle(filename, stream_index):
 
 
 @app.route('/subtitles/sidecar/<path:subtitle_filename>.vtt')
+@login_required
 def serve_sidecar_subtitle(subtitle_filename):
     """将有效的同名外挂字幕转换为浏览器可读取的 WebVTT。"""
     decoded_filename = unquote(subtitle_filename)
@@ -2218,6 +2678,7 @@ def api_ai_summary_job_stream(job_id):
     return ai_summary_job_stream(job_id)
 
 @app.route('/api/add_task', methods=['POST'])
+@login_required
 def api_add_task():
     data = request.get_json() if request.is_json else request.form
     url = data.get('url')
@@ -2239,6 +2700,7 @@ def api_add_task():
 
     # 使用新的辅助函数创建任务
     tasks = create_tasks(urls, types)
+    user_store.record_tasks(USER_DB_PATH, tasks, request.user['id'], url=url)
 
     if len(urls) > 1:
         msg = f"播放列表已解析为 {len(urls)} 个视频，共创建 {len(tasks)} 个任务"
@@ -2247,6 +2709,7 @@ def api_add_task():
     return jsonify({"success": True, "msg": msg, "tasks": tasks})
 
 @app.route('/api/task_info', methods=['POST'])
+@login_required
 def api_task_info():
     data = request.get_json() if request.is_json else request.form
     tasks = data.get('tasks')
@@ -2254,7 +2717,15 @@ def api_task_info():
         return jsonify({"success": False, "msg": "Missing required parameter: tasks"}), 400
     if not isinstance(tasks, list):
         tasks = [tasks]
-    result = [get_task_info(task) for task in tasks]
+    # 逐个返回，保持「请求几个就回几个」的契约：前端据此结束轮询。
+    # 非本人任务与不存在的任务返回同样的 missing，不泄露是否存在。
+    owned = set(owned_tasks(tasks, request.user['id']))
+    result = [
+        get_task_info(task)
+        if task in owned
+        else {"task": task, "exists": False, "state": "missing"}
+        for task in tasks
+    ]
     return jsonify({"success": True, "tasks": result})
 
 
@@ -2313,6 +2784,7 @@ def redact_task_log_text(text):
 
 
 @app.route('/api/task_log', methods=['POST'])
+@login_required
 def api_task_log():
     """返回指定任务相关的日志，供首页侧栏使用。"""
     data = request.get_json() if request.is_json else request.form
@@ -2322,6 +2794,7 @@ def api_task_log():
     if not isinstance(tasks, list):
         tasks = [tasks]
     tasks = [task for task in tasks if isinstance(task, str) and TASK_ID_PATTERN.fullmatch(task)]
+    tasks = owned_tasks(tasks, request.user['id'])
     if not tasks or len(tasks) > 20:
         return jsonify({"success": False, "msg": "Invalid task list"}), 400
 
@@ -2432,6 +2905,7 @@ def favicon():
                              'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
 @app.route('/api/video_info', methods=['POST'])
+@login_required
 def api_video_info():
     data = request.get_json() if request.is_json else request.form
     url = data.get('url')
@@ -2518,6 +2992,7 @@ def api_video_info():
 
 
 @app.route('/api/video_info_basic', methods=['POST'])
+@login_required
 def api_video_info_basic():
     """只提取首页预览所需的标题、作者、时长和缩略图。"""
     data = request.get_json() if request.is_json else request.form

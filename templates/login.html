@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f4f7fb">
+    <link rel="icon" href="{{ url_for('static', filename='images/favicon.png') }}">
+    <title>{% if mode == 'register' %}注册 · DropLoad{% else %}登录 · DropLoad{% endif %}</title>
+    <link rel="stylesheet" href="{{ 'dropload.css' | versioned }}">
+</head>
+<body class="dropload-page dl-auth-page">
+    <svg class="dl-sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+        <symbol id="i-arrow-down-to-line" viewBox="0 0 24 24"><path d="M12 17V3"/><path d="m6 11 6 6 6-6"/><path d="M19 21H5"/></symbol>
+        <symbol id="i-google" viewBox="0 0 24 24"><path d="M21.6 12.2c0-.7-.06-1.4-.18-2.05H12v3.88h5.4a4.6 4.6 0 0 1-2 3.02v2.5h3.23c1.89-1.74 2.97-4.3 2.97-7.35"/><path d="M12 22c2.7 0 4.96-.9 6.62-2.43l-3.23-2.51c-.9.6-2.05.95-3.39.95-2.6 0-4.8-1.76-5.59-4.12H3.07v2.59A10 10 0 0 0 12 22"/><path d="M6.41 13.89a6 6 0 0 1 0-3.83V7.47H3.07a10 10 0 0 0 0 9.01z"/><path d="M12 5.94c1.47 0 2.79.5 3.83 1.5l2.86-2.86C16.95 2.98 14.7 2 12 2a10 10 0 0 0-8.93 5.47l3.34 2.59C7.2 7.7 9.4 5.94 12 5.94"/></symbol>
+    </svg>
+
+    <main class="dl-auth">
+        <div class="dl-auth-card">
+            <a class="dl-brand dl-auth-brand" href="{{ url_for('index') }}">
+                <span class="dl-brand-mark"><svg class="dl-icon" aria-hidden="true"><use href="#i-arrow-down-to-line"></use></svg></span>
+                <span class="dl-brand-name">Drop<span>Load</span></span>
+            </a>
+
+            {% if mode == 'pending' %}
+            <h1 class="dl-auth-title">账号已创建</h1>
+            <p class="dl-auth-subtitle">本站需要管理员审批后才能使用。审批通过后即可用该邮箱登录。</p>
+            <a class="dl-auth-submit dl-auth-link-button" href="{{ url_for('login') }}">返回登录</a>
+            {% else %}
+
+            <h1 class="dl-auth-title">
+                {%- if mode == 'register' %}{% if first_user %}创建管理员账号{% else %}创建你的账号{% endif %}{% else %}欢迎回来{% endif -%}
+            </h1>
+            <p class="dl-auth-subtitle">
+                {%- if mode == 'register' -%}
+                    {% if first_user %}这是本站第一个账号，将直接成为管理员。{% else %}注册后需要管理员审批才能使用。{% endif %}
+                {%- else -%}
+                    登录后管理你的下载任务与媒体库。
+                {%- endif -%}
+            </p>
+
+            <form class="dl-auth-form" method="post">
+                {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+                {% if mode == 'register' %}
+                <label class="dl-auth-label" for="display_name">昵称</label>
+                <input class="dl-auth-input" id="display_name" name="display_name" type="text"
+                       value="{{ display_name or '' }}" autocomplete="nickname" placeholder="可留空">
+                {% endif %}
+
+                <label class="dl-auth-label" for="email">邮箱</label>
+                <input class="dl-auth-input" id="email" name="email" type="email" required
+                       value="{{ email or '' }}" autocomplete="email" placeholder="you@example.com">
+
+                <label class="dl-auth-label" for="password">密码</label>
+                <input class="dl-auth-input" id="password" name="password" type="password" required
+                       autocomplete="{% if mode == 'register' %}new-password{% else %}current-password{% endif %}"
+                       placeholder="{% if mode == 'register' %}至少 8 位{% else %}请输入密码{% endif %}">
+
+                {% if error %}<p class="dl-auth-error" role="alert">{{ error }}</p>{% endif %}
+
+                <button class="dl-auth-submit" type="submit">
+                    {%- if mode == 'register' %}注册账号{% else %}登录{% endif -%}
+                </button>
+            </form>
+
+            {% if google_enabled %}
+            <div class="dl-auth-divider"><span>或</span></div>
+            <a class="dl-auth-google" href="{{ url_for('oauth_start', intent='login') }}">
+                <svg class="dl-icon" aria-hidden="true"><use href="#i-google"></use></svg>
+                使用 Google 账号继续
+            </a>
+            {% endif %}
+
+            <p class="dl-auth-switch">
+                {%- if mode == 'register' -%}
+                已有账号？<a href="{{ url_for('login') }}">去登录</a>
+                {%- elif registration_open -%}
+                还没有账号？<a href="{{ url_for('register') }}">注册一个</a>
+                {%- else -%}
+                本站已关闭自助注册，请联系管理员开通。
+                {%- endif -%}
+            </p>
+            {% endif %}
+        </div>
+
+        {% include '_site_footer.html' %}
+    </main>
+</body>
+</html>

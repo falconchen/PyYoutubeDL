@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import playlist_monitor
+import user_store
 import youtube_auth
 
 
@@ -22,7 +23,12 @@ class PlaylistMonitorTestCase(unittest.TestCase):
             'PLAYLIST_POLL_INTERVAL_SECONDS': 300,
             'PLAYLIST_MAX_ITEMS_PER_RUN': 10,
             'BARK_DEVICE_TOKEN': '',
+            'USER_DB_PATH': os.path.join(root, 'users.sqlite3'),
         }
+        user_store.init_db(self.config['USER_DB_PATH'])
+        self.user = user_store.create_user(
+            self.config['USER_DB_PATH'], 'owner@example.com', password='pw123456'
+        )
         self.monitor = playlist_monitor.PlaylistMonitor(self.config)
 
     def tearDown(self):
@@ -51,7 +57,9 @@ class PlaylistMonitorTestCase(unittest.TestCase):
 
     def test_consume_item_creates_video_and_audio_tasks_and_deletes(self):
         service = self._service()
-        self.monitor._consume_item(service, self._item(), ['video', 'audio'])
+        self.monitor._consume_item(
+            service, self._item(), ['video', 'audio'], self.user['id']
+        )
 
         service.playlistItems.return_value.delete.assert_called_once_with(
             id='ITEM1'
@@ -72,6 +80,7 @@ class PlaylistMonitorTestCase(unittest.TestCase):
         service = self._service()
         self.monitor._consume_item(
             service, self._item(kind='youtube#channel'), ['video'],
+            self.user['id'],
         )
         service.playlistItems.return_value.delete.assert_not_called()
         self.assertEqual(self._task_files(), [])
@@ -80,7 +89,7 @@ class PlaylistMonitorTestCase(unittest.TestCase):
         service = self._service()
         with patch.object(self.monitor, 'notify') as notify:
             self.monitor._consume_item(
-                service, self._item(), ['video', 'audio']
+                service, self._item(), ['video', 'audio'], self.user['id']
             )
         notify.assert_called_once_with(
             '已加入下载【视频+音频】: Test video',
@@ -91,7 +100,8 @@ class PlaylistMonitorTestCase(unittest.TestCase):
         service = self._service()
         with patch.object(self.monitor, 'notify') as notify:
             self.monitor._consume_item(
-                service, self._item(title='Only video'), ['video']
+                service, self._item(title='Only video'), ['video'],
+                self.user['id']
             )
         notify.assert_called_once_with(
             '已加入下载【视频】: Only video',
@@ -102,7 +112,8 @@ class PlaylistMonitorTestCase(unittest.TestCase):
         service = self._service()
         with patch.object(self.monitor, 'notify') as notify:
             self.monitor._consume_item(
-                service, self._item(title='Only audio'), ['audio']
+                service, self._item(title='Only audio'), ['audio'],
+                self.user['id']
             )
         notify.assert_called_once_with(
             '已加入下载【音频】: Only audio',
@@ -120,7 +131,7 @@ class PlaylistMonitorTestCase(unittest.TestCase):
             None,
         ]
 
-        self.monitor._process_playlist(service, 'PL123', ['video'])
+        self.monitor._process_playlist(service, 'PL123', ['video'], self.user['id'])
 
         files = self._task_files()
         self.assertEqual(len(files), 1)
@@ -169,23 +180,49 @@ class TestRunOnceGuards(unittest.TestCase):
             'MONITOR_PLAYLISTS': {'PL123': ['video']},
             'PLAYLIST_POLL_INTERVAL_SECONDS': 300,
             'PLAYLIST_MAX_ITEMS_PER_RUN': 10,
+            'USER_DB_PATH': os.path.join(root, 'users.sqlite3'),
         }
+        user_store.init_db(self.config['USER_DB_PATH'])
+        self.user = user_store.create_user(
+            self.config['USER_DB_PATH'], 'owner@example.com', password='pw123456'
+        )
         self.monitor = playlist_monitor.PlaylistMonitor(self.config)
 
     def tearDown(self):
         self.tmp.cleanup()
 
+    def _bind_google(self, fail_reason=''):
+        user_store.save_google_token(
+            self.config['USER_DB_PATH'],
+            self.user['id'],
+            '{"refresh_token": "r"}',
+        )
+        if fail_reason:
+            user_store.set_google_fail_reason(
+                self.config['USER_DB_PATH'], self.user['id'], fail_reason
+            )
+
     @patch.object(playlist_monitor, 'load_config')
-    def test_run_once_skips_api_when_fail_lock_exists(self, load_config):
+    def test_run_once_skips_api_when_token_marked_failed(self, load_config):
         load_config.return_value = self.config
-        with open(self.config['GOOGLE_OAUTH_FAIL_LOCK_FILE'], 'w') as fh:
-            fh.write('1')
+        self._bind_google(fail_reason='invalid_grant')
 
         with patch.object(
             playlist_monitor.youtube_auth, 'get_credentials'
         ) as get_credentials:
             self.monitor._run_once()
             get_credentials.assert_not_called()
+
+    @patch.object(playlist_monitor, 'load_config')
+    def test_run_once_skips_when_no_user_bound_google(self, load_config):
+        load_config.return_value = self.config
+
+        with patch.object(
+            playlist_monitor.youtube_auth, 'get_credentials'
+        ) as get_credentials:
+            result = self.monitor._run_once()
+            get_credentials.assert_not_called()
+        self.assertEqual(result['state'], 'no_token')
 
     @patch.object(playlist_monitor, 'load_config')
     def test_run_once_skips_when_not_enabled(self, load_config):

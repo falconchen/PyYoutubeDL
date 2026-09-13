@@ -20,7 +20,20 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 
-SCOPES = ["https://www.googleapis.com/auth/youtube"]
+# 登录只需要身份信息；YouTube 播放列表监控与后续的 Drive 上传在「绑定」
+# 流程里一次性申请，避免普通登录就索取过宽的权限。
+LOGIN_SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+]
+YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube"]
+# drive.file 只能访问本应用自己创建的文件，足够上传下载产物。
+DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+FULL_SCOPES = LOGIN_SCOPES + YOUTUBE_SCOPES + DRIVE_SCOPES
+
+# 兼容旧调用方
+SCOPES = YOUTUBE_SCOPES
 
 
 def build_client_config(config):
@@ -36,13 +49,18 @@ def build_client_config(config):
     }
 
 
-def build_oauth_flow(config):
+def build_oauth_flow(config, scopes=None, redirect_uri=None):
     """构建 OAuth Web Flow；调用方需在 authorization_url 时传入
-    access_type='offline' 与 prompt='consent' 以取得 refresh_token。"""
+    access_type='offline' 与 prompt='consent' 以取得 refresh_token。
+
+    Google 常常会在返回的 scope 里追加 openid 等项，与请求不完全一致会让
+    oauthlib 抛 Scope has changed；这里放宽该校验。
+    """
+    os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
     return Flow.from_client_config(
         build_client_config(config),
-        scopes=SCOPES,
-        redirect_uri=config.get("GOOGLE_OAUTH_REDIRECT_URI", ""),
+        scopes=scopes or SCOPES,
+        redirect_uri=redirect_uri or config.get("GOOGLE_OAUTH_REDIRECT_URI", ""),
     )
 
 
@@ -81,6 +99,28 @@ def save_token(config, token):
         os.chmod(token_file, 0o600)
     except OSError:
         pass
+
+
+class FileTokenStore:
+    """原先的全局单份令牌文件，保留用于迁移与无用户上下文的场景。"""
+
+    def __init__(self, config):
+        self.config = config
+
+    def load(self):
+        return load_token(self.config)
+
+    def save(self, token):
+        save_token(self.config, token)
+
+    def failed(self):
+        return fail_lock_exists(self.config)
+
+    def mark_failed(self, reason=""):
+        set_fail_lock(self.config)
+
+    def clear_failure(self):
+        clear_fail_lock(self.config)
 
 
 def fail_lock_exists(config):
@@ -125,11 +165,12 @@ def _credentials_to_token(credentials):
     return json.loads(credentials.to_json())
 
 
-def get_credentials(config, notify=None):
+def get_credentials(config, store=None, notify=None):
     """加载并确保有效的 Credentials。
 
     Args:
         config: 运行配置字典。
+        store: 令牌存储；默认用全局文件，多用户场景传入按用户的存储。
         notify: 可选回调 notify(title, content)，用于失败时的 Bark 通知。
 
     Returns:
@@ -138,7 +179,8 @@ def get_credentials(config, notify=None):
     Raises:
         RuntimeError: 令牌刷新失败（已写 fail-lock）。
     """
-    token = load_token(config)
+    store = store or FileTokenStore(config)
+    token = store.load()
     if not token:
         return None
 
@@ -147,21 +189,21 @@ def get_credentials(config, notify=None):
         return creds
 
     if not creds.refresh_token:
-        _handle_refresh_failure(config, notify, reason="缺少 refresh_token")
+        _handle_refresh_failure(config, store, notify, reason="缺少 refresh_token")
         raise RuntimeError("缺少 refresh_token")
 
     try:
         creds.refresh(_proxied_request(config))
     except Exception as exc:
-        _handle_refresh_failure(config, notify, reason=str(exc))
+        _handle_refresh_failure(config, store, notify, reason=str(exc))
         raise RuntimeError(f"刷新令牌失败: {exc}") from exc
 
-    save_token(config, _credentials_to_token(creds))
+    store.save(_credentials_to_token(creds))
     return creds
 
 
-def _handle_refresh_failure(config, notify, reason=""):
-    set_fail_lock(config)
+def _handle_refresh_failure(config, store, notify, reason=""):
+    store.mark_failed(reason)
     if notify:
         notify(
             "YouTube 授权已失效，请重新授权",

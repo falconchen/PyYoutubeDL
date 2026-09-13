@@ -6,6 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import app
+import user_store
+from auth_helper import install_auth
 
 
 class TestTaskInfoAPI(unittest.TestCase):
@@ -18,6 +20,7 @@ class TestTaskInfoAPI(unittest.TestCase):
         self.logs_dir.mkdir()
         self.client = app.app.test_client()
         app.app.testing = True
+        install_auth(self)
 
         self.patches = [
             patch.object(app, 'URLS_DIR', str(self.urls_dir)),
@@ -35,6 +38,13 @@ class TestTaskInfoAPI(unittest.TestCase):
         (self.urls_dir / f'{task_id}{extension}').write_text(
             'https://example.com/video',
             encoding='utf-8',
+        )
+        self.own_task(task_id)
+
+    def own_task(self, task_id):
+        """任务接口只返回当前用户的任务，测试里的任务需登记归属。"""
+        user_store.record_tasks(
+            self.user_db_path, [task_id], self.logged_in_user['id']
         )
 
     def test_reports_queued_task(self):
@@ -54,6 +64,7 @@ class TestTaskInfoAPI(unittest.TestCase):
             'https://youtu.be/dQw4w9WgXcQ?t=12',
             encoding='utf-8',
         )
+        self.own_task(task_id)
 
         response = self.client.post('/api/task_info', json={'tasks': [task_id]})
         task = response.get_json()['tasks'][0]
@@ -473,7 +484,8 @@ class TestTaskInfoAPI(unittest.TestCase):
         task = response.get_json()['tasks'][0]
 
         self.assertFalse(task['exists'])
-        self.assertEqual(task['msg'], 'Invalid task id')
+        # 非法 ID 不属于任何人，与「任务不存在」返回同样的 missing
+        self.assertEqual(task['state'], 'missing')
 
     def test_accepts_legacy_numeric_task_suffix(self):
         task_id = 'a202505161122552581'

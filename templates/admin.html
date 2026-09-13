@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f4f7fb">
+    <link rel="icon" href="{{ url_for('static', filename='images/favicon.png') }}">
+    <title>用户管理 · DropLoad</title>
+    <link rel="stylesheet" href="{{ 'dropload.css' | versioned }}">
+</head>
+<body class="dropload-page">
+    <svg class="dl-sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+        <symbol id="i-arrow-down-to-line" viewBox="0 0 24 24"><path d="M12 17V3"/><path d="m6 11 6 6 6-6"/><path d="M19 21H5"/></symbol>
+    </svg>
+
+    <header class="dl-header">
+        <div class="dl-header-inner">
+            <a class="dl-brand" href="{{ url_for('index') }}">
+                <span class="dl-brand-mark"><svg class="dl-icon" aria-hidden="true"><use href="#i-arrow-down-to-line"></use></svg></span>
+                <span class="dl-brand-name">Drop<span>Load</span></span>
+            </a>
+            <div class="dl-header-actions">
+                <a class="dl-header-link" href="{{ url_for('index') }}">返回</a>
+            </div>
+        </div>
+    </header>
+
+    <div class="dl-page">
+        <section class="dl-card dl-admin">
+            <div class="dl-admin-header">
+                <div>
+                    <h1>用户管理</h1>
+                    <p>待审批的账号需要放行后才能登录。</p>
+                </div>
+                <span class="dl-task-count">{{ users|length }} 个账号</span>
+            </div>
+
+            <div class="dl-admin-scroll">
+                <table class="dl-admin-table">
+                    <thead>
+                        <tr>
+                            <th>邮箱</th>
+                            <th>昵称</th>
+                            <th>角色</th>
+                            <th>状态</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for user in users %}
+                        <tr>
+                            <td class="dl-admin-email">{{ user.email }}</td>
+                            <td>{{ user.display_name }}</td>
+                            <td>{% if user.role == 'admin' %}管理员{% else %}用户{% endif %}</td>
+                            <td>
+                                <span class="dl-admin-status" data-status="{{ user.status }}">
+                                    {%- if user.status == 'active' %}已启用
+                                    {%- elif user.status == 'pending' %}待审批
+                                    {%- else %}已停用{% endif -%}
+                                </span>
+                            </td>
+                            <td class="dl-admin-actions">
+                                {% if user.id == current_user_id %}
+                                <span class="dl-admin-self">当前账号</span>
+                                {% else %}
+                                    {% if user.status != 'active' %}
+                                    <form method="post" action="{{ url_for('admin_set_status', user_id=user.id) }}">
+                                        <input type="hidden" name="status" value="active">
+                                        <button class="dl-admin-button" type="submit">放行</button>
+                                    </form>
+                                    {% endif %}
+                                    {% if user.status != 'disabled' %}
+                                    <form method="post" action="{{ url_for('admin_set_status', user_id=user.id) }}">
+                                        <input type="hidden" name="status" value="disabled">
+                                        <button class="dl-admin-button dl-admin-button-danger" type="submit">停用</button>
+                                    </form>
+                                    {% endif %}
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    {% include '_site_footer.html' %}
+</body>
+</html>

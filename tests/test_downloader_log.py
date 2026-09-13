@@ -4,12 +4,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 import app as app_module
+import user_store
+from auth_helper import install_auth
 
 
 class TestDownloaderLogAPI(unittest.TestCase):
     def setUp(self):
         app_module.app.config['TESTING'] = True
         self.client = app_module.app.test_client()
+        install_auth(self)
 
     def request_log(
         self,
@@ -124,6 +127,10 @@ class TestDownloaderLogAPI(unittest.TestCase):
             urls_dir.mkdir()
             log_dir.mkdir()
             task_id = 'v20260831172600AbC'
+            # 任务日志只对任务归属者开放，测试里需登记归属
+            user_store.record_tasks(
+                self.user_db_path, [task_id], self.logged_in_user['id']
+            )
             Path(urls_dir, f'{task_id}.txt').write_text(
                 'https://example.com/video', encoding='utf-8'
             )

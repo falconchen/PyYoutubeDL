@@ -4,7 +4,12 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
+import tempfile
+from pathlib import Path
+
 import app as app_module
+import user_store
+import youtube_auth
 from app import app
 
 
@@ -44,46 +49,162 @@ class TestOAuthRoutes(unittest.TestCase):
         with self.client.session_transaction() as sess:
             self.assertEqual(sess['oauth_code_verifier'], 'test-verifier')
 
-    @patch('youtube_auth.build_oauth_flow')
-    @patch('youtube_auth.save_token')
-    @patch('youtube_auth.clear_fail_lock')
-    @patch('youtube_auth.fetch_user_profile', return_value={
-        'channel_id': 'UCtest',
-        'name': '测试频道',
-        'avatar_url': 'https://example.com/avatar.png',
-    })
-    @patch('youtube_auth.save_user_profile')
-    @patch('bark_util.bark_notify')
-    def test_oauth_callback_saves_token_and_clears_lock(
-        self, bark_notify, save_user_profile, fetch_user_profile,
-        clear_lock, save_token, build_flow,
-    ):
+    def _flow_with_credentials(self, refresh_token='refresh-token'):
         flow = MagicMock()
         flow.credentials = MagicMock()
-        flow.credentials.refresh_token = 'refresh-token'
+        flow.credentials.refresh_token = refresh_token
+        flow.credentials.token = 'access-token'
         flow.credentials.to_json.return_value = json.dumps({
             'token': 'access-token',
-            'refresh_token': 'refresh-token',
+            'refresh_token': refresh_token,
             'token_uri': 'https://oauth2.googleapis.com/token',
             'client_id': 'cid',
             'client_secret': 'cs',
-            'scopes': ['https://www.googleapis.com/auth/youtube'],
+            'scopes': list(youtube_auth.FULL_SCOPES),
         })
+        return flow
+
+    @patch('app.fetch_google_userinfo')
+    @patch('youtube_auth.build_oauth_flow')
+    def test_google_login_creates_first_admin_and_signs_in(
+        self, build_flow, userinfo,
+    ):
+        flow = self._flow_with_credentials()
         build_flow.return_value = flow
+        userinfo.return_value = {
+            'sub': 'google-sub-1',
+            'email': 'first@example.com',
+            'name': '第一个用户',
+        }
 
-        with self.client.session_transaction() as sess:
-            sess['oauth_state'] = 'fixed_state'
-            sess['oauth_code_verifier'] = 'test-verifier'
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = str(Path(directory, 'users.sqlite3'))
+            user_store.init_db(db_path)
+            with patch.object(app_module, 'USER_DB_PATH', db_path):
+                with self.client.session_transaction() as sess:
+                    sess['oauth_state'] = 'fixed_state'
+                    sess['oauth_code_verifier'] = 'test-verifier'
+                    sess['oauth_intent'] = 'login'
 
-        response = self.client.get('/oauth/callback?code=CODE&state=fixed_state')
+                response = self.client.get(
+                    '/oauth/callback?code=CODE&state=fixed_state'
+                )
+
+                user = user_store.get_user_by_email(db_path, 'first@example.com')
+                identity = user_store.get_identity(
+                    db_path, user_store.PROVIDER_GOOGLE, 'google-sub-1'
+                )
+                token = user_store.load_google_token(db_path, user['id'])
+                with self.client.session_transaction() as sess:
+                    signed_in = sess.get(app_module.SESSION_USER_KEY)
+
+        # 首个 Google 登录者同样成为管理员并直接可用
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(flow.code_verifier, 'test-verifier')
+        self.assertEqual(user['role'], user_store.ROLE_ADMIN)
+        self.assertEqual(user['status'], user_store.STATUS_ACTIVE)
+        self.assertEqual(identity['user_id'], user['id'])
+        self.assertIn('refresh-token', token['token_json'])
+        self.assertEqual(signed_in, user['id'])
+
+    @patch('app.fetch_google_userinfo')
+    @patch('youtube_auth.build_oauth_flow')
+    def test_google_login_second_user_waits_for_approval(
+        self, build_flow, userinfo,
+    ):
+        build_flow.return_value = self._flow_with_credentials()
+        userinfo.return_value = {
+            'sub': 'google-sub-2',
+            'email': 'second@example.com',
+            'name': '第二个用户',
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = str(Path(directory, 'users.sqlite3'))
+            user_store.init_db(db_path)
+            user_store.create_user(db_path, 'admin@example.com', password='pw123456')
+            with patch.object(app_module, 'USER_DB_PATH', db_path):
+                with self.client.session_transaction() as sess:
+                    sess['oauth_state'] = 's'
+                    sess['oauth_code_verifier'] = 'v'
+                    sess['oauth_intent'] = 'login'
+
+                response = self.client.get('/oauth/callback?code=CODE&state=s')
+                created = user_store.get_user_by_email(db_path, 'second@example.com')
+                with self.client.session_transaction() as sess:
+                    signed_in = sess.get(app_module.SESSION_USER_KEY)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(flow.code_verifier, 'test-verifier')
-        flow.fetch_token.assert_called_once_with(code='CODE')
-        save_token.assert_called_once()
-        clear_lock.assert_called_once()
-        fetch_user_profile.assert_called_once()
-        save_user_profile.assert_called_once()
+        self.assertIn('等待管理员审批', response.get_data(as_text=True))
+        self.assertEqual(created['status'], user_store.STATUS_PENDING)
+        self.assertIsNone(signed_in)
+
+    @patch('app.fetch_google_userinfo')
+    @patch('youtube_auth.build_oauth_flow')
+    def test_google_bind_attaches_token_to_current_user(
+        self, build_flow, userinfo,
+    ):
+        build_flow.return_value = self._flow_with_credentials()
+        userinfo.return_value = {
+            'sub': 'google-sub-3',
+            'email': 'bound@gmail.com',
+            'name': '绑定账号',
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = str(Path(directory, 'users.sqlite3'))
+            user_store.init_db(db_path)
+            owner = user_store.create_user(
+                db_path, 'owner@example.com', password='pw123456'
+            )
+            with patch.object(app_module, 'USER_DB_PATH', db_path):
+                with self.client.session_transaction() as sess:
+                    sess[app_module.SESSION_USER_KEY] = owner['id']
+                    sess['oauth_state'] = 's'
+                    sess['oauth_code_verifier'] = 'v'
+                    sess['oauth_intent'] = 'bind'
+
+                response = self.client.get('/oauth/callback?code=CODE&state=s')
+                identity = user_store.get_identity_for_user(
+                    db_path, user_store.PROVIDER_GOOGLE, owner['id']
+                )
+                token = user_store.load_google_token(db_path, owner['id'])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('绑定成功', response.get_data(as_text=True))
+        self.assertEqual(identity['provider_user_id'], 'google-sub-3')
+        # 绑定申请的是含 YouTube 与 Drive 的完整 scope
+        self.assertIn('drive.file', token['scopes'])
+        self.assertIn('youtube', token['scopes'])
+
+    @patch('app.fetch_google_userinfo')
+    @patch('youtube_auth.build_oauth_flow')
+    def test_google_bind_rejects_account_bound_elsewhere(
+        self, build_flow, userinfo,
+    ):
+        build_flow.return_value = self._flow_with_credentials()
+        userinfo.return_value = {'sub': 'shared-sub', 'email': 'x@gmail.com'}
+
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = str(Path(directory, 'users.sqlite3'))
+            user_store.init_db(db_path)
+            first = user_store.create_user(db_path, 'a@example.com', password='pw123456')
+            second = user_store.create_user(db_path, 'b@example.com', password='pw123456')
+            user_store.set_status(db_path, second['id'], user_store.STATUS_ACTIVE)
+            user_store.link_identity(
+                db_path, user_store.PROVIDER_GOOGLE, 'shared-sub', first['id']
+            )
+            with patch.object(app_module, 'USER_DB_PATH', db_path):
+                with self.client.session_transaction() as sess:
+                    sess[app_module.SESSION_USER_KEY] = second['id']
+                    sess['oauth_state'] = 's'
+                    sess['oauth_code_verifier'] = 'v'
+                    sess['oauth_intent'] = 'bind'
+
+                response = self.client.get('/oauth/callback?code=CODE&state=s')
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('已绑定到其他用户', response.get_data(as_text=True))
 
     @patch('youtube_auth.build_oauth_flow')
     def test_oauth_callback_rejects_state_mismatch(self, build_flow):
@@ -97,17 +218,28 @@ class TestOAuthRoutes(unittest.TestCase):
 
     @patch('youtube_auth.build_oauth_flow')
     def test_oauth_callback_requires_refresh_token(self, build_flow):
-        flow = MagicMock()
-        flow.credentials = MagicMock()
-        flow.credentials.refresh_token = None
+        flow = self._flow_with_credentials(refresh_token=None)
         build_flow.return_value = flow
 
-        with self.client.session_transaction() as sess:
-            sess['oauth_state'] = 's'
-            sess['oauth_code_verifier'] = 'test-verifier'
+        with tempfile.TemporaryDirectory() as directory, patch(
+            'app.fetch_google_userinfo',
+            return_value={'sub': 'sub-x', 'email': 'x@gmail.com'},
+        ):
+            db_path = str(Path(directory, 'users.sqlite3'))
+            user_store.init_db(db_path)
+            owner = user_store.create_user(
+                db_path, 'owner@example.com', password='pw123456'
+            )
+            with patch.object(app_module, 'USER_DB_PATH', db_path):
+                with self.client.session_transaction() as sess:
+                    sess[app_module.SESSION_USER_KEY] = owner['id']
+                    sess['oauth_state'] = 's'
+                    sess['oauth_code_verifier'] = 'test-verifier'
+                    sess['oauth_intent'] = 'bind'
 
-        response = self.client.get('/oauth/callback?code=CODE&state=s')
+                response = self.client.get('/oauth/callback?code=CODE&state=s')
 
+        # 绑定必须拿到离线凭据，否则后台 worker 无法续期
         self.assertEqual(response.status_code, 400)
         flow.fetch_token.assert_called_once_with(code='CODE')
 

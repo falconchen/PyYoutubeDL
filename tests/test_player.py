@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import app as app_module
+from auth_helper import install_auth
 import ai_summary_store
 from app import app
 
@@ -25,6 +26,7 @@ class TestPlayerPage(unittest.TestCase):
         ai_summary_store.init_db(self.summary_db_path)
         self.client = app.test_client()
         app.testing = True
+        install_auth(self)
         app_module._probe_media_metadata.cache_clear()
         app_module._probe_media_source_url.cache_clear()
         self.source_url_patcher = patch('app.get_media_source_url', return_value='')

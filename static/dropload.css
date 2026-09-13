@@ -1430,3 +1430,355 @@
         padding: 0 32px 24px;
     }
 }
+
+/* 登录 / 注册 */
+
+.dl-auth-page {
+    display: flex;
+    min-height: 100vh;
+    flex-direction: column;
+}
+
+.dl-auth {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+}
+
+.dl-auth-card {
+    width: 100%;
+    max-width: 400px;
+    padding: 28px;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 8px 30px rgba(42, 72, 112, 0.05);
+}
+
+.dl-auth-brand {
+    margin-bottom: 24px;
+}
+
+.dl-auth-title {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+    color: #14213d;
+}
+
+.dl-auth-subtitle {
+    margin: 6px 0 0;
+    font-size: 14px;
+    line-height: 22px;
+    color: #8794a7;
+}
+
+.dl-auth-form {
+    margin-top: 20px;
+}
+
+.dl-auth-label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #445269;
+}
+
+.dl-auth-input {
+    width: 100%;
+    margin-bottom: 14px;
+    padding: 11px 12px;
+    border: 1px solid #dce4ef;
+    border-radius: 8px;
+    background: #fff;
+    font: inherit;
+    font-size: 14px;
+    color: inherit;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.dl-auth-input:focus {
+    border-color: #1769e0;
+    box-shadow: 0 0 0 3px rgba(23, 105, 224, 0.12);
+}
+
+.dl-auth-error {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border: 1px solid #f5c2c0;
+    border-radius: 8px;
+    background: #fdf0ef;
+    font-size: 13px;
+    color: #b4322c;
+}
+
+.dl-auth-submit {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    border: 0;
+    border-radius: 8px;
+    background: #1769e0;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.dl-auth-submit:hover {
+    background: #0f58c4;
+}
+
+.dl-auth-link-button {
+    margin-top: 20px;
+}
+
+.dl-auth-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 20px 0;
+    font-size: 12px;
+    color: #9aa8ba;
+}
+
+.dl-auth-divider::before,
+.dl-auth-divider::after {
+    flex: 1;
+    height: 1px;
+    background: #e6ebf2;
+    content: '';
+}
+
+.dl-auth-google {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 11px;
+    border: 1px solid #dce4ef;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #445269;
+    text-decoration: none;
+    transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.dl-auth-google:hover {
+    border-color: #1769e0;
+    color: #1769e0;
+}
+
+.dl-auth-switch {
+    margin: 20px 0 0;
+    font-size: 13px;
+    color: #8794a7;
+    text-align: center;
+}
+
+.dl-auth-switch a {
+    color: #1769e0;
+    text-decoration: none;
+}
+
+/* 顶栏账号菜单 */
+
+.dl-account {
+    position: relative;
+}
+
+.dl-account > summary {
+    cursor: pointer;
+    list-style: none;
+}
+
+.dl-account > summary::-webkit-details-marker {
+    display: none;
+}
+
+.dl-account-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 30;
+    width: 244px;
+    padding: 8px;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 12px 32px rgba(19, 33, 59, 0.14);
+}
+
+.dl-account-email {
+    margin: 4px 8px 8px;
+    overflow: hidden;
+    font-size: 12px;
+    color: #8794a7;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dl-account-bound {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 8px 8px;
+    font-size: 12px;
+    color: #24a05a;
+}
+
+.dl-account-bound .dl-icon {
+    width: 13px;
+    height: 13px;
+}
+
+.dl-account-item {
+    display: block;
+    width: 100%;
+    padding: 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    font: inherit;
+    font-size: 14px;
+    color: #334155;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.dl-account-item:hover {
+    background: #f5f8fc;
+}
+
+.dl-account-danger {
+    color: #d0453f;
+}
+
+.dl-account-hint {
+    margin: 4px 8px 0;
+    font-size: 12px;
+    line-height: 18px;
+    color: #9aa8ba;
+}
+
+/* 用户管理 */
+
+.dl-admin {
+    padding: 20px;
+}
+
+.dl-admin-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.dl-admin-header h1 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.dl-admin-header p {
+    margin: 4px 0 0;
+    font-size: 14px;
+    color: #8794a7;
+}
+
+.dl-admin-scroll {
+    overflow-x: auto;
+}
+
+.dl-admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.dl-admin-table th,
+.dl-admin-table td {
+    padding: 12px 10px;
+    border-bottom: 1px solid #edf1f5;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.dl-admin-table th {
+    font-size: 12px;
+    font-weight: 600;
+    color: #9aa8ba;
+}
+
+.dl-admin-email {
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dl-admin-status {
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: #eef2f7;
+    font-size: 12px;
+    font-weight: 600;
+    color: #65748a;
+}
+
+.dl-admin-status[data-status="active"] {
+    background: #e9f8ef;
+    color: #24a05a;
+}
+
+.dl-admin-status[data-status="pending"] {
+    background: #fff6df;
+    color: #d18a00;
+}
+
+.dl-admin-status[data-status="disabled"] {
+    background: #fdecec;
+    color: #d0453f;
+}
+
+.dl-admin-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.dl-admin-button {
+    padding: 6px 12px;
+    border: 1px solid #dce4ef;
+    border-radius: 8px;
+    background: #fff;
+    font: inherit;
+    font-size: 13px;
+    color: #445269;
+    cursor: pointer;
+}
+
+.dl-admin-button:hover {
+    border-color: #1769e0;
+    color: #1769e0;
+}
+
+.dl-admin-button-danger:hover {
+    border-color: #d0453f;
+    color: #d0453f;
+}
+
+.dl-admin-self {
+    font-size: 12px;
+    color: #9aa8ba;
+}

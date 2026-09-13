@@ -2,7 +2,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import user_store
 from app import app
+from auth_helper import logged_in_client
 
 
 class TestPublicInformationPages(unittest.TestCase):
@@ -29,7 +31,8 @@ class TestPublicInformationPages(unittest.TestCase):
                 self.assertIn('href="/privacy"', html)
 
     def test_download_page_links_to_public_information_pages(self):
-        response = self.client.get('/')
+        with logged_in_client() as (client, _user, _db):
+            response = client.get('/')
         html = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
@@ -45,52 +48,50 @@ class TestPublicInformationPages(unittest.TestCase):
         self.assertIn('padding-top: 1rem;', footer_rule)
 
 
-class TestIndexOAuthStatus(unittest.TestCase):
+class TestAuthEntryPoints(unittest.TestCase):
     def setUp(self):
         self.client = app.test_client()
         app.testing = True
 
-    @patch('youtube_auth.load_user_profile', return_value={
-        'channel_id': 'UCtest',
-        'name': '测试频道',
-        'avatar_url': 'https://example.com/avatar.png',
-    })
-    @patch('youtube_auth.load_token', return_value={'token': 'x'})
-    def test_index_hides_avatar_and_name_when_authorized(
-        self, load_token, load_profile,
-    ):
-        # 公开站点：即使已授权且有本地用户资料，也不渲染头像/用户名
+    def test_anonymous_index_redirects_to_login(self):
         response = self.client.get('/')
-        html = response.get_data(as_text=True)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertNotIn('测试频道', html)
-        self.assertNotIn('https://example.com/avatar.png', html)
-        self.assertIn('重新授权', html)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/login', response.headers['Location'])
 
-    @patch('youtube_auth.load_user_profile', return_value=None)
-    @patch('youtube_auth.load_token', return_value=None)
-    def test_index_shows_login_link_when_not_authorized(
-        self, load_token, load_profile,
-    ):
-        response = self.client.get('/')
+    def test_login_page_renders_without_session(self):
+        response = self.client.get('/login')
         html = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('登录', html)
-        self.assertNotIn('使用 Google 账号登录', html)
+        self.assertIn('name="email"', html)
+        self.assertIn('name="password"', html)
 
-    @patch('youtube_auth.load_user_profile', return_value=None)
-    @patch('youtube_auth.load_token', return_value={'token': 'x'})
-    def test_index_shows_relogin_link_when_authorized_without_profile(
-        self, load_token, load_profile,
-    ):
-        response = self.client.get('/')
-        html = response.get_data(as_text=True)
+    def test_signed_in_header_shows_account_menu_not_oauth_status(self):
+        with logged_in_client() as (client, user, _db):
+            html = client.get('/').get_data(as_text=True)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('重新授权', html)
-        self.assertNotIn('已授权', html)
+        # 多用户后顶栏展示账号菜单与绑定入口，不再显示全局授权状态
+        self.assertIn(user['display_name'], html)
+        self.assertIn('绑定 Google 账号', html)
+        self.assertIn('退出登录', html)
+        self.assertNotIn('重新授权 Google', html)
+
+    def test_bound_account_shows_rebind_and_unbind(self):
+        with logged_in_client() as (client, user, db_path):
+            user_store.link_identity(
+                db_path,
+                user_store.PROVIDER_GOOGLE,
+                'google-sub-1',
+                user['id'],
+                email='bound@gmail.com',
+            )
+            html = client.get('/').get_data(as_text=True)
+
+        self.assertIn('bound@gmail.com', html)
+        self.assertIn('重新授权 Google', html)
+        self.assertIn('解除绑定', html)
 
 
 if __name__ == '__main__':

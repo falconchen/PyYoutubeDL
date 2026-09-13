@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
 import app
+from auth_helper import install_auth
 
 
 class TestLooksLikePlaylist(unittest.TestCase):
@@ -291,6 +292,7 @@ class PlaylistSubmitTestCase(unittest.TestCase):
         self.urls_dir.mkdir()
         self.client = app.app.test_client()
         app.app.testing = True
+        install_auth(self)
         self.patch_urls = patch.object(app, 'URLS_DIR', str(self.urls_dir))
         self.patch_urls.start()
 

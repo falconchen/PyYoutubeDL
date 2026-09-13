@@ -6,6 +6,8 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import app as app_module
+import user_store
+from auth_helper import logged_in_client, other_user
 
 
 def bootstrap_payload(html):
@@ -20,7 +22,11 @@ def bootstrap_payload(html):
 
 
 def test_library_routes_carry_view_tab_and_file():
-    client = app_module.app.test_client()
+    with logged_in_client() as (client, _user, _db):
+        _assert_routes(client)
+
+
+def _assert_routes(client):
     cases = [
         ('/', 'download', 'video', ''),
         ('/?view=library', 'library', 'video', ''),
@@ -33,7 +39,7 @@ def test_library_routes_carry_view_tab_and_file():
     ]
     for path, view, tab, requested in cases:
         response = client.get(path)
-        assert response.status_code == 200
+        assert response.status_code == 200, path
         payload = bootstrap_payload(response.get_data(as_text=True))
         assert payload['view'] == view, path
         assert payload['tab'] == tab, path
@@ -51,14 +57,14 @@ def test_requested_file_wins_over_tab():
 
 
 def test_media_list_splits_video_and_audio():
-    with TemporaryDirectory() as files_dir:
+    with logged_in_client() as (client, _user, _db), TemporaryDirectory() as files_dir:
         for name in ['video.mp4', 'audio.mp3', "quote's video.mp4"]:
             Path(files_dir, name).touch()
         with patch('app.FILES_DIR', files_dir):
-            response = app_module.app.test_client().get('/api/media_list')
+            response = client.get('/api/media_list')
+            payload = response.get_json()
 
     assert response.status_code == 200
-    payload = response.get_json()
     assert payload['success'] is True
     assert {item['filename'] for item in payload['video']} == {
         'video.mp4',
@@ -72,21 +78,22 @@ def test_media_list_splits_video_and_audio():
 
 
 def test_media_list_applies_exclude_keywords():
-    with TemporaryDirectory() as files_dir:
+    with logged_in_client() as (client, _user, _db), TemporaryDirectory() as files_dir:
         for name in ['keep.mp4', 'skip-me.mp4']:
             Path(files_dir, name).touch()
         with patch('app.FILES_DIR', files_dir), patch.dict(
             app_module.config,
             {'PLAYER_FILENAME_EXCLUDE_KEYWORDS': ['skip']},
         ):
-            response = app_module.app.test_client().get('/api/media_list')
+            payload = client.get('/api/media_list').get_json()
 
-    assert [item['filename'] for item in response.get_json()['video']] == ['keep.mp4']
+    assert [item['filename'] for item in payload['video']] == ['keep.mp4']
 
 
 def test_empty_library_returns_empty_lists():
-    with TemporaryDirectory() as files_dir, patch('app.FILES_DIR', files_dir):
-        payload = app_module.app.test_client().get('/api/media_list').get_json()
+    with logged_in_client() as (client, _user, _db), TemporaryDirectory() as files_dir:
+        with patch('app.FILES_DIR', files_dir):
+            payload = client.get('/api/media_list').get_json()
 
     assert payload['success'] is True
     assert payload['video'] == []
@@ -94,8 +101,48 @@ def test_empty_library_returns_empty_lists():
 
 
 def test_library_panel_has_accessible_tabs():
-    html = app_module.app.test_client().get('/player').get_data(as_text=True)
+    with logged_in_client() as (client, _user, _db):
+        html = client.get('/player').get_data(as_text=True)
 
     assert 'role="tablist"' in html
     assert 'data-tab="video"' in html
     assert 'data-tab="audio"' in html
+
+
+def test_media_list_only_returns_own_files():
+    """媒体私有：他人下载的文件不应出现在自己的媒体库里。"""
+    with logged_in_client() as (client, user, db_path), TemporaryDirectory() as files_dir:
+        Path(files_dir, 'mine.mp4').touch()
+        Path(files_dir, 'theirs.mp4').touch()
+        stranger = other_user(db_path)
+        user_store.record_media(db_path, 'mine.mp4', user['id'])
+        user_store.record_media(db_path, 'theirs.mp4', stranger['id'])
+
+        with patch('app.FILES_DIR', files_dir):
+            payload = client.get('/api/media_list').get_json()
+
+    assert [item['filename'] for item in payload['video']] == ['mine.mp4']
+
+
+def test_serving_another_users_file_is_not_found():
+    with logged_in_client() as (client, _user, db_path), TemporaryDirectory() as files_dir:
+        Path(files_dir, 'theirs.mp4').write_bytes(b'x')
+        stranger = other_user(db_path)
+        user_store.record_media(db_path, 'theirs.mp4', stranger['id'])
+
+        with patch('app.FILES_DIR', files_dir):
+            played = client.get('/files/theirs.mp4')
+            downloaded = client.get('/downloads/theirs.mp4')
+
+    # 用 404 而不是 403，避免泄露「该文件存在」
+    assert played.status_code == 404
+    assert downloaded.status_code == 404
+
+
+def test_anonymous_is_redirected_to_login():
+    app_module.app.testing = True
+    client = app_module.app.test_client()
+
+    assert client.get('/').status_code == 302
+    assert client.get('/player').status_code == 302
+    assert client.get('/api/media_list').status_code == 401

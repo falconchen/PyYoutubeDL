@@ -298,6 +298,28 @@ journalctl -u pyyoutubedl -f    # 实时日志
 
 启动后访问 `http://<host>:5100`，通过网页提交 YouTube/小红书/Bilibili 等链接，选择视频或音频模式即可下载。
 
+### 账号与多用户
+
+本站需要登录使用。**第一个注册的账号自动成为管理员**并直接可用，同时接管升级前已有的下载任务、`FILES_DIR` 中的文件和原先的全局 Google 令牌；之后注册的账号一律进入待审批状态，由管理员在 `/admin` 放行或停用。把 `REGISTRATION_OPEN` 置为 `false` 可以彻底关闭自助注册（对第一个管理员账号不生效，否则会无法初始化）。
+
+任务和媒体按用户隔离：每个人只能看到自己提交的任务与自己下载的文件，跨用户访问 `/files`、`/downloads`、`/api/task_info` 等一律按「不存在」处理，不区分「无权限」和「不存在」。
+
+登录方式有两种，可以混用：
+
+- **邮箱 + 密码**：密码用 Werkzeug 的 PBKDF2 哈希存储，不保存明文。
+- **Google 登录**：`/oauth/start?intent=login`，只申请身份 scope（openid、email、profile）。若该 Google 邮箱已有本地账号，会直接绑定到这个账号而不是新建。
+
+用密码注册的账号也可以随时在顶栏账号菜单里**绑定 Google**（`/oauth/start?intent=bind`）。绑定申请的是完整 scope，用于：
+
+- **YouTube 播放列表监控**：`playlist_monitor.py` 会遍历所有已绑定且启用的用户，用各自的令牌轮询 `MONITOR_PLAYLISTS`，下发的任务归属于对应用户。
+- **Google Drive 授权**：已申请 `drive.file` scope 并按用户保存令牌，上传功能本身尚未实现。
+
+绑定必须拿到 `refresh_token`，否则后台 worker 无法续期。若绑定报「未返回 refresh_token」，请到 Google 账号的第三方授权页面移除本应用后重新绑定。
+
+账号、身份绑定、令牌与归属关系都存放在 `USER_DB_PATH` 指定的 SQLite 库（默认 `./data/users.sqlite3`，WAL 模式）。该目录已在 `.gitignore` 中。
+
+> **从单用户升级**：首次启动后立即注册你自己的管理员账号，历史数据会归到该账号名下。在此之前页面会把所有访问重定向到登录页。原先的 `GOOGLE_OAUTH_TOKEN_FILE` 仅用于一次性接管，之后令牌以数据库中的为准。Google OAuth 的回调地址仍是 `/oauth/callback`，无需在 Google 控制台改配置，但新增的 Drive scope 需要重新授权一次才会生效。
+
 页面是单页双模式，顶栏的分段控件在「下载器」和「媒体库」之间切换。媒体库播放 `FILES_DIR` 中已下载的视频和音频，列表来自 `/api/media_list`，播放器使用 [zwplayer](https://github.com/chenfanyu/zwplayer-release)（静态资源在 `static/zwplayer/`）。`/player` 和 `/audio-player` 仍然可用，直接打开媒体库并分别默认选中视频或音频；带 `file` 参数时定位到该文件。
 
 站点提供以下公开信息页面，并在主页面页脚提供入口：
@@ -413,6 +435,8 @@ curl http://localhost:5100/api/ai_summaries/jobs/<job_id> \
 
 `/api/task_info` 会返回任务的 `state`（`queued`、`downloading`、`completed`、`failed` 或 `missing`）和 `progress`。下载中任务的 `progress` 包含可用的 `percent`、`downloaded`、`total`、`speed`、`eta` 等字段；新任务完成后包含 `final_size_bytes`、`elapsed_seconds`、`average_speed_bytes_per_second`。视频或音频任务完成并且主媒体产物仍在本地时，还会返回对应的 `player_url`。
 
+除 `/healthz` 与公开信息页外，页面和接口都需要登录；未登录时页面重定向到 `/login`，`/api/*` 返回 401。下列 curl 示例需要先带上登录后的会话 cookie。
+
 `/api/media_list` 返回媒体库需要的视频与音频条目，各自按修改时间倒序，沿用 `PLAYER_FILENAME_EXCLUDE_KEYWORDS` 过滤。每个条目包含文件名、标题、作者、来源链接、封面、扩展名、时长、视频高度、文件大小以及播放和下载地址。时长和高度由 `ffprobe` 读取并按文件属性缓存，目录中文件较多时首次请求需要数秒。
 
 `/api/task_log` 只返回请求任务对应的任务日志，以及 `downloader.log` 中包含这些任务 ID 或任务 URL 的日志行，供首页右侧日志侧栏滚动显示；不会把完整全局日志或日志访问令牌发送给浏览器。返回前会将项目绝对路径替换为 `📁`，避免把服务器目录结构暴露给用户。
@@ -486,6 +510,9 @@ video (2).mp4
 | `WEBDAV_RECONNECT_INTERVAL` | int | 上传器启动时 WebDAV 不可用的重连间隔（秒），默认 30；等待期间发现的媒体文件会排队并在连接恢复后上传 |
 | `BARK_DEVICE_TOKEN` | string | Bark 推送通知 Token |
 | `EXTENSION_LOG_TOKEN` | string | Chrome 扩展读取 `downloader.log` 的访问令牌；为空时禁用日志接口 |
+| `USER_DB_PATH` | string | 用户、身份绑定与 Google 令牌数据库，默认 `./data/users.sqlite3` |
+| `REGISTRATION_OPEN` | bool | 是否允许自助注册，默认 `true`；首个管理员账号不受限制 |
+| `SESSION_COOKIE_SECURE` | bool | HTTPS 部署时置为 `true`，给会话 cookie 加 Secure，默认 `false` |
 | `AI_SUMMARY_DB_PATH` | string | AI 总结 SQLite 数据库路径，默认 `./data/ai_summaries.sqlite3` |
 | `AI_SUMMARY_ACCESS_TOKEN` | string | Chrome 扩展调用 AI 总结接口的独立访问令牌；为空时禁用扩展接口 |
 | `AI_SUMMARY_JOB_RETENTION_DAYS` | int | 已完成和失败的 AI 总结任务记录保留天数，默认 30；总结正文不随任务清理 |
@@ -703,6 +730,7 @@ PyYoutubeDL/
 ├── playlist_monitor.py   # 播放列表监控 worker（可选）
 ├── youtube_auth.py       # YouTube OAuth / Data API 封装
 ├── task_queue.py         # 下载任务写入（Web 与 worker 共用）
+├── user_store.py         # 用户、身份绑定、Google 令牌与资源归属（SQLite）
 ├── runner.sh             # 启动脚本
 ├── supervisor-runner.sh  # Supervisor 部署维护脚本
 ├── deploy/               # 开发机与远端发布脚本

@@ -46,10 +46,34 @@
                     <a class="dl-mode" data-view="download" href="{{ url_for('index') }}">下载器</a>
                     <a class="dl-mode" data-view="library" href="{{ url_for('player') }}">媒体库</a>
                 </nav>
-                <a class="dl-header-link" href="{{ url_for('oauth_start') }}">
-                    <svg class="dl-icon" aria-hidden="true"><use href="#i-log-in"></use></svg>
-                    <span>{% if is_authorized %}重新授权{% else %}登录{% endif %}</span>
-                </a>
+                <details class="dl-account">
+                    <summary class="dl-header-link">
+                        <svg class="dl-icon" aria-hidden="true"><use href="#i-user"></use></svg>
+                        <span class="dl-header-link-text">{{ current_user.display_name }}</span>
+                    </summary>
+                    <div class="dl-account-menu">
+                        <p class="dl-account-email">{{ current_user.email }}</p>
+                        {% if google_identity %}
+                        <p class="dl-account-bound">
+                            <svg class="dl-icon" aria-hidden="true"><use href="#i-check"></use></svg>
+                            已绑定 {{ google_identity.email or google_identity.display_name }}
+                        </p>
+                        <a class="dl-account-item" href="{{ url_for('oauth_start', intent='bind') }}">重新授权 Google</a>
+                        <form method="post" action="{{ url_for('google_unbind') }}">
+                            <button class="dl-account-item dl-account-danger" type="submit">解除绑定</button>
+                        </form>
+                        {% else %}
+                        <a class="dl-account-item" href="{{ url_for('oauth_start', intent='bind') }}">绑定 Google 账号</a>
+                        <p class="dl-account-hint">绑定后可监视 YouTube 播放列表，并授权上传到 Google Drive。</p>
+                        {% endif %}
+                        {% if current_user.role == 'admin' %}
+                        <a class="dl-account-item" href="{{ url_for('admin') }}">用户管理</a>
+                        {% endif %}
+                        <form method="post" action="{{ url_for('logout') }}">
+                            <button class="dl-account-item" type="submit">退出登录</button>
+                        </form>
+                    </div>
+                </details>
             </div>
         </div>
     </header>
