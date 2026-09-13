@@ -1,22 +1,20 @@
 services:
-  pyyoutubedl:
+  pydl:
     build:
       context: .
-    image: pyyoutubedl:latest
+    image: pydl:latest
     restart: unless-stopped
+    # Docker 自动创建的绑定目录通常属于 root。目录已授权给普通用户时，
+    # 可在 .env 中设置 PYYOUTUBEDL_UID/PYYOUTUBEDL_GID 覆盖默认值。
+    user: "${PYYOUTUBEDL_UID:-0}:${PYYOUTUBEDL_GID:-0}"
+    environment:
+      PYYOUTUBEDL_RUNTIME_CONFIG_DIR: /app/runtime-config
     ports:
       - "5100:5100"
     volumes:
-      - ./config.json:/app/config.json:ro
-      - pyyoutubedl-urls:/app/urls
-      - pyyoutubedl-tmp:/app/tmp
-      - pyyoutubedl-files:/app/files
-      - pyyoutubedl-logs:/app/logs
-      - pyyoutubedl-data:/app/data
-
-volumes:
-  pyyoutubedl-urls:
-  pyyoutubedl-tmp:
-  pyyoutubedl-files:
-  pyyoutubedl-logs:
-  pyyoutubedl-data:
+      - ${PYYOUTUBEDL_CONFIG_DIR:-.}:/app/runtime-config:ro
+      - ${PYYOUTUBEDL_URLS_PATH:-./urls}:/app/urls
+      - ${PYYOUTUBEDL_TMP_PATH:-./tmp}:/app/tmp
+      - ${PYYOUTUBEDL_FILES_PATH:-./files}:/app/files
+      - ${PYYOUTUBEDL_LOGS_PATH:-./logs}:/app/logs
+      - ${PYYOUTUBEDL_DATA_PATH:-./data}:/app/data

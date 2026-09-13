@@ -74,43 +74,73 @@ Web 应用、下载器，以及按配置启用的 AI 总结、WebDAV 和播放�
 
 ```bash
 cp config.sample.json config.json
+# 可选：复制后修改 Compose 的宿主机路径和运行 UID/GID
+cp .env.example .env
 # 编辑 config.json，至少检查 WebDAV、AI、OAuth、Cookie 和目录配置
 docker compose build
 docker compose up -d
 docker compose ps
 ```
 
-访问 `http://127.0.0.1:5100/`。Compose 会将 `config.json` 只读挂载到容器，
-并用具名卷持久化 `urls`、`tmp`、`files`、`logs` 和 `data`。这些卷包含任务、
-下载产物、日志、AI 总结数据库和 OAuth 令牌，删除卷前应确认数据已备份。
+访问 `http://127.0.0.1:5100/`。Compose 会将配置目录整体只读挂载到容器的
+`/app/runtime-config`；默认配置目录为当前项目目录，其中应包含 `config.json`、
+`yt-dlp.conf` 和 `yta-dlp.conf`。`urls`、`tmp`、`files`、`logs` 和 `data`
+仍分别绑定到当前项目目录下的同名目录。运行目录不存在时 Docker 会自动创建；
+其中包含任务、下载产物、日志、AI 总结数据库和 OAuth 令牌，清理前应确认数据
+已备份。
+
+以下宿主机路径可在 `.env` 中覆盖；相对路径以 `compose.yaml` 所在目录为基准：
+
+| 环境变量 | 默认值 | 容器路径 |
+|---|---|---|
+| `PYYOUTUBEDL_CONFIG_DIR` | `.` | `/app/runtime-config`（只读） |
+| `PYYOUTUBEDL_URLS_PATH` | `./urls` | `/app/urls` |
+| `PYYOUTUBEDL_TMP_PATH` | `./tmp` | `/app/tmp` |
+| `PYYOUTUBEDL_FILES_PATH` | `./files` | `/app/files` |
+| `PYYOUTUBEDL_LOGS_PATH` | `./logs` | `/app/logs` |
+| `PYYOUTUBEDL_DATA_PATH` | `./data` | `/app/data` |
+
+不创建 `.env` 时直接使用上述默认值。真实 `.env` 已被 Git 忽略，仓库仅提供
+`.env.example` 模板。
 
 `config.json`、`*.local.conf`、Cookie、Token 和运行时目录均被 `.dockerignore`
-排除，不会进入构建上下文。若需要 Cookie 或本机 `yt-dlp.local.conf`，应额外
-使用只读卷挂载，并确保配置中的容器内路径与挂载目标一致。例如：
+排除，不会进入镜像构建上下文。若使用独立配置目录，应先放入三个必需文件：
 
-```yaml
-services:
-  pyyoutubedl:
-    volumes:
-      - ./yt-dlp.local.conf:/app/yt-dlp.local.conf:ro
-      - /宿主机/cookies.txt:/run/secrets/youtube-cookies.txt:ro
+```text
+/etc/pyyoutubedl/
+├── config.json
+├── yt-dlp.conf
+└── yta-dlp.conf
 ```
 
-此时 Cookie 参数应指向 `/run/secrets/youtube-cookies.txt`。配置中的
-`localhost` 指向容器自身；访问宿主机上的 YTC、代理或 bgutil provider 时，
-需改为容器可达的宿主机地址。镜像以 UID/GID `1000:1000` 的非 root 用户运行，
-改用宿主机目录绑定挂载时，该用户必须对目录拥有读写权限。
+然后在 `.env` 中设置 `PYYOUTUBEDL_CONFIG_DIR=/etc/pyyoutubedl`。Cookie 或
+`*.local.conf` 也可放在该目录；配置中的 Cookie 路径应使用容器路径，例如
+`/app/runtime-config/youtube-cookies.txt`。配置中的 `localhost` 指向容器自身；
+访问宿主机上的 YTC、代理或 bgutil provider 时，需改为容器可达的宿主机地址。
+
+由于挂载的是目录，宿主机用编辑器原子替换 `yt-dlp.conf` 或 `yta-dlp.conf`
+后，容器也能看到新文件；新配置从下一次 yt-dlp 调用开始生效，不影响正在执行的
+任务。`config.json` 仍由各服务启动时加载，修改后需要重启容器。
+
+镜像直接运行时使用 UID/GID `1000:1000` 的非 root 用户。Compose 为兼容
+Docker 自动创建的 `root:root` 绑定目录，默认覆盖为 `0:0` 运行。若目录已授权给
+普通用户，建议在项目的 `.env` 中设置实际 UID/GID，恢复非 root 运行：
+
+```dotenv
+PYYOUTUBEDL_UID=1000
+PYYOUTUBEDL_GID=1000
+```
 
 推送到 `master` 或创建 `v*` 版本标签后，GitHub Actions 会自动构建
 `linux/amd64`、`linux/arm64` 镜像并发布到
-`ghcr.io/falconchen/pyyoutubedl`。PR 只验证构建，不发布镜像。`master`
+`ghcr.io/falconchen/pydl`。PR 只验证构建，不发布镜像。`master`
 对应 `latest`、`master` 和 `sha-<短提交哈希>` 标签；`v1.2.3` 还会生成
 `1.2.3`、`1.2` 和 `1` 标签。工作流使用 GitHub 自动提供的
 `GITHUB_TOKEN`，无需保存额外 Registry 凭据，但仓库 Actions 权限必须允许
 写入 Packages。首次发布后请在 GitHub Packages 页面确认镜像为公开可见。
 
 ```bash
-docker pull ghcr.io/falconchen/pyyoutubedl:latest
+docker pull ghcr.io/falconchen/pydl:latest
 ```
 
 ### 3. 启动

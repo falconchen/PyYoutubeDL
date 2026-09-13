@@ -1,4 +1,5 @@
 import io
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -106,6 +107,45 @@ class TestConfigLoading(unittest.TestCase):
 
         self.assertEqual(result['FLASK_PORT'], 5100)
         self.assertIn('加载配置文件失败，使用默认配置', output.getvalue())
+
+    def test_runtime_config_directory_can_be_overridden(self):
+        with tempfile.TemporaryDirectory() as root:
+            config_dir = Path(root) / 'runtime-config'
+            config_dir.mkdir()
+            (config_dir / 'config.json').write_text(
+                '{"FLASK_PORT": 5500}',
+                encoding='utf-8',
+            )
+            with patch.dict(
+                os.environ,
+                {config_util.RUNTIME_CONFIG_DIR_ENV: str(config_dir)},
+            ):
+                result = config_util.load_config(
+                    default_config={'FLASK_PORT': 5100},
+                    config_keys=[],
+                )
+
+        self.assertEqual(result['FLASK_PORT'], 5500)
+
+    def test_ytdlp_config_uses_runtime_directory_and_local_override(self):
+        with tempfile.TemporaryDirectory() as root:
+            config_dir = Path(root)
+            default_path = config_dir / 'yt-dlp.conf'
+            default_path.write_text('--no-mtime\n', encoding='utf-8')
+            with patch.dict(
+                os.environ,
+                {config_util.RUNTIME_CONFIG_DIR_ENV: str(config_dir)},
+            ):
+                self.assertEqual(
+                    config_util.get_ytdlp_config_path('video'),
+                    str(default_path),
+                )
+                local_path = config_dir / 'yt-dlp.local.conf'
+                local_path.write_text('--verbose\n', encoding='utf-8')
+                self.assertEqual(
+                    config_util.get_ytdlp_config_path('video'),
+                    str(local_path),
+                )
 
 
 class TestPlaylistMonitorConfig(unittest.TestCase):

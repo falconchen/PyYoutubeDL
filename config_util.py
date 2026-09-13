@@ -6,6 +6,7 @@ import pytz
 
 MOVE_STAGING_PREFIX = '.pyyoutubedl-moving-'
 DEFAULT_PLAYLIST_MAX_ITEMS = 20
+RUNTIME_CONFIG_DIR_ENV = 'PYYOUTUBEDL_RUNTIME_CONFIG_DIR'
 
 # 默认配置
 DEFAULT_CONFIG = {
@@ -131,6 +132,28 @@ def is_playlist_monitor_enabled(runtime_config):
     )
 
 
+def get_runtime_config_dir():
+    """返回运行时配置目录；未设置环境变量时沿用项目根目录。"""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    configured_dir = os.environ.get(RUNTIME_CONFIG_DIR_ENV, '').strip()
+    if not configured_dir:
+        return base_dir
+    return os.path.abspath(os.path.join(base_dir, configured_dir))
+
+
+def get_ytdlp_config_path(mode='video'):
+    """返回 yt-dlp 配置路径，仍优先使用配置目录内的 local 覆盖文件。"""
+    default_name = 'yt-dlp.conf' if mode == 'video' else 'yta-dlp.conf'
+    config_dir = get_runtime_config_dir()
+    local_path = os.path.join(
+        config_dir,
+        default_name.replace('.conf', '.local.conf'),
+    )
+    if os.path.exists(local_path):
+        return local_path
+    return os.path.join(config_dir, default_name)
+
+
 def load_config(default_config=None, config_keys=None):
     """
     加载配置文件
@@ -148,7 +171,7 @@ def load_config(default_config=None, config_keys=None):
         config_keys = PATH_CONFIG_KEYS
 
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(BASE_DIR, 'config.json')
+    config_path = os.path.join(get_runtime_config_dir(), 'config.json')
 
     if os.path.exists(config_path):
         try:

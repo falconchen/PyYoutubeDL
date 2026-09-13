@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import hashlib
 import hmac
 from werkzeug.utils import safe_join
-from config_util import get_playlist_max_items, load_config
+from config_util import get_playlist_max_items, get_ytdlp_config_path, load_config
 import pytz
 from datetime import datetime
 import requests
@@ -190,16 +190,7 @@ def _is_channel_content_path(path):
 
 def _pick_ytdlp_conf(mode='video'):
     """选择 yt-dlp 配置文件，优先使用 .local.conf 本机覆盖版本。"""
-    default_conf_file = 'yt-dlp.conf' if mode == 'video' else 'yta-dlp.conf'
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    local_conf_path = os.path.join(
-        script_dir,
-        default_conf_file.replace('.conf', '.local.conf'),
-    )
-    default_conf_path = os.path.join(script_dir, default_conf_file)
-    if os.path.exists(local_conf_path):
-        return local_conf_path
-    return default_conf_path
+    return get_ytdlp_config_path(mode)
 
 
 def looks_like_playlist(url):
@@ -2381,15 +2372,7 @@ def api_video_info():
         return jsonify({"success": False, "msg": "Missing required parameter: url"}), 400
     
     try:
-        # 检查是否存在.local.conf文件
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        default_conf_file = 'yt-dlp.conf'
-        local_conf_file = default_conf_file.replace('.conf', '.local.conf')
-        local_conf_path = os.path.join(script_dir, local_conf_file)
-        default_conf_path = os.path.join(script_dir, default_conf_file)
-        
-        # 优先使用.local.conf文件，如果不存在则使用默认配置文件
-        conf_path = local_conf_path if os.path.exists(local_conf_path) else default_conf_path
+        conf_path = _pick_ytdlp_conf('video')
         cmd = [
             sys.executable, '-m', 'yt_dlp',
             '--config-location', conf_path,

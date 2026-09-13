@@ -21,6 +21,7 @@ from config_util import (
     MOVE_STAGING_PREFIX,
     build_dated_output_template,
     get_playlist_max_items,
+    get_ytdlp_config_path,
     load_config,
 )
 from log_util import setup_logger
@@ -564,16 +565,7 @@ class DownloadHandler(FileSystemEventHandler):
             bool: 下载成功返回 True，失败返回 False。
         """
         logger.info(f"开始下载: {url} ({mode})")
-        default_conf_file = 'yt-dlp.conf' if mode == 'video' else 'yta-dlp.conf'
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # 检查是否存在.local.conf文件
-        local_conf_file = default_conf_file.replace('.conf', '.local.conf')
-        local_conf_path = os.path.join(script_dir, local_conf_file)
-        default_conf_path = os.path.join(script_dir, default_conf_file)
-        
-        # 优先使用.local.conf文件，如果不存在则使用默认配置文件
-        conf_path = local_conf_path if os.path.exists(local_conf_path) else default_conf_path
+        conf_path = get_ytdlp_config_path(mode)
         logger.info(f"使用配置文件: {conf_path}")
         
         task_tmp_dir = os.path.join(config["TMP_DIR"], f"{base_name}")
