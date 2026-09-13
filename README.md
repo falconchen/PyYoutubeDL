@@ -101,6 +101,18 @@ services:
 需改为容器可达的宿主机地址。镜像以 UID/GID `1000:1000` 的非 root 用户运行，
 改用宿主机目录绑定挂载时，该用户必须对目录拥有读写权限。
 
+推送到 `master` 或创建 `v*` 版本标签后，GitHub Actions 会自动构建
+`linux/amd64`、`linux/arm64` 镜像并发布到
+`ghcr.io/falconchen/pyyoutubedl`。PR 只验证构建，不发布镜像。`master`
+对应 `latest`、`master` 和 `sha-<短提交哈希>` 标签；`v1.2.3` 还会生成
+`1.2.3`、`1.2` 和 `1` 标签。工作流使用 GitHub 自动提供的
+`GITHUB_TOKEN`，无需保存额外 Registry 凭据，但仓库 Actions 权限必须允许
+写入 Packages。首次发布后请在 GitHub Packages 页面确认镜像为公开可见。
+
+```bash
+docker pull ghcr.io/falconchen/pyyoutubedl:latest
+```
+
 ### 3. 启动
 
 ```bash
