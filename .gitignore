@@ -9,6 +9,7 @@ venv/
 urls/
 files/
 config.json
+!deploy/docker/config.json
 test/
 logs/
 *.local.conf

@@ -65,6 +65,42 @@ vim config.json
 
 主要配置项参见下方[配置说明](#配置说明)。
 
+### Docker 部署
+
+仓库提供 `Dockerfile` 和 `compose.yaml`。镜像包含 Python 运行环境、`ffmpeg`、
+Web 应用、下载器，以及按配置启用的 AI 总结、WebDAV 和播放列表监控 worker。
+
+先创建本机配置，再构建并启动：
+
+```bash
+cp config.sample.json config.json
+# 编辑 config.json，至少检查 WebDAV、AI、OAuth、Cookie 和目录配置
+docker compose build
+docker compose up -d
+docker compose ps
+```
+
+访问 `http://127.0.0.1:5100/`。Compose 会将 `config.json` 只读挂载到容器，
+并用具名卷持久化 `urls`、`tmp`、`files`、`logs` 和 `data`。这些卷包含任务、
+下载产物、日志、AI 总结数据库和 OAuth 令牌，删除卷前应确认数据已备份。
+
+`config.json`、`*.local.conf`、Cookie、Token 和运行时目录均被 `.dockerignore`
+排除，不会进入构建上下文。若需要 Cookie 或本机 `yt-dlp.local.conf`，应额外
+使用只读卷挂载，并确保配置中的容器内路径与挂载目标一致。例如：
+
+```yaml
+services:
+  pyyoutubedl:
+    volumes:
+      - ./yt-dlp.local.conf:/app/yt-dlp.local.conf:ro
+      - /宿主机/cookies.txt:/run/secrets/youtube-cookies.txt:ro
+```
+
+此时 Cookie 参数应指向 `/run/secrets/youtube-cookies.txt`。配置中的
+`localhost` 指向容器自身；访问宿主机上的 YTC、代理或 bgutil provider 时，
+需改为容器可达的宿主机地址。镜像以 UID/GID `1000:1000` 的非 root 用户运行，
+改用宿主机目录绑定挂载时，该用户必须对目录拥有读写权限。
+
 ### 3. 启动
 
 ```bash

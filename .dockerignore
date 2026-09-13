@@ -1,0 +1,31 @@
+.git
+.agent
+.pytest_cache
+.vscode
+__pycache__
+*.py[cod]
+*.log
+*.out
+*.swp
+*.bak
+*.bak-*
+
+# 本机配置和凭据不得进入镜像
+config.json
+!deploy/docker/config.json
+*.local.conf
+firefox-cookies.txt
+youtube-cookies.txt
+
+# 运行时数据使用卷挂载
+data/
+files/
+logs/
+tmp/
+urls/
+venv/
+
+# 开发和发布产物
+chrome-extension/node_modules/
+dist/
+test/

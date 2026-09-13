@@ -1,0 +1,22 @@
+services:
+  pyyoutubedl:
+    build:
+      context: .
+    image: pyyoutubedl:latest
+    restart: unless-stopped
+    ports:
+      - "5100:5100"
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - pyyoutubedl-urls:/app/urls
+      - pyyoutubedl-tmp:/app/tmp
+      - pyyoutubedl-files:/app/files
+      - pyyoutubedl-logs:/app/logs
+      - pyyoutubedl-data:/app/data
+
+volumes:
+  pyyoutubedl-urls:
+  pyyoutubedl-tmp:
+  pyyoutubedl-files:
+  pyyoutubedl-logs:
+  pyyoutubedl-data:

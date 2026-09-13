@@ -1,0 +1,16 @@
+{
+  // 镜像的安全默认配置。生产环境请挂载自己的 /app/config.json。
+  "URLS_DIR": "./urls",
+  "TMP_DIR": "./tmp",
+  "FILES_DIR": "./files",
+  "LOG_DIR": "./logs",
+  "AI_SUMMARY_DB_PATH": "./data/ai_summaries.sqlite3",
+  "GOOGLE_OAUTH_TOKEN_FILE": "./data/youtube_token.json",
+  "GOOGLE_OAUTH_FAIL_LOCK_FILE": "./data/youtube_oauth_fail.lock",
+  "GOOGLE_OAUTH_USER_FILE": "./data/youtube_user.json",
+  "ENABLE_WEBDAV_UPLOAD": false,
+  "ENABLE_PLAYLIST_MONITOR": false,
+  "FLASK_HOST": "0.0.0.0",
+  "FLASK_PORT": 5100,
+  "FLASK_DEBUG": false
+}
