@@ -31,26 +31,6 @@ class TestPlayerPage(unittest.TestCase):
         self.source_url_patcher.start()
         self.addCleanup(self.source_url_patcher.stop)
 
-    def test_player_shows_and_switches_original_source_url(self):
-        source_url = 'https://www.youtube.com/watch?v=Hh3AmV46epI'
-        with tempfile.TemporaryDirectory() as files_dir:
-            Path(files_dir, 'source.mp4').touch()
-            with (
-                patch('app.FILES_DIR', files_dir),
-                patch('app.get_embedded_subtitles', return_value=[]),
-                patch('app.get_media_source_url', return_value=source_url),
-            ):
-                response = self.client.get('/player')
-
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(f'href="{source_url}"', html)
-        self.assertIn('>原始链接 <i', html)
-        self.assertIn('id="current-video-source"', html)
-        self.assertIn('var videoMetadata = {"source.mp4":', html)
-        self.assertIn('updateCurrentVideoInfo(filename);', html)
-        self.assertIn('link.href = sourceUrl;', html)
-
     def test_video_source_url_probe_reads_purl_or_comment_tags(self):
         source_url = 'https://example.com/original-video'
         probe_result = subprocess.CompletedProcess(
@@ -75,382 +55,6 @@ class TestPlayerPage(unittest.TestCase):
             in argument
             for argument in command
         ))
-
-    def test_video_metadata_is_displayed_with_cover_and_top_navigation(self):
-        source_url = 'https://www.youtube.com/watch?v=Hh3AmV46epI'
-        metadata = {
-            'title': '测试视频',
-            'artist': '测试作者',
-            'album': '',
-            'date': '2026-08-17',
-            'genre': '科技',
-            'description': '第一行\n第二行',
-            'source_url': source_url,
-        }
-        with tempfile.TemporaryDirectory() as files_dir:
-            Path(files_dir, 'source.mp4').touch()
-            with (
-                patch('app.FILES_DIR', files_dir),
-                patch('app.get_embedded_subtitles', return_value=[]),
-                patch('app._probe_media_metadata', return_value=metadata),
-                patch('app.get_media_source_url', return_value=source_url),
-            ):
-                response = self.client.get('/player')
-
-        html = response.get_data(as_text=True)
-        self.assertIn('正在播放: 测试视频', html)
-        self.assertIn('<dt>作者</dt>', html)
-        self.assertIn('<dd>测试作者</dd>', html)
-        self.assertIn('<summary>简介</summary>', html)
-        self.assertIn('poster="https://i.ytimg.com/vi/Hh3AmV46epI/hqdefault.jpg"', html)
-        self.assertIn('updateVideoPoster(filename);', html)
-        self.assertIn(
-            'image.naturalWidth <= 120 && image.naturalHeight <= 90',
-            html,
-        )
-        self.assertIn('tryCandidate(index + 1);', html)
-        self.assertIn('id="audio-tab"', html)
-        self.assertLess(html.index('class="player-nav"'), html.index('class="player-content"'))
-        self.assertNotIn('class="footer-actions"', html)
-
-    def test_player_header_aligns_title_and_navigation(self):
-        template = Path(app.template_folder, 'player.html').read_text(
-            encoding='utf-8',
-        )
-        audio_template = Path(app.template_folder, 'audio_player.html').read_text(
-            encoding='utf-8',
-        )
-        css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
-
-        for page_template in (template,):
-            self.assertIn('class="player-header-row"', page_template)
-            self.assertLess(
-                page_template.index('class="player-header-row"'),
-                page_template.index('class="player-nav"'),
-            )
-        self.assertNotIn('播放已下载的精彩内容', template)
-        self.assertNotIn('聆听已下载的音频内容', audio_template)
-        self.assertIn('align-items: center;', css)
-        self.assertIn('margin-top: 0;', css)
-        self.assertIn('border-radius: 999px;', css)
-        self.assertIn('background: #fff7f7;', css)
-
-        mobile_css = css.split('@media (max-width: 480px)', 1)[1]
-        self.assertIn('flex-wrap: nowrap;', mobile_css)
-        self.assertIn('font-size: clamp(1rem, 4.8vw, 1.2rem);', mobile_css)
-        self.assertIn('min-height: 32px;', mobile_css)
-        self.assertNotIn('flex-wrap: wrap;', mobile_css)
-        self.assertIn('@media (max-width: 360px)', mobile_css)
-
-    def test_download_control_is_rendered_for_current_video(self):
-        with tempfile.TemporaryDirectory() as files_dir:
-            filename = 'test video.mp4'
-            Path(files_dir, filename).touch()
-
-            with patch('app.FILES_DIR', files_dir):
-                response = self.client.get('/player')
-
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("videojs.registerComponent('DownloadButton'", html)
-        self.assertIn("controlBar.addChild('DownloadButton'", html)
-        self.assertIn("this.addClass('vjs-download-control')", html)
-        self.assertIn('var currentFilename = "test video.mp4";', html)
-        self.assertIn('link.download = currentFilename;', html)
-        self.assertLess(html.index('video-js.min.css'), html.index('player.css'))
-
-    def test_download_icon_uses_centered_control_box(self):
-        css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
-
-        self.assertIn('cursor: pointer;', css)
-        self.assertIn('align-items: center;', css)
-        self.assertIn('justify-content: center;', css)
-        self.assertIn('font-size: 1.3em;', css)
-        self.assertIn('line-height: 1;', css)
-
-    def test_video_player_uses_centered_theme_play_button(self):
-        css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
-
-        self.assertIn('.player-page .video-js .vjs-big-play-button {', css)
-        self.assertIn('top: 50%;', css)
-        self.assertIn('left: 50%;', css)
-        self.assertIn('border-radius: 50%;', css)
-        self.assertIn('background: rgba(220, 20, 60, 0.84);', css)
-        self.assertIn('.player-page .video-js.vjs-paused .vjs-big-play-button', css)
-        self.assertIn('.player-page .video-js.vjs-playing .vjs-big-play-button', css)
-
-    def test_video_player_uses_inline_playback_on_ios(self):
-        template = Path(app.template_folder, 'player.html').read_text(
-            encoding='utf-8',
-        )
-
-        self.assertIn('playsinline webkit-playsinline', template)
-        self.assertIn("var player = videojs('video-player', {", template)
-        self.assertIn('playsinline: true', template)
-        self.assertNotIn('fullscreenToggle: false', template)
-
-    def test_video_player_supports_playback_rates(self):
-        template = Path(app.template_folder, 'player.html').read_text(
-            encoding='utf-8',
-        )
-
-        self.assertIn(
-            'playbackRates: [0.5, 0.75, 1, 1.5, 2, 3]',
-            template,
-        )
-
-    def test_video_play_only_scrolls_inside_playlist(self):
-        template = Path(app.template_folder, 'player.html').read_text(
-            encoding='utf-8',
-        )
-        scroll_body = template.split('function scrollToActive()', 1)[1].split(
-            "player.on('play', scrollToActive);",
-            1,
-        )[0]
-
-        self.assertIn("document.getElementById('video-list')", scroll_body)
-        self.assertIn('playlist.scrollTop += scrollDelta;', scroll_body)
-        self.assertNotIn('scrollIntoView(', scroll_body)
-
-    def test_player_layout_prevents_mobile_horizontal_overflow(self):
-        css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
-
-        self.assertIn(
-            'grid-template-columns: minmax(0, 1fr) minmax(280px, 350px);',
-            css,
-        )
-        self.assertIn('.video-wrapper .video-js {', css)
-        self.assertIn('width: calc(100% + 2rem);', css)
-        self.assertGreaterEqual(css.count('min-width: 0;'), 4)
-
-    def test_playlist_items_are_keyboard_accessible_buttons(self):
-        with tempfile.TemporaryDirectory() as files_dir:
-            Path(files_dir, 'first.mp4').touch()
-
-            with (
-                patch('app.FILES_DIR', files_dir),
-                patch('app.get_embedded_subtitles', return_value=[]),
-            ):
-                response = self.client.get('/player')
-
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('type="button" class="playlist-item active"', html)
-        self.assertIn('aria-current="true"', html)
-        self.assertIn("element.setAttribute('aria-current', 'true');", html)
-
-    def test_playlist_item_name_hides_numeric_datetime_prefix(self):
-        with tempfile.TemporaryDirectory() as files_dir:
-            prefixed_filename = '08221544-example-720.mp4'
-            unprefixed_filename = 'abcdefgh-example-720.mp4'
-            Path(files_dir, prefixed_filename).touch()
-            Path(files_dir, unprefixed_filename).touch()
-
-            with (
-                patch('app.FILES_DIR', files_dir),
-                patch('app.get_embedded_subtitles', return_value=[]),
-            ):
-                response = self.client.get('/player')
-
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(
-            '<span class="item-name" title="example-720.mp4">example-720.mp4</span>',
-            html,
-        )
-        self.assertNotIn(f'class="item-name" title="{prefixed_filename}"', html)
-        self.assertIn(
-            f'<span class="item-name" title="{unprefixed_filename}">{unprefixed_filename}</span>',
-            html,
-        )
-
-    def test_file_parameter_selects_requested_video(self):
-        with tempfile.TemporaryDirectory() as files_dir:
-            first = Path(files_dir, 'first.mp4')
-            requested = Path(files_dir, 'requested video.mp4')
-            first.touch()
-            requested.touch()
-            first.touch()
-
-            with (
-                patch('app.FILES_DIR', files_dir),
-                patch('app.get_embedded_subtitles', return_value=[]),
-            ):
-                response = self.client.get(
-                    '/player',
-                    query_string={'file': requested.name},
-                )
-
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(
-            'var currentFilename = "requested video.mp4";',
-            html,
-        )
-        self.assertIn(
-            '正在播放: requested video.mp4',
-            html,
-        )
-
-    def test_file_parameter_ignores_unknown_and_non_mp4_paths(self):
-        with tempfile.TemporaryDirectory() as files_dir:
-            filename = 'available.mp4'
-            Path(files_dir, filename).touch()
-
-            with (
-                patch('app.FILES_DIR', files_dir),
-                patch('app.get_embedded_subtitles', return_value=[]),
-            ):
-                response = self.client.get(
-                    '/player',
-                    query_string={'file': '../config.json'},
-                )
-
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('var currentFilename = "available.mp4";', html)
-
-    def test_switch_video_updates_file_parameter_in_url(self):
-        with tempfile.TemporaryDirectory() as files_dir:
-            Path(files_dir, 'first.mp4').touch()
-            Path(files_dir, 'second video.mp4').touch()
-
-            with (
-                patch('app.FILES_DIR', files_dir),
-                patch('app.get_embedded_subtitles', return_value=[]),
-            ):
-                response = self.client.get('/player')
-
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("url.searchParams.set('file', filename);", html)
-        self.assertIn(
-            "window.history.replaceState({ filename: filename }, '', url);",
-            html,
-        )
-        self.assertIn('updatePlayerUrl(filename);', html)
-        self.assertLess(
-            html.index('currentFilename = filename;'),
-            html.index('updatePlayerUrl(filename);'),
-        )
-
-    def test_player_saves_and_restores_progress_per_video(self):
-        with tempfile.TemporaryDirectory() as files_dir:
-            Path(files_dir, 'first.mp4').touch()
-            Path(files_dir, 'second.mp4').touch()
-
-            with (
-                patch('app.FILES_DIR', files_dir),
-                patch('app.get_embedded_subtitles', return_value=[]),
-            ):
-                response = self.client.get('/player')
-
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(
-            "var playbackProgressPrefix = 'pyyoutubedl:playback-progress:';",
-            html,
-        )
-        self.assertIn(
-            'localStorage.setItem(\n'
-            '                    playbackProgressKey(currentFilename),',
-            html,
-        )
-        self.assertIn("player.on('loadedmetadata', function () {", html)
-        loaded_metadata_start = html.index(
-            "player.on('loadedmetadata', function () {"
-        )
-        self.assertIn(
-            'restoreCurrentVideoProgress();',
-            html[loaded_metadata_start:],
-        )
-        self.assertIn("player.on('timeupdate', function () {", html)
-        self.assertIn(
-            "player.on('pause', saveCurrentVideoProgress);",
-            html,
-        )
-        self.assertIn(
-            "window.addEventListener('beforeunload', saveCurrentVideoProgress);",
-            html,
-        )
-        self.assertIn('clearVideoProgress(currentFilename);', html)
-        self.assertIn(
-            'switchVideo(nextSrc, nextFile, items[currentIndex], false);',
-            html,
-        )
-        switch_start = html.index(
-            'function switchVideo(src, filename, element, savePrevious)'
-        )
-        source_update = html.index(
-            'player.src({ type: "video/mp4", src: src });',
-            switch_start,
-        )
-        self.assertLess(
-            html.index('saveCurrentVideoProgress();', switch_start),
-            source_update,
-        )
-
-    def test_player_filters_filenames_by_configured_keywords(self):
-        with tempfile.TemporaryDirectory() as files_dir:
-            Path(files_dir, '保留的视频.mp4').touch()
-            Path(files_dir, '包含预告的预告片.mp4').touch()
-            Path(files_dir, 'sample-preview.mp4').touch()
-            Path(files_dir, '不是视频.mp3').touch()
-
-            with (
-                patch('app.FILES_DIR', files_dir),
-                patch.dict(
-                    app_module.config,
-                    {'PLAYER_FILENAME_EXCLUDE_KEYWORDS': ['预告', 'preview', '']},
-                ),
-            ):
-                response = self.client.get('/player')
-
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('保留的视频.mp4', html)
-        self.assertNotIn('包含预告的预告片.mp4', html)
-        self.assertNotIn('sample-preview.mp4', html)
-
-    def test_player_ignores_invalid_keyword_config(self):
-        with tempfile.TemporaryDirectory() as files_dir:
-            Path(files_dir, '正常视频.mp4').touch()
-
-            with (
-                patch('app.FILES_DIR', files_dir),
-                patch.dict(
-                    app_module.config,
-                    {'PLAYER_FILENAME_EXCLUDE_KEYWORDS': '不是数组'},
-                ),
-            ):
-                response = self.client.get('/player')
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('正常视频.mp4', response.get_data(as_text=True))
-
-    def test_player_loads_embedded_subtitles_as_webvtt_tracks(self):
-        with tempfile.TemporaryDirectory() as files_dir:
-            filename = '带字幕.mp4'
-            Path(files_dir, filename).touch()
-            subtitles = [
-                {'stream_index': 2, 'language': 'zh-Hans', 'label': '简体中文'},
-                {'stream_index': 3, 'language': 'zh-Hant', 'label': '繁体中文'},
-            ]
-
-            with (
-                patch('app.FILES_DIR', files_dir),
-                patch('app.get_embedded_subtitles', return_value=subtitles),
-            ):
-                response = self.client.get('/player')
-
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('kind="subtitles"', html)
-        self.assertIn('srclang="zh-Hans" label="简体中文"', html)
-        self.assertIn('srclang="zh-Hant" label="繁体中文"', html)
-        self.assertIn('/subtitles/', html)
-        self.assertIn('player.addRemoteTextTrack({', html)
-        self.assertIn('player.removeRemoteTextTrack(currentTracks[index]);', html)
 
     def test_sidecar_subtitles_are_strictly_matched_sorted_and_deduplicated(self):
         with tempfile.TemporaryDirectory() as files_dir:
@@ -484,152 +88,6 @@ class TestPlayerPage(unittest.TestCase):
             [track['language'] for track in tracks],
             ['und', 'zh-Hans', 'zh-Hant', 'en', 'ja'],
         )
-
-    def test_player_prefers_sidecars_without_probing_embedded_subtitles(self):
-        with tempfile.TemporaryDirectory() as files_dir:
-            Path(files_dir, 'video.mp4').touch()
-            Path(files_dir, 'video.zh-Hans.srt').touch()
-            with (
-                patch('app.FILES_DIR', files_dir),
-                patch('app.get_embedded_subtitles') as embedded,
-            ):
-                response = self.client.get('/player')
-
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        embedded.assert_not_called()
-        self.assertIn('id="sidecar:video.zh-Hans.srt"', html)
-        self.assertIn('/subtitles/sidecar/video.zh-Hans.srt.vtt', html)
-        self.assertNotIn('/subtitles/video.mp4/', html)
-
-    def test_player_uses_accept_language_for_default_subtitle(self):
-        with tempfile.TemporaryDirectory() as files_dir:
-            filename = '带字幕.mp4'
-            Path(files_dir, filename).touch()
-            subtitles = [
-                {'stream_index': 2, 'language': 'zh-Hans', 'label': '简体中文'},
-                {'stream_index': 3, 'language': 'en', 'label': 'English'},
-            ]
-
-            with (
-                patch('app.FILES_DIR', files_dir),
-                patch('app.get_embedded_subtitles', return_value=subtitles),
-            ):
-                response = self.client.get(
-                    '/player',
-                    headers={
-                        'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,fr;q=0',
-                    },
-                )
-
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(
-            'var browser_subtitle_languages = ["en-US", "en", "zh-CN"]',
-            html,
-        )
-        self.assertIn("normalizedLanguages.unshift('zh-hans');", html)
-        self.assertIn('subtitleLanguageVariant(language)', html)
-
-    def test_player_persists_manual_subtitle_language_and_off_state(self):
-        with tempfile.TemporaryDirectory() as files_dir:
-            Path(files_dir, '带字幕.mp4').touch()
-
-            with (
-                patch('app.FILES_DIR', files_dir),
-                patch(
-                    'app.get_embedded_subtitles',
-                    return_value=[
-                        {'stream_index': 2, 'language': 'en', 'label': 'English'},
-                    ],
-                ),
-            ):
-                response = self.client.get('/player')
-
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(
-            "var subtitlePreferenceKey = 'pyyoutubedl:subtitle-preference';",
-            html,
-        )
-        self.assertIn(
-            "player.textTracks().addEventListener('change', saveSubtitlePreference);",
-            html,
-        )
-        self.assertIn("mode: 'language'", html)
-        self.assertIn("writeSubtitlePreference({ mode: 'off' });", html)
-        self.assertIn("savedPreference.mode !== 'off'", html)
-        self.assertIn('applySubtitlePreference();', html)
-        preference_start = html.index('function saveSubtitlePreference()')
-        self.assertIn(
-            'updateAiSummaryPanel(currentFilename);',
-            html[preference_start:],
-        )
-
-    def test_player_renders_on_demand_ai_summary_controls(self):
-        with tempfile.TemporaryDirectory() as files_dir:
-            Path(files_dir, '带字幕.mp4').touch()
-            with (
-                patch('app.FILES_DIR', files_dir),
-                patch(
-                    'app.get_embedded_subtitles',
-                    return_value=[
-                        {'stream_index': 2, 'language': 'zh-Hans', 'label': '简体中文'},
-                    ],
-                ),
-                patch.dict(
-                    app_module.config,
-                    {
-                        'AI_API_BASE_URL': 'https://ai.example/v1/chat/completions',
-                        'AI_API_MODEL': 'test-model',
-                        'AI_API_TOKEN': 'test-token',
-                    },
-                ),
-            ):
-                response = self.client.get('/player')
-
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('id="generate-ai-summary"', html)
-        self.assertIn('var aiSummaryConfigured = true;', html)
-        self.assertIn("fetch(\"/api/ai_summary\"", html)
-        self.assertIn('stream_index: track.stream_index', html)
-        self.assertNotIn('test-token', html)
-
-    def test_ai_summary_renders_sanitized_markdown_as_html(self):
-        template = Path(app.template_folder, 'player.html').read_text(
-            encoding='utf-8',
-        )
-        css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
-
-        self.assertIn('marked@18.0.7/lib/marked.umd.js', template)
-        self.assertIn('dompurify@3.4.12/dist/purify.min.js', template)
-        self.assertIn('var renderedHtml = marked.parse(markdown', template)
-        self.assertIn('var sanitizedHtml = DOMPurify.sanitize(renderedHtml', template)
-        self.assertIn("FORBID_TAGS: ['img', 'svg', 'math', 'style']", template)
-        self.assertIn('content.innerHTML = sanitizedHtml;', template)
-        self.assertIn('content.textContent = markdown;', template)
-        self.assertIn('.ai-summary-content h2 {', css)
-        self.assertIn('.ai-summary-content pre code {', css)
-
-    def test_ai_summary_has_copy_and_expand_controls(self):
-        template = Path(app.template_folder, 'player.html').read_text(
-            encoding='utf-8',
-        )
-        css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
-
-        self.assertIn('id="copy-ai-summary"', template)
-        self.assertIn('id="toggle-ai-summary"', template)
-        self.assertIn('navigator.clipboard.writeText(summary);', template)
-        self.assertIn('fallbackCopyText(summary);', template)
-        self.assertIn("toggleButton.textContent = expanded ? '收起' : '展开';", template)
-        self.assertIn("toggleButton.setAttribute('aria-expanded', String(expanded));", template)
-        self.assertIn("content.classList.remove('is-collapsed');", template)
-        self.assertIn("toggleButton.textContent = '收起';", template)
-        self.assertIn("toggleButton.setAttribute('aria-expanded', 'true');", template)
-        self.assertIn('consumeAiSummaryStream(result.job_id', template)
-        self.assertIn('application/x-ndjson', template)
-        self.assertIn('.ai-summary-content.is-collapsed {', css)
 
     def test_ai_summary_requires_server_configuration(self):
         with patch.dict(
@@ -880,6 +338,67 @@ class TestPlayerPage(unittest.TestCase):
 
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.get_data(as_text=True), 'subtitle conversion failed')
+
+
+    def test_media_list_title_hides_numeric_datetime_prefix(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, '08221544-example-720.mp4').touch()
+            Path(files_dir, 'abcdefgh-example-720.mp4').touch()
+
+            with patch('app.FILES_DIR', files_dir):
+                response = self.client.get('/api/media_list')
+
+        titles = {
+            item['filename']: item['title']
+            for item in response.get_json()['video']
+        }
+        self.assertEqual(response.status_code, 200)
+        # 只有纯数字前缀会被隐藏，文件名本身不变。
+        self.assertEqual(titles['08221544-example-720.mp4'], 'example-720.mp4')
+        self.assertEqual(
+            titles['abcdefgh-example-720.mp4'],
+            'abcdefgh-example-720.mp4',
+        )
+
+    def test_media_list_filters_filenames_by_configured_keywords(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, 'keep-me.mp4').touch()
+            Path(files_dir, 'sample-trailer.mp4').touch()
+            Path(files_dir, 'sample-trailer.mp3').touch()
+
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch.dict(
+                    app_module.config,
+                    {'PLAYER_FILENAME_EXCLUDE_KEYWORDS': ['trailer']},
+                ),
+            ):
+                payload = self.client.get('/api/media_list').get_json()
+
+        self.assertEqual(
+            [item['filename'] for item in payload['video']],
+            ['keep-me.mp4'],
+        )
+        self.assertEqual(payload['audio'], [])
+
+    def test_media_list_ignores_invalid_keyword_config(self):
+        with tempfile.TemporaryDirectory() as files_dir:
+            Path(files_dir, 'keep-me.mp4').touch()
+
+            with (
+                patch('app.FILES_DIR', files_dir),
+                patch.dict(
+                    app_module.config,
+                    {'PLAYER_FILENAME_EXCLUDE_KEYWORDS': 'trailer'},
+                ),
+            ):
+                payload = self.client.get('/api/media_list').get_json()
+
+        # 配置非法时退回不过滤，而不是整页失败。
+        self.assertEqual(
+            [item['filename'] for item in payload['video']],
+            ['keep-me.mp4'],
+        )
 
 
 if __name__ == '__main__':

@@ -1,0 +1,8 @@
+pmOnFail: ignore
+
+minimumReleaseAgeExclude:
+  - '@next/*'
+  - next
+
+allowBuilds:
+  zwplayer-react: set this to true or false

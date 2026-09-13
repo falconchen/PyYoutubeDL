@@ -63,6 +63,20 @@
     var drawerUrlText = document.querySelector('.dl-drawer-url-text');
     var drawerCopy = document.querySelector('.dl-drawer-copy');
     var drawerSummary = document.querySelector('.dl-drawer-summary');
+    var modeLinks = Array.prototype.slice.call(document.querySelectorAll('.dl-mode'));
+    var panels = {
+        download: document.querySelector('[data-panel="download"]'),
+        library: document.querySelector('[data-panel="library"]')
+    };
+    var stageFrame = document.querySelector('.dl-stage-frame');
+    var stageCount = document.querySelector('.dl-stage-count-text');
+    var nowIcon = document.querySelector('.dl-now-icon');
+    var nowTitle = document.querySelector('.dl-now-title');
+    var nowMeta = document.querySelector('.dl-now-meta');
+    var nowDownload = document.querySelector('.dl-now-download');
+    var tabButtons = Array.prototype.slice.call(document.querySelectorAll('.dl-tab'));
+    var playlistItems = document.querySelector('.dl-playlist-items');
+    var playlistEmpty = document.querySelector('.dl-playlist-empty');
 
     if (!form || !listElement) return;
 
@@ -75,6 +89,12 @@
     /** 视频元数据缓存，按源 URL 索引，避免重复调用较慢的解析接口。 */
     var metadata = Object.create(null);
     var openTaskId = null;
+    /** 媒体库：按类型缓存的列表、当前标签与正在播放项。 */
+    var mediaLibrary = null;
+    var libraryTab = 'video';
+    var currentMedia = null;
+    var zwplayer = null;
+    var libraryLoading = false;
     var lastFocused = null;
 
     function readStore() {
@@ -639,6 +659,239 @@
         if (event.key === 'Escape' && openTaskId) closeDrawer();
     });
 
+    /* 媒体库 */
+
+    function formatDuration(value) {
+        var total = Math.round(Number(value) || 0);
+        if (!total) return '';
+        var hours = Math.floor(total / 3600);
+        var minutes = Math.floor((total % 3600) / 60);
+        var seconds = total % 60;
+        var parts = hours
+            ? [hours, minutes, seconds]
+            : [minutes, seconds];
+        return parts
+            .map(function (part, index) {
+                return index === 0 ? String(part) : String(part).padStart(2, '0');
+            })
+            .join(':');
+    }
+
+    function mediaFormatLabel(item) {
+        var parts = [(item.extension || '').toUpperCase()];
+        if (item.type === 'video' && item.height) parts.push(item.height + 'p');
+        else if (item.size_bytes) parts.push(formatBytes(item.size_bytes));
+        return parts.filter(Boolean).join(' · ');
+    }
+
+    function mediaMetaLine(item) {
+        return [mediaFormatLabel(item), formatDuration(item.duration)]
+            .filter(Boolean)
+            .join(' · ');
+    }
+
+    function destroyPlayer() {
+        if (zwplayer) {
+            try {
+                zwplayer.destroy();
+            } catch (error) {
+                console.warn('销毁播放器失败:', error);
+            }
+            zwplayer = null;
+        }
+        // 首次播放时也要清掉模板里的占位节点，否则会留下重复的挂载点。
+        stageFrame.replaceChildren();
+    }
+
+    function playMedia(item) {
+        if (!item) return;
+        currentMedia = item;
+        renderNowPlaying(item);
+        renderPlaylist();
+
+        // 与设计稿一致：切换媒体时重建播放器实例，避免残留上一条的状态。
+        destroyPlayer();
+        var mount = document.createElement('div');
+        mount.id = 'dl-player';
+        stageFrame.appendChild(mount);
+
+        if (typeof window.ZWPlayer !== 'function') {
+            console.warn('ZWPlayer 未加载');
+            return;
+        }
+        try {
+            zwplayer = new window.ZWPlayer({
+                playerElm: mount,
+                url: item.url,
+                poster: item.poster || '',
+                fluid: true,
+                autoplay: false,
+                disableMutedConfirm: true,
+                mediaKind: item.type === 'audio' ? 'audio' : 'video'
+            });
+        } catch (error) {
+            console.error('初始化播放器失败:', error);
+        }
+    }
+
+    function renderNowPlaying(item) {
+        if (!item) {
+            nowTitle.textContent = '未选择媒体';
+            nowMeta.textContent = '从右侧播放列表中选择已下载的媒体';
+            nowDownload.hidden = true;
+            return;
+        }
+        nowIcon.replaceChildren(icon(item.type === 'audio' ? '#i-music' : '#i-video'));
+        nowTitle.textContent = item.title;
+        nowTitle.title = item.title;
+        nowMeta.textContent = [item.artist, mediaMetaLine(item)]
+            .filter(Boolean)
+            .join(' · ');
+        nowDownload.href = item.download_url;
+        nowDownload.hidden = false;
+    }
+
+    function renderPlaylist() {
+        if (!mediaLibrary) return;
+        var items = mediaLibrary[libraryTab] || [];
+
+        tabButtons.forEach(function (button) {
+            button.setAttribute(
+                'aria-selected',
+                String(button.dataset.tab === libraryTab)
+            );
+        });
+        stageCount.textContent = items.length + ' 个媒体';
+
+        playlistItems.replaceChildren.apply(playlistItems, items.map(function (item) {
+            var li = document.createElement('li');
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'dl-playlist-item';
+            button.dataset.type = item.type;
+            button.dataset.filename = item.filename;
+            button.setAttribute(
+                'aria-current',
+                String(Boolean(currentMedia) && currentMedia.filename === item.filename)
+            );
+
+            var iconWrap = document.createElement('span');
+            iconWrap.className = 'dl-playlist-item-icon';
+            iconWrap.appendChild(icon(item.type === 'audio' ? '#i-music' : '#i-video'));
+
+            var body = document.createElement('div');
+            body.className = 'dl-playlist-item-body';
+            var title = document.createElement('p');
+            title.className = 'dl-playlist-item-title';
+            title.textContent = item.title;
+            title.title = item.title;
+            var meta = document.createElement('p');
+            meta.className = 'dl-playlist-item-meta';
+            meta.textContent = mediaMetaLine(item);
+            body.append(title, meta);
+
+            button.append(iconWrap, body);
+            if (currentMedia && currentMedia.filename === item.filename) {
+                button.appendChild(icon('#i-play', 'dl-playlist-item-playing'));
+            }
+            li.appendChild(button);
+            return li;
+        }));
+
+        playlistEmpty.hidden = items.length > 0;
+        if (!items.length) {
+            playlistEmpty.textContent = libraryTab === 'audio'
+                ? '还没有已下载的音频。'
+                : '还没有已下载的视频。';
+        }
+    }
+
+    async function loadLibrary(preferredFile) {
+        if (mediaLibrary || libraryLoading) {
+            if (mediaLibrary) selectInitialMedia(preferredFile);
+            return;
+        }
+        libraryLoading = true;
+        try {
+            var response = await fetch('/api/media_list');
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            var data = await response.json();
+            if (!data.success) throw new Error(data.msg || '读取媒体列表失败');
+            mediaLibrary = { video: data.video || [], audio: data.audio || [] };
+            selectInitialMedia(preferredFile);
+        } catch (error) {
+            console.error('读取媒体列表失败:', error);
+            playlistEmpty.hidden = false;
+            playlistEmpty.textContent = '媒体列表读取失败，请稍后重试。';
+        } finally {
+            libraryLoading = false;
+        }
+    }
+
+    function findMedia(filename) {
+        if (!filename || !mediaLibrary) return null;
+        var found = null;
+        ['video', 'audio'].forEach(function (type) {
+            if (found) return;
+            found = (mediaLibrary[type] || []).find(function (item) {
+                return item.filename === filename;
+            }) || null;
+            if (found) libraryTab = type;
+        });
+        return found;
+    }
+
+    function selectInitialMedia(preferredFile) {
+        // 任务完成后的直达链接优先，其次才是当前标签的第一条。
+        var target = findMedia(preferredFile);
+        if (!target) {
+            var items = mediaLibrary[libraryTab] || [];
+            target = items[0] || null;
+        }
+        renderPlaylist();
+        if (target) playMedia(target);
+        else renderNowPlaying(null);
+    }
+
+    function setView(view, preferredFile) {
+        var next = view === 'library' ? 'library' : 'download';
+        panels.download.hidden = next !== 'download';
+        panels.library.hidden = next !== 'library';
+        modeLinks.forEach(function (link) {
+            if (link.dataset.view === next) link.setAttribute('aria-current', 'page');
+            else link.removeAttribute('aria-current');
+        });
+        if (next === 'library') loadLibrary(preferredFile);
+        else destroyPlayer();
+        return next;
+    }
+
+    modeLinks.forEach(function (link) {
+        link.addEventListener('click', function (event) {
+            event.preventDefault();
+            var view = setView(link.dataset.view);
+            var target = view === 'library' ? '/?view=library' : '/';
+            window.history.replaceState({}, '', target);
+        });
+    });
+
+    tabButtons.forEach(function (button) {
+        button.addEventListener('click', function () {
+            if (libraryTab === button.dataset.tab) return;
+            libraryTab = button.dataset.tab;
+            renderPlaylist();
+        });
+    });
+
+    playlistItems.addEventListener('click', function (event) {
+        var button = event.target.closest('.dl-playlist-item');
+        if (!button || !mediaLibrary) return;
+        var item = (mediaLibrary[libraryTab] || []).find(function (candidate) {
+            return candidate.filename === button.dataset.filename;
+        });
+        if (item) playMedia(item);
+    });
+
     /* 表单 */
 
     function selectedTypes() {
@@ -734,7 +987,7 @@
     }
 
     function bootstrap() {
-        var payload = { tasks: [], url: '' };
+        var payload = { tasks: [], url: '', view: 'download', tab: 'video', file: '' };
         var node = document.getElementById('dl-bootstrap');
         if (node) {
             try {
@@ -762,6 +1015,9 @@
         syncSubmitState();
         render();
         if (tasks.length) pollTasks();
+
+        if (payload.tab === 'audio') libraryTab = 'audio';
+        setView(payload.view, payload.file);
     }
 
     bootstrap();

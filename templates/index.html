@@ -26,6 +26,10 @@
         <symbol id="i-log-in" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="m10 17 5-5-5-5"/><path d="M15 12H3"/></symbol>
         <symbol id="i-play-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M10 8l6 4-6 4Z"/></symbol>
         <symbol id="i-loader" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+        <symbol id="i-list-music" viewBox="0 0 24 24"><path d="M21 15V6"/><path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5"/><path d="M12 12H3"/><path d="M16 6H3"/><path d="M12 18H3"/></symbol>
+        <symbol id="i-video" viewBox="0 0 24 24"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/></symbol>
+        <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
+        <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 3l14 9-14 9Z"/></symbol>
         <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
         <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
         <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
@@ -38,10 +42,10 @@
                 <span class="dl-brand-name">Drop<span>Load</span></span>
             </a>
             <div class="dl-header-actions">
-                <a class="dl-header-link dl-header-link-ghost" href="{{ url_for('player') }}" title="打开媒体库">
-                    <svg class="dl-icon" aria-hidden="true"><use href="#i-play-circle"></use></svg>
-                    <span class="dl-header-link-text">打开媒体库</span>
-                </a>
+                <nav class="dl-modes" aria-label="切换下载器与媒体库">
+                    <a class="dl-mode" data-view="download" href="{{ url_for('index') }}">下载器</a>
+                    <a class="dl-mode" data-view="library" href="{{ url_for('player') }}">媒体库</a>
+                </nav>
                 <a class="dl-header-link" href="{{ url_for('oauth_start') }}">
                     <svg class="dl-icon" aria-hidden="true"><use href="#i-log-in"></use></svg>
                     <span>{% if is_authorized %}重新授权{% else %}登录{% endif %}</span>
@@ -50,7 +54,13 @@
         </div>
     </header>
 
-    <div class="dl-layout">
+    <div class="dl-page">
+        <div class="dl-modes dl-modes-mobile" aria-label="切换下载器与媒体库">
+            <a class="dl-mode" data-view="download" href="{{ url_for('index') }}">下载器</a>
+            <a class="dl-mode" data-view="library" href="{{ url_for('player') }}">媒体库</a>
+        </div>
+
+        <div class="dl-layout" data-panel="download">
         <section class="dl-card dl-hero">
             <div class="dl-hero-inner">
                 <div class="dl-eyebrow">
@@ -129,6 +139,57 @@
             <p class="dl-task-empty"{% if tasks %} hidden{% endif %}>还没有任务，粘贴链接开始下载。</p>
             </div>
         </aside>
+        </div>
+
+        <section class="dl-library" data-panel="library" hidden>
+            <div class="dl-card dl-stage">
+                <div class="dl-stage-header">
+                    <div>
+                        <p class="dl-stage-eyebrow">媒体库</p>
+                        <h1 class="dl-stage-title">正在播放</h1>
+                    </div>
+                    <span class="dl-stage-count">
+                        <svg class="dl-icon" aria-hidden="true"><use href="#i-list-music"></use></svg>
+                        <span class="dl-stage-count-text">0 个媒体</span>
+                    </span>
+                </div>
+                <div class="dl-stage-frame"><div id="dl-player"></div></div>
+                <div class="dl-now-playing">
+                    <span class="dl-now-icon"><svg class="dl-icon" aria-hidden="true"><use href="#i-video"></use></svg></span>
+                    <div class="dl-now-body">
+                        <h2 class="dl-now-title">未选择媒体</h2>
+                        <p class="dl-now-meta">从右侧播放列表中选择已下载的媒体</p>
+                    </div>
+                    <a class="dl-now-download" href="" download hidden title="下载文件" aria-label="下载文件">
+                        <svg class="dl-icon" aria-hidden="true"><use href="#i-download"></use></svg>
+                    </a>
+                </div>
+            </div>
+
+            <aside class="dl-card dl-playlist" aria-label="播放列表">
+                <div class="dl-playlist-header">
+                    <div class="dl-playlist-heading">
+                        <div>
+                            <h2>播放列表</h2>
+                            <p>选择已下载的媒体</p>
+                        </div>
+                        <svg class="dl-icon dl-playlist-icon" aria-hidden="true"><use href="#i-list-music"></use></svg>
+                    </div>
+                    <div class="dl-tabs" role="tablist" aria-label="媒体类型">
+                        <button class="dl-tab" type="button" role="tab" data-tab="video" aria-selected="true">
+                            <svg class="dl-icon" aria-hidden="true"><use href="#i-video"></use></svg> 视频
+                        </button>
+                        <button class="dl-tab" type="button" role="tab" data-tab="audio" aria-selected="false">
+                            <svg class="dl-icon" aria-hidden="true"><use href="#i-music"></use></svg> 音频
+                        </button>
+                    </div>
+                </div>
+                <div class="dl-playlist-scroll">
+                    <ul class="dl-playlist-items"></ul>
+                    <p class="dl-playlist-empty">正在载入媒体列表…</p>
+                </div>
+            </aside>
+        </section>
     </div>
 
     <div class="dl-drawer-overlay" hidden>
@@ -195,7 +256,8 @@
         </script>
     {% endif %}
 
-    <script id="dl-bootstrap" type="application/json">{{ {'tasks': tasks, 'url': url} | tojson }}</script>
+    <script id="dl-bootstrap" type="application/json">{{ {'tasks': tasks, 'url': url, 'view': view, 'tab': tab, 'file': requested_file} | tojson }}</script>
+    <script src="{{ url_for('static', filename='zwplayer/zwplayer.js') }}" defer></script>
     <script src="{{ 'dropload.js' | versioned }}" defer></script>
 </body>
 </html>

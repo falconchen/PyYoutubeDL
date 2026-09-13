@@ -154,12 +154,386 @@
 
 /* 布局 */
 
-.dl-layout {
-    display: grid;
-    gap: 12px;
+.dl-page {
     max-width: 1320px;
     margin: 0 auto;
     padding: 12px;
+}
+
+.dl-layout {
+    display: grid;
+    gap: 12px;
+}
+
+.dl-library {
+    display: grid;
+    gap: 12px;
+}
+
+/* grid item 默认 min-width:auto，播放器内部的 min-content 会把列撑破，需显式归零。 */
+.dl-layout > *,
+.dl-library > * {
+    min-width: 0;
+}
+
+[data-panel][hidden] {
+    display: none;
+}
+
+/* 模式切换 */
+
+.dl-modes {
+    display: flex;
+    gap: 2px;
+    padding: 4px;
+    border-radius: 8px;
+    background: #f1f5fa;
+}
+
+.dl-modes-mobile {
+    margin-bottom: 12px;
+    background: #eaf1fb;
+}
+
+.dl-mode {
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #718096;
+    text-align: center;
+    text-decoration: none;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.dl-mode[aria-current="page"] {
+    background: #fff;
+    color: #1769e0;
+    box-shadow: 0 1px 2px rgba(15, 40, 80, 0.08);
+}
+
+.dl-modes:not(.dl-modes-mobile) {
+    display: none;
+}
+
+/* 媒体库：播放区 */
+
+.dl-stage {
+    padding: 12px;
+}
+
+.dl-stage-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.dl-stage-eyebrow {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: #1769e0;
+}
+
+.dl-stage-title {
+    margin: 4px 0 0;
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #14213d;
+}
+
+.dl-stage-count {
+    display: none;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: #eef6ff;
+    font-size: 12px;
+    font-weight: 500;
+    color: #1769e0;
+}
+
+.dl-stage-count .dl-icon {
+    width: 14px;
+    height: 14px;
+}
+
+.dl-stage-frame {
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: 12px;
+    background: #0b1220;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06);
+}
+
+.dl-stage-frame > div {
+    width: 100%;
+    height: 100%;
+}
+
+/* zwplayer 的 fluid 模式用 padding-top 自撑 16:9，这里由外框定比例，让它填满即可。 */
+.dl-stage-frame .zwp-wrap {
+    height: 100% !important;
+    max-width: none !important;
+    padding-top: 0 !important;
+}
+
+.dl-now-playing {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-top: 16px;
+    padding: 16px;
+    border-radius: 12px;
+    background: #f6f9fd;
+}
+
+.dl-now-icon {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: #e6efff;
+    color: #1769e0;
+}
+
+.dl-now-icon .dl-icon {
+    width: 19px;
+    height: 19px;
+}
+
+.dl-now-body {
+    min-width: 0;
+    flex: 1;
+}
+
+.dl-now-title {
+    margin: 0;
+    overflow: hidden;
+    font-size: 16px;
+    font-weight: 700;
+    color: #1e2b42;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dl-now-meta {
+    margin: 4px 0 0;
+    font-size: 14px;
+    color: #8491a3;
+}
+
+.dl-now-download {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: #e6efff;
+    color: #1769e0;
+    text-decoration: none;
+    transition: background-color 0.15s ease;
+}
+
+.dl-now-download:hover {
+    background: #d6e6ff;
+}
+
+.dl-now-download[hidden] {
+    display: none;
+}
+
+/* 媒体库：播放列表 */
+
+.dl-playlist {
+    display: flex;
+    min-height: 460px;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.dl-playlist-header {
+    padding: 20px;
+    border-bottom: 1px solid #edf1f5;
+}
+
+.dl-playlist-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.dl-playlist-heading h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.dl-playlist-heading p {
+    margin: 4px 0 0;
+    font-size: 14px;
+    color: #8794a7;
+}
+
+.dl-playlist-icon {
+    width: 20px;
+    height: 20px;
+    color: #9aa8ba;
+}
+
+.dl-tabs {
+    display: flex;
+    gap: 2px;
+    margin-top: 16px;
+    padding: 4px;
+    border-radius: 8px;
+    background: #f1f5fa;
+}
+
+.dl-tab {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    color: #718096;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.dl-tab .dl-icon {
+    width: 15px;
+    height: 15px;
+}
+
+.dl-tab[aria-selected="true"] {
+    background: #fff;
+    color: #1769e0;
+    box-shadow: 0 1px 2px rgba(15, 40, 80, 0.08);
+}
+
+.dl-playlist-scroll {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.dl-playlist-items {
+    flex: none;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.dl-playlist-item {
+    display: flex;
+    width: 100%;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.dl-playlist-item:hover {
+    background: #f7f9fc;
+}
+
+.dl-playlist-item[aria-current="true"] {
+    background: #eef5ff;
+}
+
+.dl-playlist-item-icon {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: #e7efff;
+    color: #1769e0;
+}
+
+.dl-playlist-item[data-type="audio"] .dl-playlist-item-icon {
+    background: #f0ebff;
+    color: #7855c9;
+}
+
+.dl-playlist-item-icon .dl-icon {
+    width: 18px;
+    height: 18px;
+}
+
+.dl-playlist-item-body {
+    min-width: 0;
+    flex: 1;
+}
+
+.dl-playlist-item-title {
+    margin: 0;
+    overflow: hidden;
+    font-size: 14px;
+    font-weight: 600;
+    color: #334155;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dl-playlist-item-meta {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: #97a3b3;
+}
+
+.dl-playlist-item-playing {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    margin-top: 4px;
+    fill: #1769e0;
+    stroke: none;
+    color: #1769e0;
+}
+
+.dl-playlist-empty {
+    margin: auto;
+    padding: 32px 20px;
+    font-size: 14px;
+    color: #97a3b3;
+    text-align: center;
+}
+
+.dl-playlist-empty[hidden] {
+    display: none;
 }
 
 .dl-card {
@@ -918,9 +1292,34 @@
         padding: 0 20px;
     }
 
-    .dl-layout {
-        gap: 24px;
+    .dl-page {
         padding: 24px 20px;
+    }
+
+    .dl-layout,
+    .dl-library {
+        gap: 24px;
+    }
+
+    /* 顶栏容纳分段控件后，移动端那一行切换即可隐藏。 */
+    .dl-modes:not(.dl-modes-mobile) {
+        display: flex;
+    }
+
+    .dl-modes-mobile {
+        display: none;
+    }
+
+    .dl-stage {
+        padding: 20px;
+    }
+
+    .dl-stage-count {
+        display: flex;
+    }
+
+    .dl-stage-title {
+        font-size: 30px;
     }
 
     .dl-eyebrow {
@@ -989,13 +1388,18 @@
 
 @media (min-width: 1024px) {
     .dl-header-inner,
-    .dl-layout {
+    .dl-page {
         padding-left: 32px;
         padding-right: 32px;
     }
 
-    .dl-layout {
+    .dl-layout,
+    .dl-library {
         grid-template-columns: minmax(0, 1fr) 390px;
+    }
+
+    .dl-playlist {
+        min-height: 620px;
     }
 
     .dl-hero {

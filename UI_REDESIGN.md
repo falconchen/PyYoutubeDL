@@ -1,53 +1,68 @@
-# 统一媒体库 UI
+# DropLoad 单页 UI
 
-播放页采用暖灰背景、深绿操作按钮和卡片布局。视频／音频标签位于播放列表顶部，替代原列表标题，以紧凑样式切换播放器及对应播放列表；桌面双栏，小屏单栏。首页已改为 DropLoad 设计稿（见下文「首页：DropLoad 下载页」），媒体库入口移到首页顶栏。
+首页是单页双模式：顶栏（小屏为内容区顶部）的分段控件在「下载器」和「媒体库」之间切换，两块面板共用同一个页面与同一套设计语言。下载器部分见下文「首页：DropLoad 下载页」，媒体库部分见「媒体库」。
 
-## 路由与兼容
+设计稿在 `DropLoadWithMediaLibrary/`（v0 生成的 Next.js 工程），只作参考，不接入运行时；上一版不含媒体库的稿子保留在 `DropLoad/`。
 
-- `/player` 默认打开视频，`/player?tab=audio` 打开音频。
-- `file` 参数匹配的媒体类型优先于 `tab`，继续支持下载任务的直接播放链接。
-- `/audio-player` 保留为统一播放页的兼容入口，默认选中音频；切换后 URL 更新为 `/player`。
-- 两类列表继续独立按修改时间倒序排列，应用原有关键词过滤。
-- 标签切换暂停另一个播放器，不自动播放新标签；保留各自进度与选中项。左右方向键、Home、End 可切换标签。
+## 媒体库
 
-## 文件结构
+媒体库按设计稿重做，替换了原来的 `/player` 整页。左栏是播放器和「正在播放」信息卡，右栏是播放列表，顶部有视频／音频标签；桌面 `minmax(0, 1fr) 390px` 双栏，小屏单栏。
 
-- `templates/player.html`：共同页面、视频面板、视频控制逻辑和共享评论区。
-- `templates/audio_player.html`：音频面板片段，不能单独作为完整页面渲染。
-- `templates/_audio_controller.html`：音频控制脚本，以 IIFE 隔离变量；独立下载组件和 AI DOM ID，防止与视频冲突。
-- `static/media-library.js`：标签状态、互斥暂停、键盘操作及 URL 更新。
-- `static/refresh.css`：首页和媒体库的样式覆盖，基础播放器样式仍在 `player.css`。
+### 播放内核
 
-字幕、歌词、倍速、下载、播放进度、连续播放及 AI 总结沿用原有逻辑。Waline 仍由原开关控制，共享一处容器，位于播放器列 AI 总结下方，背景、圆角、宽度与信息卡片一致，域名和路径隔离规则不变；旧音频入口路径的历史评论不会自动迁移到 `/player`。部署时继续确认 Waline 的 `SECURE_DOMAINS` 包含 `yter.cellmean.com`。
+采用第三方 [zwplayer](https://github.com/chenfanyu/zwplayer-release) 3.3.2，静态资源在 `static/zwplayer/`（约 4.1MB，含 `css/`、`plugins/`、`widgets/`）。用原生 UMD 构建而不是设计稿里的 `zwplayer-react`：
 
-## 验证
-
-```bash
-venv/bin/python -m pytest tests/test_player.py tests/test_audio_player.py tests/test_media_library.py tests/test_public_pages.py -q
-git diff --check
+```js
+new ZWPlayer({ playerElm: mount, url, poster, fluid: true, autoplay: false })
 ```
 
-浏览器检查首页、视频和音频切换、播放后跨标签暂停、键盘切换、移动端横向溢出。测试使用临时目录覆盖空列表、旧入口、文件定位优先级、唯一 DOM ID 和文件名引号安全。未变更下载器、上传器或生产配置。
+- CSS 由 `zwplayer.js` 依据自身脚本路径自动加载 `css/zwplayer.css`，模板里不用单独引入。
+- `fluid` 模式会用 `padding-top` 自撑 16:9，而外框 `.dl-stage-frame` 已定好比例，所以 CSS 里强制它 `height:100%; padding-top:0` 填满外框。
+- 切换媒体时销毁并重建实例（对应设计稿的 `key` 强制重挂载）；离开媒体库模式也会销毁，避免音频在后台继续播放。
+- `.dl-layout > *` 和 `.dl-library > *` 必须保留 `min-width: 0`。grid item 默认 `min-width:auto`，播放器内部的 min-content 会把列撑破，小屏出现横向溢出。
 
-## 音频字幕自动滚动
+### 路由与数据
 
-`syncLyrics()` 仅使用 `lyricsContent.scrollTo()` 将当前语句居中到字幕容器；不要对语句调用 `scrollIntoView()`，它会连带滚动页面，让正在查看评论的用户跳回播放器。字幕高亮和减少动态效果设置保持原行为。
+- `/`、`/player`、`/audio-player` 渲染同一个 `templates/index.html`，由模板写入的 `#dl-bootstrap` JSON 决定初始视图（`view`／`tab`／`file`）。
+- `/?view=library` 直接打开媒体库；`/player?tab=audio` 和 `/audio-player` 默认选中音频。
+- `file` 参数匹配的媒体类型优先于 `tab`：前端 `findMedia()` 找到文件后会把标签切到它所在的那一类，任务完成后的直达播放链接因此保持可用。
+- 列表由 `GET /api/media_list` 提供，进入媒体库模式时按需拉取并在前端缓存；两类列表各自按修改时间倒序，沿用 `PLAYER_FILENAME_EXCLUDE_KEYWORDS` 过滤。
+- 标题优先用文件内嵌标签，回退到文件名时才隐藏下载器写入的数字时间戳前缀（`08221544-` 这类）。
+
+`/api/media_list` 对每个文件调用一次 `ffprobe` 取时长和高度，结果按文件属性走 `lru_cache`。首次请求在几十个文件的目录上需要数秒，之后命中缓存。
+
+### 随旧播放页移除的功能
+
+按需求采用设计稿的简化播放器，以下原有能力已从界面移除：内嵌／外挂字幕轨道与字幕语言偏好、音频歌词同步滚动、播放器内的 AI 总结、播放进度记忆、连续播放、音频频谱与封面模糊背景、播放页的 Waline 评论。
+
+对应的后端未删除，仍可用且仍有测试覆盖：`/subtitles/...` 字幕转换路由、`/api/ai_summary*` 与 `/api/ai_summaries*`、`ai_summary_worker.py` 及其 SQLite 存储（Chrome 扩展仍在用）。`find_audio_lyrics()`、`get_local_summary_tracks()` 等只被旧播放页调用的辅助函数现在没有调用方。
+
+删除的文件：`templates/player.html`、`templates/audio_player.html`、`templates/_audio_controller.html`、`static/player.css`、`static/refresh.css`、`static/media-library.js`、`static/background-playback.js`。`static/style.css` 保留，`templates/content_base.html`（关于／条款／隐私）和 chrome 扩展仍在用。
+
+### 验证
+
+```bash
+venv/bin/python -m pytest tests/test_media_library.py tests/test_player.py tests/test_audio_player.py tests/test_task_info.py -q
+node --check static/dropload.js
+```
+
+浏览器检查：桌面双栏与小屏单栏、视频／音频标签切换、`/player?file=` 直达链接选中正确条目并切到对应标签、模式切换时播放器销毁、375px 下无横向溢出。
 
 ## 首页：DropLoad 下载页
 
-首页按 `DropLoad/`（v0 生成的 Next.js 设计稿）重做，但仍是 Flask + Jinja 页面，不引入 Node 构建。设计稿只作参考，未接入运行时。
+下载器面板仍是 Flask + Jinja 页面，不引入 Node 构建。
 
 ### 结构
 
 - `templates/index.html`：整页结构，图标以内联 SVG sprite（`<symbol>` + `<use>`）提供，替代原来的 Font Awesome CDN。
-- `static/dropload.css`：纯 CSS 实现设计稿的间距、配色与断点（640px / 1024px），仅在首页使用，不影响 `style.css`、`refresh.css` 和播放页。
-- `static/dropload.js`：任务入队、进度轮询和任务详情抽屉。
+- `static/dropload.css`：纯 CSS 实现设计稿的间距、配色与断点（640px / 1024px），下载器与媒体库共用，不影响 `style.css` 和关于／条款／隐私页。
+- `static/dropload.js`：模式切换、任务入队、进度轮询、任务详情抽屉和媒体库。
 
 左栏为链接输入与格式勾选，右栏为任务列表；桌面端 `minmax(0, 1fr) 390px` 双栏，小屏单栏且任务列表限高 420px。
 
 ### 数据流
 
-页面复用既有接口，未新增后端路由：
+下载器面板复用既有接口，未新增后端路由（媒体库新增的 `/api/media_list` 见上文）：
 
 - 提交走 `POST /api/add_task`，返回的任务 ID 直接插入右栏列表，不再整页跳转。
 - 列表状态轮询 `POST /api/task_info`，2 秒一次，全部任务进入 `completed` / `failed` 后停止。
@@ -59,14 +74,14 @@ git diff --check
 ### 与设计稿的差异
 
 - 设计稿的邮箱／密码注册登录（better-auth + Postgres）未实现，顶栏按钮仍指向既有的 YouTube OAuth（`/oauth/start`），未授权显示「登录」，已授权显示「重新授权」。
-- 播放器部分按要求未改动，`/player`、`/audio-player` 及其模板保持原样。
 - 任务行增加了细进度条、失败状态和「下载文件／播放」链接，这些是原首页已有的能力，设计稿中没有。
+- 顶栏的「下载器／媒体库」用链接而不是按钮，未启用 JS 时仍能跳到 `/` 和 `/player`。
 - 原首页的复制链接、视频元数据卡片和下载日志侧栏合并进了任务详情抽屉，点击任务行打开，Esc 或点击遮罩关闭。
 
 ### 验证
 
 ```bash
-venv/bin/python -m pytest tests/test_task_info.py tests/test_public_pages.py tests/test_audio_player.py -q
+venv/bin/python -m pytest tests/test_task_info.py tests/test_public_pages.py -q
 node --check static/dropload.js
 ```
 

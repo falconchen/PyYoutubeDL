@@ -365,7 +365,8 @@ class TestTaskInfoAPI(unittest.TestCase):
 
         self.assertIn('value="{{ \'\' if tasks else url }}"', template)
         # 服务端渲染的任务 ID 通过 JSON 交给前端，避免再次内联 URL 文本。
-        self.assertIn("{{ {'tasks': tasks, 'url': url} | tojson }}", template)
+        self.assertIn("'tasks': tasks, 'url': url", template)
+        self.assertIn('| tojson }}</script>', template)
 
     def test_completed_task_is_always_100_percent(self):
         task_id = 'v20260723120000QwE'

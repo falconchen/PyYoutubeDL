@@ -1289,6 +1289,48 @@ def _probe_media_metadata(filepath, file_mtime_ns, file_size):
 
 
 @lru_cache(maxsize=256)
+def _probe_media_dimensions(filepath, file_mtime_ns, file_size):
+    """读取媒体时长与视频高度，供媒体库列表展示；文件属性用于缓存失效。"""
+    del file_mtime_ns, file_size
+    try:
+        result = subprocess.run(
+            [
+                'ffprobe', '-v', 'error',
+                '-select_streams', 'v:0',
+                '-show_entries', 'format=duration:stream=height',
+                '-of', 'json', filepath,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        payload = json.loads(result.stdout)
+    except (FileNotFoundError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+        app.logger.warning("读取媒体时长失败，已忽略: %s (%s)", filepath, exc)
+        return None, None
+
+    duration = valid_nonnegative_number(payload.get('format', {}).get('duration'))
+    streams = payload.get('streams') or []
+    height = None
+    if streams:
+        height = valid_nonnegative_number(streams[0].get('height'))
+    return duration, int(height) if height else None
+
+
+def get_media_dimensions(filename):
+    """安全读取 FILES_DIR 中媒体文件的时长与高度。"""
+    filepath = safe_join(FILES_DIR, filename)
+    if not filepath or not os.path.isfile(filepath):
+        return None, None
+    try:
+        stat = os.stat(filepath)
+    except OSError:
+        return None, None
+    return _probe_media_dimensions(filepath, stat.st_mtime_ns, stat.st_size)
+
+
+@lru_cache(maxsize=256)
 def _probe_audio_metadata(filepath, file_mtime_ns, file_size):
     """读取音频 metadata；文件属性参数用于在文件变化时自动失效缓存。"""
     metadata = _probe_media_metadata(filepath, file_mtime_ns, file_size)
@@ -1564,67 +1606,77 @@ def get_player_exclude_keywords():
         if isinstance(keyword, str) and keyword
     ]
 
+def render_index_page(
+    url='',
+    types=None,
+    tasks=None,
+    error='',
+    view='download',
+    tab='video',
+    status=200,
+):
+    """渲染单页（下载器 + 媒体库），三个入口共用同一个模板。"""
+    youtube_user = youtube_auth.load_user_profile(config)
+    html = render_template(
+        'index.html',
+        url=url,
+        types=types or [],
+        tasks=tasks or [],
+        error=error,
+        view=view,
+        tab=tab,
+        requested_file=request.args.get('file', ''),
+        show_waline=config.get("SHOW_WALINE_ON_INDEX", False),
+        youtube_user=youtube_user,
+        is_authorized=bool(youtube_user) or bool(youtube_auth.load_token(config)),
+    )
+    return (html, status) if status != 200 else html
+
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
-    youtube_user = youtube_auth.load_user_profile(config)
-    is_authorized = bool(youtube_user) or bool(youtube_auth.load_token(config))
-
     if request.method == 'POST':
-        url = request.form.get('url')
         types = request.form.getlist('type')
-
         # 从分享文本中提取URL
-        url = extract_url(url)
+        url = extract_url(request.form.get('url'))
 
         if not url:
-            return render_template(
-                'index.html',
-                url='',
+            return render_index_page(
                 types=types,
-                tasks=[],
                 error='请输入有效的视频或播放列表链接',
-                show_waline=config.get("SHOW_WALINE_ON_INDEX", False),
-                youtube_user=youtube_user,
-                is_authorized=is_authorized,
-            ), 400
+                status=400,
+            )
 
         # 播放列表展开为逐集 URL，再逐个创建任务
         urls, error = expand_task_urls(url)
         if error:
-            return render_template(
-                'index.html',
+            return render_index_page(
                 url=url,
                 types=types,
-                tasks=[],
                 error=error,
-                show_waline=config.get("SHOW_WALINE_ON_INDEX", False),
-                youtube_user=youtube_user,
-                is_authorized=is_authorized,
-            ), 400
+                status=400,
+            )
 
         task_ids = create_tasks(urls, types)
 
         # 构建重定向URL，包含所有参数
-        redirect_url = url_for('index', 
-                             url=url,
-                             types=','.join(types),
-                             tasks=','.join(task_ids))
-        
+        redirect_url = url_for(
+            'index',
+            url=url,
+            types=','.join(types),
+            tasks=','.join(task_ids),
+        )
         return redirect(redirect_url)
 
     # GET请求处理
-    url = request.args.get('url', '')
-    types = request.args.get('types', '').split(',') if request.args.get('types') else []
-    tasks = request.args.get('tasks', '').split(',') if request.args.get('tasks') else []
-    
-    return render_template('index.html', 
-                         url=url,
-                         types=types,
-                         tasks=tasks,
-                         error='',
-                         show_waline=config.get("SHOW_WALINE_ON_INDEX", False),
-                         youtube_user=youtube_user,
-                         is_authorized=is_authorized)
+    requested_view = 'library' if request.args.get('view') == 'library' else 'download'
+    return render_index_page(
+        url=request.args.get('url', ''),
+        types=request.args.get('types', '').split(',') if request.args.get('types') else [],
+        tasks=request.args.get('tasks', '').split(',') if request.args.get('tasks') else [],
+        view=requested_view,
+        tab='audio' if request.args.get('tab') == 'audio' else 'video',
+    )
 
 
 @app.route('/about')
@@ -1775,61 +1827,43 @@ def oauth_callback():
         message="YouTube 授权成功，令牌已保存，播放列表监控已就绪。",
     )
 
-@app.route('/player')
-def player():
+NUMERIC_FILENAME_PREFIX_PATTERN = re.compile(r'^\d+-')
+
+
+def strip_numeric_filename_prefix(name):
+    """隐藏下载器写入的数字时间戳前缀，如 08221544-example.mp4。"""
+    stripped = NUMERIC_FILENAME_PREFIX_PATTERN.sub('', name, count=1)
+    return stripped or name
+
+
+def media_display_title(probed_title, fallback_name):
+    """媒体标题优先用文件内嵌标签；回退到文件名时才隐藏数字前缀。"""
+    if probed_title and probed_title != fallback_name:
+        return probed_title
+    return strip_numeric_filename_prefix(fallback_name)
+
+
+def build_media_library_items():
+    """列出媒体库需要的视频与音频条目，按修改时间倒序。"""
     exclude_keywords = get_player_exclude_keywords()
 
-    # 获取 files 目录下的所有 mp4 文件
-    video_files = [
-        filename for filename in os.listdir(FILES_DIR)
-        if filename.endswith('.mp4')
-        and not any(keyword in filename for keyword in exclude_keywords)
-    ]
-    
-    # 根据文件的最后修改时间进行降序排序（从晚到早）
-    video_files.sort(key=lambda f: os.path.getmtime(os.path.join(FILES_DIR, f)), reverse=True)
+    def listed(predicate):
+        names = [
+            filename for filename in os.listdir(FILES_DIR)
+            if predicate(filename)
+            and not any(keyword in filename for keyword in exclude_keywords)
+        ]
+        names.sort(
+            key=lambda name: os.path.getmtime(os.path.join(FILES_DIR, name)),
+            reverse=True,
+        )
+        return names
 
-    requested_file = request.args.get('file', '')
-    if requested_file in video_files:
-        video_files.remove(requested_file)
-        video_files.insert(0, requested_file)
-
-    subtitle_tracks = {}
-    video_metadata = {}
-    for filename in video_files:
-        video_metadata[filename] = get_video_metadata(filename)
-        tracks = get_video_subtitle_tracks(filename)
-        for track in tracks:
-            if track['source_kind'] == 'sidecar':
-                track["url"] = url_for(
-                    "serve_sidecar_subtitle",
-                    subtitle_filename=track['subtitle_filename'],
-                )
-            else:
-                track["url"] = url_for(
-                    "serve_subtitle",
-                    filename=filename,
-                    stream_index=track["stream_index"],
-                )
-        subtitle_tracks[filename] = tracks
-
-    audio_files = [
-        filename for filename in os.listdir(FILES_DIR)
-        if os.path.splitext(filename)[1].lower().lstrip('.') in AUDIO_EXTENSIONS
-        and not any(keyword in filename for keyword in exclude_keywords)
-    ]
-    audio_files.sort(key=lambda f: os.path.getmtime(os.path.join(FILES_DIR, f)), reverse=True)
-    if requested_file in audio_files:
-        audio_files.remove(requested_file)
-        audio_files.insert(0, requested_file)
-    if requested_file in video_files:
-        active_media = 'video'
-    elif requested_file in audio_files:
-        active_media = 'audio'
-    else:
-        active_media = 'audio' if (
-            request.args.get('tab') == 'audio' or request.path == '/audio-player'
-        ) else 'video'
+    video_files = listed(lambda name: name.endswith('.mp4'))
+    audio_files = listed(
+        lambda name: os.path.splitext(name)[1].lower().lstrip('.')
+        in AUDIO_EXTENSIONS
+    )
 
     fallback_cover_url = config.get(
         'AUDIO_PLAYER_FALLBACK_COVER_URL',
@@ -1841,41 +1875,78 @@ def player():
             filename='images/audio-cover-default.svg',
         )
 
-    audio_items = []
-    preferred_languages = [
-        language
-        for language, quality in request.accept_languages
-        if quality > 0
-    ]
+    def base_item(filename, media_type):
+        duration, height = get_media_dimensions(filename)
+        extension = os.path.splitext(filename)[1].lower().lstrip('.')
+        try:
+            size_bytes = os.path.getsize(os.path.join(FILES_DIR, filename))
+        except OSError:
+            size_bytes = None
+        return {
+            'filename': filename,
+            'type': media_type,
+            'extension': extension,
+            'height': height,
+            'duration': duration,
+            'size_bytes': size_bytes,
+            'url': url_for('serve_file', filename=filename),
+            'download_url': url_for('download_file', filename=filename),
+        }
+
+    videos = []
+    for filename in video_files:
+        metadata = get_video_metadata(filename)
+        item = base_item(filename, 'video')
+        item.update({
+            'title': media_display_title(metadata.get('title'), filename),
+            'artist': metadata.get('artist', ''),
+            'source_url': metadata.get('source_url', ''),
+            'poster': next(iter(metadata.get('cover_candidates') or []), ''),
+        })
+        videos.append(item)
+
+    audios = []
     for filename in audio_files:
         metadata = get_audio_metadata(filename, fallback_cover_url)
-        metadata.update({
-            'filename': filename,
-            'url': url_for('serve_file', filename=filename),
-            'lyrics': find_audio_lyrics(filename, preferred_languages),
-            'summary_tracks': get_local_summary_tracks(filename),
+        item = base_item(filename, 'audio')
+        item.update({
+            'title': media_display_title(
+                metadata.get('title'),
+                os.path.splitext(filename)[0],
+            ),
+            'artist': metadata.get('artist', ''),
+            'source_url': metadata.get('source_url', ''),
+            'poster': next(iter(metadata.get('cover_candidates') or []), ''),
         })
-        audio_items.append(metadata)
+        audios.append(item)
 
-    return render_template(
-        'player.html',
-        video_files=video_files,
-        video_metadata=video_metadata,
-        subtitle_tracks=subtitle_tracks,
-        browser_subtitle_languages=preferred_languages,
-        active_media=active_media,
-        audio_items=audio_items,
-        fallback_cover_url=fallback_cover_url,
-        ai_summary_configured=ai_summary_is_configured(),
-        show_waline=config.get("SHOW_WALINE_ON_PLAYER", False),
+    return videos, audios
+
+
+@app.route('/api/media_list', methods=['GET'])
+def api_media_list():
+    """媒体库列表接口，供首页的媒体库模式异步加载。"""
+    try:
+        videos, audios = build_media_library_items()
+    except OSError as exc:
+        app.logger.error("读取媒体库目录失败: %s", exc)
+        return jsonify({"success": False, "msg": "读取媒体目录失败"}), 500
+    return jsonify({"success": True, "video": videos, "audio": audios})
+
+
+@app.route('/player')
+def player():
+    """媒体库入口，与首页同页；保留原路径以兼容既有播放链接。"""
+    return render_index_page(
+        view='library',
+        tab='audio' if request.args.get('tab') == 'audio' else 'video',
     )
-    
+
+
 @app.route('/audio-player')
 def audio_player():
-    """兼容已有音频链接，在统一播放页打开音频标签。"""
-    return player()
-
-
+    """兼容已有音频链接，在媒体库中打开音频标签。"""
+    return render_index_page(view='library', tab='audio')
 @app.route('/files/<path:filename>')
 def serve_file(filename):
     decoded_filename = unquote(filename)  

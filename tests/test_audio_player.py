@@ -150,27 +150,20 @@ class TestAudioPlayerPage(unittest.TestCase):
         self.assertEqual(metadata['mime_type'], 'audio/flac')
         self.assertEqual(metadata['cover_candidates'], ['/fallback.svg'])
 
-    def test_audio_page_filters_sorts_and_selects_requested_file(self):
+    def test_media_list_filters_and_sorts_audio_by_mtime(self):
         with tempfile.TemporaryDirectory() as files_dir:
             older = Path(files_dir, 'older.mp3')
-            requested = Path(files_dir, 'requested song.m4a')
+            newer = Path(files_dir, 'requested song.m4a')
             ignored_video = Path(files_dir, 'video.mp4')
             older.touch()
-            requested.touch()
             ignored_video.touch()
-            older.touch()
+            newer.touch()
 
             def metadata(filename, fallback_url):
-                extension = Path(filename).suffix.lower()
                 return {
                     'title': Path(filename).stem,
                     'artist': 'Artist',
-                    'album': 'Album',
-                    'date': '2026-08-17',
-                    'genre': 'Music',
-                    'description': 'Description',
                     'source_url': 'https://example.com/original-audio',
-                    'mime_type': 'audio/mp4' if extension == '.m4a' else 'audio/mpeg',
                     'cover_candidates': [fallback_url],
                 }
 
@@ -182,26 +175,24 @@ class TestAudioPlayerPage(unittest.TestCase):
                     {'AUDIO_PLAYER_FALLBACK_COVER_URL': '/fallback.svg'},
                 ),
             ):
-                response = self.client.get(
-                    '/audio-player',
-                    query_string={'file': requested.name},
-                )
+                response = self.client.get('/api/media_list')
 
-        html = response.get_data(as_text=True)
+        payload = response.get_json()
         self.assertEqual(response.status_code, 200)
-        self.assertIn('<source src="/files/requested%20song.m4a" type="audio/mp4">', html)
-        self.assertLess(html.index('requested song'), html.index('older.mp3'))
-        self.assertNotIn('video.mp4', html.split('id="audio-list"', 1)[1].split('</aside>', 1)[0])
-        self.assertIn('href="https://example.com/original-audio"', html)
-        self.assertIn('>原始链接 <i', html)
-        self.assertIn('id="current-audio-source"', html)
-        self.assertIn('sourceLink.href = sourceUrl;', html)
-        self.assertIn('id="current-audio-metadata"', html)
-        self.assertIn('<dd>Album</dd>', html)
-        self.assertIn('id="video-tab"', html)
-        self.assertLess(html.index('class="player-nav"'), html.index('class="player-content"'))
-        self.assertNotIn('class="footer-actions', html)
-        self.assertIn('aria-labelledby="lyrics-heading"\n                        hidden', html)
+        # 最近修改的排在前面，视频不会混进音频列表。
+        self.assertEqual(
+            [item['filename'] for item in payload['audio']],
+            ['requested song.m4a', 'older.mp3'],
+        )
+        self.assertEqual(
+            [item['filename'] for item in payload['video']],
+            ['video.mp4'],
+        )
+        first = payload['audio'][0]
+        self.assertEqual(first['url'], '/files/requested%20song.m4a')
+        self.assertEqual(first['source_url'], 'https://example.com/original-audio')
+        self.assertEqual(first['artist'], 'Artist')
+        self.assertEqual(first['poster'], '/fallback.svg')
 
     def test_audio_page_matches_preferred_sidecar_lyrics(self):
         with tempfile.TemporaryDirectory() as files_dir:
@@ -252,160 +243,6 @@ class TestAudioPlayerPage(unittest.TestCase):
 
         self.assertEqual(lyrics['filename'], english.name)
 
-    def test_audio_player_uses_poster_mode_and_race_safe_fallback(self):
-        template = Path(app.template_folder, 'audio_player.html').read_text(
-            encoding='utf-8',
-        ) + Path(app.template_folder, '_audio_controller.html').read_text(encoding='utf-8')
-
-        self.assertIn('audioPosterMode: true', template)
-        self.assertIn('pictureInPictureToggle: false', template)
-        self.assertIn('fullscreenToggle: false', template)
-        self.assertIn('var posterRequestSerial = 0;', template)
-        self.assertIn('var requestSerial = ++posterRequestSerial;', template)
-        self.assertIn('image.onerror = function () {', template)
-        self.assertIn('tryCandidate(index + 1);', template)
-        self.assertIn("player.poster(fallbackCoverUrl);", template)
-
-    def test_audio_player_uses_inline_playback_attributes(self):
-        template = Path(app.template_folder, 'audio_player.html').read_text(
-            encoding='utf-8',
-        ) + Path(app.template_folder, '_audio_controller.html').read_text(encoding='utf-8')
-
-        self.assertIn('playsinline webkit-playsinline', template)
-        self.assertIn('playsinline: true', template)
-
-    def test_audio_player_renders_real_audio_spectrum_visualizer(self):
-        template = Path('templates/audio_player.html').read_text(encoding='utf-8') + Path(app.template_folder, '_audio_controller.html').read_text(encoding='utf-8')
-        css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
-
-        self.assertIn('id="audio-visualizer"', template)
-        self.assertIn('id="audio-cover-gradient"', template)
-        self.assertIn('player.el().appendChild(coverGradient);', template)
-        self.assertIn('filter: blur(4px)', css)
-        self.assertIn('transform: scale(1.08);', css)
-        self.assertIn('top: 50%;', css)
-        self.assertIn('left: 50%;', css)
-        self.assertIn('border-radius: 50%;', css)
-        self.assertIn('background: rgba(220, 20, 60, 0.84);', css)
-        self.assertIn('transform: translate(-50%, -50%);', css)
-        self.assertIn('.player-page .video-js.vjs-paused .vjs-big-play-button', css)
-        self.assertIn('.player-page .video-js.vjs-playing .vjs-big-play-button', css)
-        self.assertNotIn('display: none;', css.split(
-            '.player-page .video-js .vjs-big-play-button',
-            1,
-        )[1].split('}', 1)[0])
-        self.assertIn("aria-hidden=\"true\"", template)
-        self.assertIn('window.AudioContext || window.webkitAudioContext', template)
-        self.assertIn('createMediaElementSource(', template)
-        self.assertEqual(template.count('createMediaElementSource('), 1)
-        self.assertIn('visualizerAnalyser.getByteFrequencyData(', template)
-        self.assertIn('Math.min(54, height * 0.1)', template)
-        self.assertNotIn('height * 0.14', template)
-        self.assertIn('window.requestAnimationFrame(drawAudioVisualizer)', template)
-        self.assertIn('window.cancelAnimationFrame(visualizerAnimationFrame)', template)
-        self.assertIn('function resetAudioVisualizer()', template)
-        self.assertIn('resetAudioVisualizer();', template)
-        stop_body = template.split('function stopAudioVisualizer()', 1)[1].split(
-            'function resetAudioVisualizer()',
-            1,
-        )[0]
-        self.assertNotIn('clearAudioVisualizer();', stop_body)
-        self.assertIn("player.on('play', startAudioVisualizer);", template)
-        self.assertIn("player.on('pause', stopAudioVisualizer);", template)
-        self.assertIn("document.addEventListener('visibilitychange'", template)
-        self.assertIn("window.matchMedia('(prefers-reduced-motion: reduce)')", template)
-        self.assertIn('pointer-events: none;', css)
-        self.assertIn('.audio-cover-gradient {', css)
-        self.assertIn('rgba(10, 15, 28, 0.78) 100%', css)
-        self.assertIn('@media (prefers-reduced-motion: reduce)', css)
-        playlist_header_rule = css.split('.playlist-header {', 1)[1].split('}', 1)[0]
-        self.assertIn('display: none;', playlist_header_rule)
-
-    def test_audio_player_reuses_playback_download_and_auto_next_behaviors(self):
-        template = Path(app.template_folder, 'audio_player.html').read_text(
-            encoding='utf-8',
-        ) + Path(app.template_folder, '_audio_controller.html').read_text(encoding='utf-8')
-
-        self.assertIn(
-            'playbackRates: [0.5, 0.75, 1, 1.5, 2, 3]',
-            template,
-        )
-        self.assertIn("controlBar.addChild('AudioDownloadButton'", template)
-        self.assertIn('link.download = currentFilename;', template)
-        self.assertIn("player.on('ended', function () {", template)
-        self.assertIn("player.on('loadedmetadata', restoreCurrentAudioProgress);", template)
-        self.assertIn("player.on('pause', saveCurrentAudioProgress);", template)
-        self.assertIn("window.addEventListener('beforeunload', saveCurrentAudioProgress);", template)
-        shared = Path(app.template_folder, 'player.html').read_text(encoding='utf-8')
-        self.assertEqual(shared.count('id="waline"'), 1)
-
-    def test_audio_player_loads_and_synchronizes_sidecar_lyrics(self):
-        template = Path(app.template_folder, 'audio_player.html').read_text(
-            encoding='utf-8',
-        ) + Path(app.template_folder, '_audio_controller.html').read_text(encoding='utf-8')
-        css = Path(app.static_folder, 'player.css').read_text(encoding='utf-8')
-
-        self.assertIn('id="lyrics-content"', template)
-        self.assertIn('player.el().appendChild(lyricsPanel);', template)
-        self.assertIn('function parseLrcLyrics(text)', template)
-        self.assertIn('function parseTimedTextLyrics(text)', template)
-        self.assertIn('fetch(audioItem.lyrics.url', template)
-        self.assertIn('function syncLyrics()', template)
-        self.assertIn('function hideLyricsPanel()', template)
-        self.assertIn('lyricsPanel.hidden = true;', template)
-        self.assertIn('lyricsPanel.hidden = false;', template)
-        self.assertIn('if (!audioItem || !audioItem.lyrics) {', template)
-        self.assertIn('.audio-player-page .lyrics-panel[hidden] {', css)
-        self.assertIn('player.currentTime(cue.time);', template)
-        self.assertIn('loadLyrics(audioItem);', template)
-        self.assertIn('.lyrics-line.active {', css)
-        self.assertIn('.audio-player-page .lyrics-panel {', css)
-        self.assertIn('z-index: 3;', css)
-        lyrics_panel_rule = css.split(
-            '.audio-player-page .lyrics-panel {',
-            1,
-        )[1].split('}', 1)[0]
-        self.assertIn('top: 1%;', lyrics_panel_rule)
-        self.assertIn('bottom: 42%;', lyrics_panel_rule)
-        self.assertIn('border: none;', lyrics_panel_rule)
-        self.assertNotIn('right:', lyrics_panel_rule)
-        self.assertNotIn('left:', lyrics_panel_rule)
-        self.assertNotIn('border-radius:', lyrics_panel_rule)
-        self.assertNotIn('background:', lyrics_panel_rule)
-        self.assertNotIn('box-shadow:', lyrics_panel_rule)
-        self.assertNotIn('backdrop-filter:', lyrics_panel_rule)
-        self.assertLess(
-            template.index('id="audio-visualizer"'),
-            template.index('class="lyrics-panel"'),
-        )
-
-    def test_audio_player_renders_ai_summary_for_sidecar_lyrics(self):
-        with tempfile.TemporaryDirectory() as root:
-            files_dir = Path(root) / 'files'
-            files_dir.mkdir()
-            (files_dir / 'song.mp3').touch()
-            (files_dir / 'song.zh-Hans.srt').write_text(
-                '1\n00:00:00,000 --> 00:00:01,000\n中文\n',
-                encoding='utf-8',
-            )
-            with (
-                patch('app.FILES_DIR', str(files_dir)),
-                patch.dict(app_module.config, {
-                    'AI_API_BASE_URL': 'https://ai.example/v1/chat/completions',
-                    'AI_API_MODEL': 'test-model',
-                    'AI_API_TOKEN': 'test-token',
-                }),
-            ):
-                response = self.client.get('/audio-player')
-
-        html = response.get_data(as_text=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('id="generate-ai-summary"', html)
-        self.assertIn('var aiSummaryConfigured = true;', html)
-        self.assertIn('sidecar:song.zh-Hans.srt', html)
-        self.assertIn('subtitle_filename: track.subtitle_filename', html)
-        self.assertIn('updateAiSummaryPanel(filename);', html)
-
     def test_audio_ai_summary_creates_local_sidecar_job(self):
         with tempfile.TemporaryDirectory() as root:
             root_path = Path(root)
@@ -448,13 +285,15 @@ class TestAudioPlayerPage(unittest.TestCase):
         self.assertTrue(cover_path.is_file())
         self.assertIn('viewBox="0 0 1600 900"', cover_path.read_text(encoding='utf-8'))
 
-    def test_home_page_links_both_players(self):
+    def test_home_page_switches_between_downloader_and_library(self):
         response = self.client.get('/')
         html = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('href="/player"', html)
-        self.assertIn('打开媒体库', html)
+        self.assertIn('>媒体库<', html)
+        self.assertIn('>下载器<', html)
+        self.assertIn('data-view="library"', html)
 
 
 if __name__ == '__main__':
