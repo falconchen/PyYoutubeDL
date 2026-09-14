@@ -12,6 +12,14 @@
     var METADATA_TIMEOUT_MS = 30000;
     var METADATA_MAX_ATTEMPTS = 2;
     var METADATA_RETRY_DELAY_MS = 1500;
+    var PROGRESS_KEY_PREFIX = 'dropload:playback-progress:';
+    var PLAYBACK_RATE_KEY = 'dropload:playback-rate';
+    // 距结尾不足这么多秒视为播完，不再记忆进度。
+    var PLAYBACK_END_THRESHOLD = 3;
+    var PROGRESS_SAVE_INTERVAL_MS = 5000;
+    // 与 zwplayer 倍速菜单的档位保持一致，其余值不记忆。
+    var PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
+    var SEEK_OFFSET_SECONDS = 10;
 
     var STATE_LABELS = {
         queued: '等待处理',
@@ -98,6 +106,13 @@
     var libraryTab = 'video';
     var currentMedia = null;
     var zwplayer = null;
+    /** 当前 zwplayer 实例创建时的媒体类型（video/audio）。 */
+    var playerType = null;
+    /** 已挂好监听的 zwplayer 媒体元素；换源复用同一个元素。 */
+    var mediaEl = null;
+    /** 当前元素已载入元数据的条目，换源途中为 null，避免把旧进度记到新条目上。 */
+    var loadedFilename = null;
+    var lastProgressSaveAt = 0;
     var libraryLoading = false;
     var signedIn = false;
     var loginUrl = '/login';
@@ -702,7 +717,29 @@
             .join(' · ');
     }
 
+    function readStorage(key) {
+        try {
+            return window.localStorage.getItem(key);
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function writeStorage(key, value) {
+        try {
+            if (value === null) window.localStorage.removeItem(key);
+            else window.localStorage.setItem(key, value);
+        } catch (error) {
+            /* 隐私模式下无法记忆，不影响播放 */
+        }
+    }
+
     function destroyPlayer() {
+        saveProgress(true);
+        clearMediaSession();
+        mediaEl = null;
+        loadedFilename = null;
+        playerType = null;
         if (zwplayer) {
             try {
                 zwplayer.destroy();
@@ -715,14 +752,7 @@
         stageFrame.replaceChildren();
     }
 
-    function playMedia(item) {
-        if (!item) return;
-        currentMedia = item;
-        renderNowPlaying(item);
-        renderPlaylist();
-
-        // 与设计稿一致：切换媒体时重建播放器实例，避免残留上一条的状态。
-        destroyPlayer();
+    function createPlayer(item, autoplay) {
         var mount = document.createElement('div');
         mount.id = 'dl-player';
         stageFrame.appendChild(mount);
@@ -737,13 +767,332 @@
                 url: item.url,
                 poster: item.poster || '',
                 fluid: true,
-                autoplay: false,
+                autoplay: autoplay,
                 disableMutedConfirm: true,
-                mediaKind: item.type === 'audio' ? 'audio' : 'video'
+                // 标准模式下倍速按钮默认不显示，需显式打开。
+                speedButton: true,
+                mediaKind: item.type === 'audio' ? 'audio' : 'video',
+                // 音频会进入 zwplayer 音乐模式，它自带的 Media Session 指向
+                // 内部播放列表；关掉后由 attachMediaSession 统一接管锁屏控制。
+                music: { mediaSession: false },
+                onready: function () {
+                    attachMediaElement(this.videoEl);
+                }
             });
         } catch (error) {
             console.error('初始化播放器失败:', error);
+            return;
         }
+        playerType = item.type;
+        attachMediaElement(zwplayer.videoEl);
+    }
+
+    function updateLocationForMedia(item) {
+        // 地址栏跟随当前条目，与任务完成后的直达链接同一格式，刷新或复制都能回到这一条。
+        var params = new URLSearchParams();
+        params.set('file', item.filename);
+        window.history.replaceState({}, '', '/player?' + params.toString());
+    }
+
+    function playMedia(item, options) {
+        if (!item) return;
+        var autoplay = Boolean(options && options.autoplay);
+        saveProgress(true);
+        currentMedia = item;
+        loadedFilename = null;
+        lastProgressSaveAt = 0;
+        renderNowPlaying(item);
+        renderPlaylist();
+        // 首次载入与深链定位不改地址；用户切换、自动下一个、锁屏切换才同步。
+        if (autoplay) updateLocationForMedia(item);
+
+        if (zwplayer && autoplay && playerType === item.type) {
+            // 复用同一个媒体元素换源：iOS 上新建的元素没有用户手势授权，
+            // 自动播放下一条或锁屏续播会被拦截。
+            // 视频与音频之间不能复用：zwplayer 的 play(url) 不会在标准模式和
+            // 音乐模式之间切换，跨类型必然来自用户点击，重建时仍有手势授权。
+            try {
+                zwplayer.play(item.url);
+                if (mediaEl) mediaEl.poster = item.poster || '';
+            } catch (error) {
+                console.error('切换媒体失败:', error);
+            }
+        } else {
+            destroyPlayer();
+            createPlayer(item, autoplay);
+        }
+        updateSessionMetadata();
+    }
+
+    /* 媒体元素：进度、倍速、自动下一个 */
+
+    function attachMediaElement(element) {
+        if (!element || element === mediaEl) return;
+        mediaEl = element;
+        element.addEventListener('loadedmetadata', handleLoadedMetadata);
+        element.addEventListener('timeupdate', handleTimeUpdate);
+        element.addEventListener('canplay', handleCanPlay);
+        element.addEventListener('play', handlePlay);
+        element.addEventListener('pause', handlePause);
+        element.addEventListener('ended', handleEnded);
+        element.addEventListener('ratechange', handleRateChange);
+        element.addEventListener('durationchange', handleDurationChange);
+        if (element.readyState >= 1) handleLoadedMetadata({ currentTarget: element });
+    }
+
+    function isCurrentElement(event) {
+        // 已销毁的旧元素可能还会补发事件，一律忽略。
+        return Boolean(mediaEl) && event.currentTarget === mediaEl;
+    }
+
+    function progressKey(item) {
+        return PROGRESS_KEY_PREFIX + item.filename;
+    }
+
+    function saveProgress(force) {
+        if (!mediaEl || !currentMedia || loadedFilename !== currentMedia.filename) return;
+        var now = Date.now();
+        if (!force && now - lastProgressSaveAt < PROGRESS_SAVE_INTERVAL_MS) return;
+        var time = mediaEl.currentTime;
+        var duration = mediaEl.duration;
+        if (!isFinite(time) || time <= 0) return;
+        lastProgressSaveAt = now;
+        if (isFinite(duration) && duration > 0 && duration - time <= PLAYBACK_END_THRESHOLD) {
+            writeStorage(progressKey(currentMedia), null);
+            return;
+        }
+        writeStorage(progressKey(currentMedia), String(time));
+    }
+
+    function restoreProgress() {
+        var saved = Number(readStorage(progressKey(currentMedia)));
+        if (!isFinite(saved) || saved <= 0) return;
+        var duration = mediaEl.duration;
+        if (isFinite(duration) && duration > 0 && saved >= duration - PLAYBACK_END_THRESHOLD) {
+            writeStorage(progressKey(currentMedia), null);
+            return;
+        }
+        mediaEl.currentTime = saved;
+    }
+
+    function storedPlaybackRate() {
+        var rate = Number(readStorage(PLAYBACK_RATE_KEY));
+        return PLAYBACK_RATES.indexOf(rate) === -1 ? 1 : rate;
+    }
+
+    function applyPlaybackRate() {
+        // 换源时 zwplayer 会把倍速菜单复位成 1x，浏览器也会重置 playbackRate。
+        var rate = storedPlaybackRate();
+        mediaEl.defaultPlaybackRate = rate;
+        mediaEl.playbackRate = rate;
+        syncSpeedMenu();
+    }
+
+    function syncSpeedMenu() {
+        // 首次创建播放器时倍速按钮晚于 loadedmetadata 生成，canplay/play 时再对齐一次。
+        if (mediaEl && zwplayer && typeof zwplayer._syncSpeedBtnUI === 'function') {
+            zwplayer._syncSpeedBtnUI(mediaEl.playbackRate);
+        }
+    }
+
+    function handleCanPlay(event) {
+        if (!isCurrentElement(event)) return;
+        syncSpeedMenu();
+    }
+
+    function handleLoadedMetadata(event) {
+        if (!isCurrentElement(event) || !currentMedia) return;
+        loadedFilename = currentMedia.filename;
+        restoreProgress();
+        applyPlaybackRate();
+        updatePositionState();
+    }
+
+    function handleTimeUpdate(event) {
+        if (!isCurrentElement(event)) return;
+        saveProgress(false);
+        updatePositionState();
+    }
+
+    function handlePlay(event) {
+        if (!isCurrentElement(event)) return;
+        syncSpeedMenu();
+        attachMediaSession();
+    }
+
+    function handlePause(event) {
+        if (!isCurrentElement(event)) return;
+        saveProgress(true);
+        setSessionPlaybackState('paused');
+    }
+
+    function handleRateChange(event) {
+        if (!isCurrentElement(event)) return;
+        // 换源途中的复位不代表用户选择，只记忆元数据载入后的改动。
+        if (currentMedia && loadedFilename === currentMedia.filename
+            && PLAYBACK_RATES.indexOf(mediaEl.playbackRate) !== -1) {
+            writeStorage(PLAYBACK_RATE_KEY, String(mediaEl.playbackRate));
+        }
+        updatePositionState();
+    }
+
+    function handleDurationChange(event) {
+        if (!isCurrentElement(event)) return;
+        updatePositionState();
+    }
+
+    function adjacentMedia(offset) {
+        // 以正在播放条目的类型取列表，用户切到另一个标签也不会串到另一类。
+        if (!currentMedia || !mediaLibrary) return null;
+        var list = mediaLibrary[currentMedia.type] || [];
+        for (var index = 0; index < list.length; index += 1) {
+            if (list[index].filename === currentMedia.filename) {
+                return list[index + offset] || null;
+            }
+        }
+        return null;
+    }
+
+    function handleEnded(event) {
+        if (!isCurrentElement(event) || !currentMedia) return;
+        writeStorage(progressKey(currentMedia), null);
+        var next = adjacentMedia(1);
+        // 播到列表末尾就停下，与旧播放页一致，不循环。
+        if (next) playMedia(next, { autoplay: true });
+        else setSessionPlaybackState('none');
+    }
+
+    window.addEventListener('pagehide', function () {
+        saveProgress(true);
+    });
+    document.addEventListener('visibilitychange', function () {
+        // iOS 切到后台后页面可能被直接回收，趁隐藏时落盘。
+        if (document.visibilityState === 'hidden') saveProgress(true);
+    });
+
+    /* Media Session：锁屏与后台控制 */
+
+    var mediaSession = navigator.mediaSession || null;
+
+    function setSessionAction(name, handler) {
+        if (!mediaSession) return;
+        try {
+            mediaSession.setActionHandler(name, handler);
+        } catch (error) {
+            /* 浏览器不支持该动作 */
+        }
+    }
+
+    function setSessionPlaybackState(state) {
+        if (!mediaSession) return;
+        try {
+            mediaSession.playbackState = state;
+        } catch (error) {
+            /* 忽略 */
+        }
+    }
+
+    function updateSessionMetadata() {
+        if (!mediaSession || !currentMedia || typeof window.MediaMetadata !== 'function') return;
+        try {
+            mediaSession.metadata = new window.MediaMetadata({
+                title: currentMedia.title || '',
+                artist: currentMedia.artist || '',
+                artwork: currentMedia.poster ? [{ src: currentMedia.poster }] : []
+            });
+        } catch (error) {
+            /* 部分浏览器不接受封面地址 */
+        }
+    }
+
+    function updatePositionState() {
+        if (!mediaSession || !mediaEl || typeof mediaSession.setPositionState !== 'function') return;
+        var duration = mediaEl.duration;
+        var position = mediaEl.currentTime;
+        try {
+            if (!isFinite(duration) || duration <= 0 || !isFinite(position)) {
+                mediaSession.setPositionState();
+                return;
+            }
+            mediaSession.setPositionState({
+                duration: duration,
+                playbackRate: mediaEl.playbackRate || 1,
+                position: Math.max(0, Math.min(position, duration))
+            });
+        } catch (error) {
+            /* 部分浏览器只实现了部分 Media Session */
+        }
+    }
+
+    function seekTo(seconds) {
+        if (!mediaEl) return;
+        var duration = mediaEl.duration;
+        if (!isFinite(seconds) || !isFinite(duration) || duration <= 0) return;
+        mediaEl.currentTime = Math.max(0, Math.min(seconds, duration));
+        updatePositionState();
+    }
+
+    function resumePlayback() {
+        if (zwplayer && typeof zwplayer.resume === 'function') {
+            zwplayer.resume();
+            return;
+        }
+        if (mediaEl) {
+            var result = mediaEl.play();
+            if (result && result.catch) result.catch(function () {
+                setSessionPlaybackState('paused');
+            });
+        }
+    }
+
+    function attachMediaSession() {
+        try {
+            // Safari 的实验性 API：声明为播放类会话，锁屏后不被当作可打断的声音。
+            if (navigator.audioSession) navigator.audioSession.type = 'playback';
+        } catch (error) {
+            /* 不支持时仍可前台播放 */
+        }
+        if (!mediaSession) return;
+        updateSessionMetadata();
+        setSessionPlaybackState('playing');
+        setSessionAction('play', resumePlayback);
+        setSessionAction('pause', function () {
+            if (zwplayer && typeof zwplayer.pause === 'function') zwplayer.pause();
+            else if (mediaEl) mediaEl.pause();
+        });
+        setSessionAction('seekbackward', function (details) {
+            if (mediaEl) seekTo(mediaEl.currentTime - ((details && details.seekOffset) || SEEK_OFFSET_SECONDS));
+        });
+        setSessionAction('seekforward', function (details) {
+            if (mediaEl) seekTo(mediaEl.currentTime + ((details && details.seekOffset) || SEEK_OFFSET_SECONDS));
+        });
+        setSessionAction('seekto', function (details) {
+            if (details) seekTo(details.seekTime);
+        });
+        setSessionAction('previoustrack', function () {
+            var previous = adjacentMedia(-1);
+            if (previous) playMedia(previous, { autoplay: true });
+            else seekTo(0);
+        });
+        setSessionAction('nexttrack', function () {
+            var next = adjacentMedia(1);
+            if (next) playMedia(next, { autoplay: true });
+        });
+        updatePositionState();
+    }
+
+    function clearMediaSession() {
+        if (!mediaSession) return;
+        ['play', 'pause', 'seekbackward', 'seekforward', 'seekto', 'previoustrack', 'nexttrack']
+            .forEach(function (name) {
+                setSessionAction(name, null);
+            });
+        try {
+            mediaSession.metadata = null;
+        } catch (error) {
+            /* 忽略 */
+        }
+        setSessionPlaybackState('none');
     }
 
     function renderNowPlaying(item) {
@@ -901,7 +1250,8 @@
         var item = (mediaLibrary[libraryTab] || []).find(function (candidate) {
             return candidate.filename === button.dataset.filename;
         });
-        if (item) playMedia(item);
+        // 点击是用户手势，直接开播；复用媒体元素也让后续自动下一个获得授权。
+        if (item) playMedia(item, { autoplay: true });
     });
 
     /* 表单 */

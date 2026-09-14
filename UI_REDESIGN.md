@@ -13,12 +13,12 @@
 采用第三方 [zwplayer](https://github.com/chenfanyu/zwplayer-release) 3.3.2，静态资源在 `static/zwplayer/`（约 4.1MB，含 `css/`、`plugins/`、`widgets/`）。用原生 UMD 构建而不是设计稿里的 `zwplayer-react`：
 
 ```js
-new ZWPlayer({ playerElm: mount, url, poster, fluid: true, autoplay: false })
+new ZWPlayer({ playerElm: mount, url, poster, fluid: true, autoplay, speedButton: true, music: { mediaSession: false } })
 ```
 
 - CSS 由 `zwplayer.js` 依据自身脚本路径自动加载 `css/zwplayer.css`，模板里不用单独引入。
 - `fluid` 模式会用 `padding-top` 自撑 16:9，而外框 `.dl-stage-frame` 已定好比例，所以 CSS 里强制它 `height:100%; padding-top:0` 填满外框。
-- 切换媒体时销毁并重建实例（对应设计稿的 `key` 强制重挂载）；离开媒体库模式也会销毁，避免音频在后台继续播放。
+- 用户点选或自动播放下一条时，若类型相同则复用同一个实例调用 `play(url)` 换源，`videoEl` 保持不变；视频与音频之间切换、首次载入、深链定位时重建。`play(url)` 不会在标准模式和音乐模式之间切换（zwplayer 只在播放本地文件时切），所以跨类型必须重建；跨类型只可能来自用户点击，重建时仍有手势授权。iOS 上新建的媒体元素没有用户手势授权，重建会让自动下一个和锁屏续播被拦截。离开媒体库模式时销毁实例，避免在下载器页面继续出声。
 - `.dl-layout > *` 和 `.dl-library > *` 必须保留 `min-width: 0`。grid item 默认 `min-width:auto`，播放器内部的 min-content 会把列撑破，小屏出现横向溢出。
 
 ### 路由与数据
@@ -33,7 +33,18 @@ new ZWPlayer({ playerElm: mount, url, poster, fluid: true, autoplay: false })
 
 ### 随旧播放页移除的功能
 
-按需求采用设计稿的简化播放器，以下原有能力已从界面移除：内嵌／外挂字幕轨道与字幕语言偏好、音频歌词同步滚动、播放器内的 AI 总结、播放进度记忆、连续播放、音频频谱与封面模糊背景、播放页的 Waline 评论。
+按需求采用设计稿的简化播放器，以下原有能力已从界面移除：内嵌／外挂字幕轨道与字幕语言偏好、音频歌词同步滚动、播放器内的 AI 总结、音频频谱与封面模糊背景、播放页的 Waline 评论。倍速、播放进度记忆、自动播放下一个和锁屏控制已在 zwplayer 上补回，见下节。
+
+### 倍速、进度、自动下一个与锁屏控制
+
+均在 `static/dropload.js` 的媒体库段实现，没有使用 zwplayer 自带的播放列表模块（它按 ZWMAP JSON 驱动，没有「切换条目」回调，和右侧列表对不上）。
+
+- **倍速**：标准模式下 zwplayer 默认不显示倍速按钮，需显式 `speedButton: true`，档位为 0.25x–2.0x（旧版的 3x 不提供）。选择写入 `localStorage['dropload:playback-rate']`；换源时 zwplayer 会把菜单复位成 1x、浏览器也会重置 `playbackRate`，所以在 `loadedmetadata` 重新应用，并在 `canplay`／`play` 时调用 `_syncSpeedBtnUI` 对齐菜单文字（该方法属 zwplayer 内部，升级时需复查）。
+- **进度**：`localStorage['dropload:playback-progress:<filename>']`，`timeupdate` 每 5 秒、`pause`、换源前、`pagehide`、页面隐藏时保存，`loadedmetadata` 时恢复；距结尾不足 3 秒视为播完并清除。换源途中（新条目元数据未载入）不写入，避免把上一条的位置记到新条目上。
+- **自动下一个**：`ended` 后按正在播放条目所属类型的列表顺序播下一条，末尾停止不循环；用户切到另一个标签不影响。
+- **地址栏**：用户切换、自动下一个、锁屏切换时用 `replaceState` 改成 `/player?file=<filename>`，与任务完成后的直达链接同一格式；首次载入和深链定位不改地址。
+- **锁屏控制**：音频会触发 zwplayer 音乐模式，它自带的 Media Session 指向内部播放列表，因此用 `music: { mediaSession: false }` 关掉，由我们统一注册 `play`／`pause`／快退快进／`seekto`／上一条／下一条，并设置标题、作者、封面和进度；播放时尝试 `navigator.audioSession.type = 'playback'`。
+- **iOS 限制**：zwplayer 对音频也使用 `<video>` 元素，iOS 切后台或锁屏时系统可能暂停播放，需以真机测试为准。
 
 对应的后端未删除，仍可用且仍有测试覆盖：`/subtitles/...` 字幕转换路由、`/api/ai_summary*` 与 `/api/ai_summaries*`、`ai_summary_worker.py` 及其 SQLite 存储（Chrome 扩展仍在用）。`find_audio_lyrics()`、`get_local_summary_tracks()` 等只被旧播放页调用的辅助函数现在没有调用方。
 

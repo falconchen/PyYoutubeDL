@@ -324,7 +324,7 @@ journalctl -u dropload -f    # 实时日志
 
 > **从单用户升级**：首次启动后注册你自己的管理员账号，升级前无归属的历史数据会归到该账号名下，已有匿名归属的数据除外。原先的 `GOOGLE_OAUTH_TOKEN_FILE` 仅用于一次性接管，之后令牌以数据库中的为准。Google OAuth 的回调地址仍是 `/oauth/callback`，无需在 Google 控制台改配置，但新增的 Drive scope 需要重新授权一次才会生效。
 
-页面是单页双模式，顶栏的分段控件在「下载器」和「媒体库」之间切换。媒体库播放 `FILES_DIR` 中已下载的视频和音频，列表来自 `/api/media_list`，播放器使用 [zwplayer](https://github.com/chenfanyu/zwplayer-release)（静态资源在 `static/zwplayer/`）。`/player` 和 `/audio-player` 仍然可用，直接打开媒体库并分别默认选中视频或音频；带 `file` 参数时定位到该文件。
+页面是单页双模式，顶栏的分段控件在「下载器」和「媒体库」之间切换。媒体库播放 `FILES_DIR` 中已下载的视频和音频，列表来自 `/api/media_list`，播放器使用 [zwplayer](https://github.com/chenfanyu/zwplayer-release)（静态资源在 `static/zwplayer/`）。`/player` 和 `/audio-player` 仍然可用，直接打开媒体库并分别默认选中视频或音频；带 `file` 参数时定位到该文件。媒体库支持倍速（0.25x–2.0x，选择会被记住）、按文件记忆播放进度、播完自动播放同类列表的下一条，以及系统锁屏／通知栏的播放控制；iOS 后台播放受系统限制，以真机表现为准。
 
 站点提供以下公开信息页面，并在主页面页脚提供入口：
 
