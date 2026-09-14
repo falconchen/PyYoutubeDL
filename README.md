@@ -324,7 +324,7 @@ journalctl -u dropload -f    # 实时日志
 
 > **从单用户升级**：首次启动后注册你自己的管理员账号，升级前无归属的历史数据会归到该账号名下，已有匿名归属的数据除外。原先的 `GOOGLE_OAUTH_TOKEN_FILE` 仅用于一次性接管，之后令牌以数据库中的为准。Google OAuth 的回调地址仍是 `/oauth/callback`，无需在 Google 控制台改配置，但新增的 Drive scope 需要重新授权一次才会生效。
 
-页面是单页双模式，顶栏的分段控件在「下载器」和「媒体库」之间切换。媒体库播放 `FILES_DIR` 中已下载的视频和音频，列表来自 `/api/media_list`，播放器使用 [zwplayer](https://github.com/chenfanyu/zwplayer-release)（静态资源在 `static/zwplayer/`）。`/player` 和 `/audio-player` 仍然可用，直接打开媒体库并分别默认选中视频或音频；带 `file` 参数时定位到该文件。媒体库支持倍速（0.25x–2.0x，选择会被记住）、按文件记忆播放进度、播完自动播放同类列表的下一条，以及系统锁屏／通知栏的播放控制；iOS 后台播放受系统限制，以真机表现为准。
+页面是单页双模式，顶栏的分段控件在「下载器」和「媒体库」之间切换。媒体库播放 `FILES_DIR` 中已下载的视频和音频，列表来自 `/api/media_list`，播放器使用 [zwplayer](https://github.com/chenfanyu/zwplayer-release)（静态资源在 `static/zwplayer/`）。`/player` 和 `/audio-player` 仍然可用，直接打开媒体库并分别默认选中视频或音频；带 `file` 参数时定位到该文件。媒体库支持倍速（0.25x–2.0x，选择会被记住）、按文件记忆播放进度、播完自动播放同类列表的下一条，以及系统锁屏／通知栏的播放控制；播放列表右侧可永久删除当前主体拥有的单个媒体文件，删除不会连带移除任务记录或同一任务的其他产物。iOS 后台播放受系统限制，以真机表现为准。
 
 站点提供以下公开信息页面，并在主页面页脚提供入口：
 
@@ -422,6 +422,11 @@ curl -X POST http://localhost:5100/api/task_log \
 # 列出媒体库中已下载的视频与音频
 curl http://localhost:5100/api/media_list
 
+# 永久删除当前登录用户或匿名会话拥有的单个媒体文件
+curl -X POST http://localhost:5100/api/media_delete \
+  -H "Content-Type: application/json" \
+  -d '{"filename":"example.mp4"}'
+
 # 查询轻量视频预览信息（标题、作者、时长、缩略图）
 curl -X POST http://localhost:5100/api/video_info_basic \
   -H "Content-Type: application/json" \
@@ -455,6 +460,8 @@ curl http://localhost:5100/api/ai_summaries/jobs/<job_id> \
 下载中的任务由下载器执行：接口返回 202 和 `pending`，Web 端写入 `<task_id>.control` 指令文件，下载器终止 yt-dlp 后再改写状态，前端轮询到新状态为止。下载器未运行期间留下的指令会在下次启动时先于中断恢复执行。
 
 `/api/media_list` 返回媒体库需要的视频与音频条目，各自按修改时间倒序，沿用 `PLAYER_FILENAME_EXCLUDE_KEYWORDS` 过滤。每个条目包含文件名、标题、作者、来源链接、封面、扩展名、时长、视频高度、文件大小以及播放和下载地址。时长和高度由 `ffprobe` 读取并按文件属性缓存，目录中文件较多时首次请求需要数秒。
+
+`/api/media_delete` 永久删除当前主体拥有的单个媒体文件，并清理对应的用户或匿名媒体归属记录。接口只接受纯文件名；其他主体的文件和不存在的文件统一返回 404。该操作不会删除关联任务、任务日志或同一任务生成的其他文件，也不提供撤销。
 
 `/api/task_log` 只返回请求任务对应的任务日志，以及 `downloader.log` 中包含这些任务 ID 或任务 URL 的日志行，供首页右侧日志侧栏滚动显示；不会把完整全局日志或日志访问令牌发送给浏览器。返回前会将项目绝对路径替换为 `📁`，避免把服务器目录结构暴露给用户。
 

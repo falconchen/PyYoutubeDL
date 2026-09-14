@@ -113,6 +113,15 @@
     var tabButtons = Array.prototype.slice.call(document.querySelectorAll('.dl-tab'));
     var playlistItems = document.querySelector('.dl-playlist-items');
     var playlistEmpty = document.querySelector('.dl-playlist-empty');
+    var libraryActionMessage = document.querySelector('.dl-library-action-message');
+    var mediaDeleteOverlay = document.querySelector('.dl-media-delete-overlay');
+    var mediaDeleteDialog = document.querySelector('.dl-media-delete-dialog');
+    var mediaDeleteCover = document.querySelector('.dl-media-delete-cover');
+    var mediaDeleteName = document.querySelector('.dl-media-delete-name');
+    var mediaDeleteMeta = document.querySelector('.dl-media-delete-meta');
+    var mediaDeleteError = document.querySelector('.dl-media-delete-error');
+    var mediaDeleteCancel = document.querySelector('[data-media-delete="cancel"]');
+    var mediaDeleteConfirm = document.querySelector('[data-media-delete="confirm"]');
 
     if (!form || !listElement) return;
 
@@ -143,6 +152,10 @@
     var loadedFilename = null;
     var lastProgressSaveAt = 0;
     var libraryLoading = false;
+    var mediaDeleteTarget = null;
+    var mediaDeleteBusy = false;
+    var mediaDeleteLastFocused = null;
+    var libraryMessageTimer = null;
     var signedIn = false;
     var loginUrl = '/login';
     var lastFocused = null;
@@ -1348,6 +1361,145 @@
         return image;
     }
 
+    function showLibraryMessage(text) {
+        if (libraryMessageTimer !== null) window.clearTimeout(libraryMessageTimer);
+        libraryMessageTimer = null;
+        libraryActionMessage.textContent = text || '';
+        libraryActionMessage.hidden = !text;
+        if (text) {
+            libraryMessageTimer = window.setTimeout(function () {
+                libraryMessageTimer = null;
+                libraryActionMessage.hidden = true;
+            }, 3000);
+        }
+    }
+
+    function setMediaDeleteError(text) {
+        mediaDeleteError.textContent = text || '';
+        mediaDeleteError.hidden = !text;
+    }
+
+    function setMediaDeleteCover(item) {
+        var candidates = Array.isArray(item.thumbnail_candidates)
+            ? item.thumbnail_candidates.filter(Boolean)
+            : [];
+        var candidateIndex = 0;
+        candidates.push('/static/images/media-cover-default.svg');
+        mediaDeleteCover.onerror = function () {
+            candidateIndex += 1;
+            if (candidateIndex < candidates.length) {
+                mediaDeleteCover.src = candidates[candidateIndex];
+            }
+        };
+        mediaDeleteCover.src = candidates[0];
+    }
+
+    function openMediaDelete(item, trigger) {
+        if (!item || mediaDeleteBusy) return;
+        mediaDeleteTarget = item;
+        mediaDeleteLastFocused = trigger || document.activeElement;
+        mediaDeleteName.textContent = item.title || item.filename;
+        mediaDeleteName.title = item.title || item.filename;
+        mediaDeleteMeta.textContent = [item.filename, formatBytes(item.size_bytes)]
+            .filter(Boolean)
+            .join(' · ');
+        setMediaDeleteCover(item);
+        setMediaDeleteError('');
+        mediaDeleteOverlay.hidden = false;
+        mediaDeleteConfirm.focus();
+    }
+
+    function closeMediaDelete(force) {
+        if (mediaDeleteBusy && !force) return;
+        mediaDeleteOverlay.hidden = true;
+        mediaDeleteTarget = null;
+        setMediaDeleteError('');
+        mediaDeleteCancel.disabled = false;
+        mediaDeleteConfirm.disabled = false;
+        mediaDeleteConfirm.textContent = '永久删除';
+        if (mediaDeleteLastFocused && document.contains(mediaDeleteLastFocused)) {
+            mediaDeleteLastFocused.focus();
+        } else {
+            var fallback = playlistItems.querySelector(
+                '.dl-playlist-item[aria-current="true"], .dl-playlist-item'
+            );
+            if (fallback) fallback.focus();
+        }
+        mediaDeleteLastFocused = null;
+    }
+
+    function nextMediaAfter(item) {
+        var list = mediaLibrary[item.type] || [];
+        var index = list.findIndex(function (candidate) {
+            return candidate.filename === item.filename;
+        });
+        return index >= 0 ? list[index + 1] || null : null;
+    }
+
+    function removeMediaFromLibrary(item) {
+        var deletingCurrent = Boolean(currentMedia)
+            && currentMedia.filename === item.filename;
+        var replacement = deletingCurrent ? nextMediaAfter(item) : null;
+
+        if (deletingCurrent) destroyPlayer();
+        writeStorage(progressKey(item), null);
+        mediaLibrary[item.type] = (mediaLibrary[item.type] || []).filter(function (candidate) {
+            return candidate.filename !== item.filename;
+        });
+
+        if (!deletingCurrent) {
+            renderPlaylist();
+            return;
+        }
+
+        currentMedia = null;
+        clearMediaLocation();
+        if (replacement) playMedia(replacement, { autoplay: false });
+        else {
+            renderNowPlaying(null);
+            renderPlaylist();
+        }
+    }
+
+    async function deleteMedia() {
+        var item = mediaDeleteTarget;
+        if (!item || mediaDeleteBusy) return;
+        mediaDeleteBusy = true;
+        mediaDeleteCancel.disabled = true;
+        mediaDeleteConfirm.disabled = true;
+        mediaDeleteConfirm.textContent = '正在删除…';
+        setMediaDeleteError('');
+        try {
+            var response = await fetch('/api/media_delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: item.filename })
+            });
+            var data = {};
+            try {
+                data = await response.json();
+            } catch (error) {
+                data = {};
+            }
+            if (!response.ok || !data.success) {
+                setMediaDeleteError(data.msg || '删除失败，请稍后重试');
+                return;
+            }
+            removeMediaFromLibrary(item);
+            closeMediaDelete(true);
+            showLibraryMessage('已永久删除“' + (item.title || item.filename) + '”');
+        } catch (error) {
+            setMediaDeleteError('网络异常，文件未删除');
+        } finally {
+            mediaDeleteBusy = false;
+            if (!mediaDeleteOverlay.hidden) {
+                mediaDeleteCancel.disabled = false;
+                mediaDeleteConfirm.disabled = false;
+                mediaDeleteConfirm.textContent = '永久删除';
+            }
+        }
+    }
+
     function renderPlaylist() {
         if (!mediaLibrary) return;
         var items = mediaLibrary[libraryTab] || [];
@@ -1362,6 +1514,7 @@
 
         playlistItems.replaceChildren.apply(playlistItems, items.map(function (item) {
             var li = document.createElement('li');
+            li.className = 'dl-playlist-row';
             var button = document.createElement('button');
             button.type = 'button';
             button.className = 'dl-playlist-item';
@@ -1370,6 +1523,10 @@
             button.setAttribute(
                 'aria-current',
                 String(Boolean(currentMedia) && currentMedia.filename === item.filename)
+            );
+            li.classList.toggle(
+                'is-current',
+                Boolean(currentMedia) && currentMedia.filename === item.filename
             );
 
             var cover = createPlaylistCover(item);
@@ -1389,7 +1546,14 @@
             if (currentMedia && currentMedia.filename === item.filename) {
                 button.appendChild(icon('#i-play', 'dl-playlist-item-playing'));
             }
-            li.appendChild(button);
+            var deleteButton = document.createElement('button');
+            deleteButton.type = 'button';
+            deleteButton.className = 'dl-playlist-delete';
+            deleteButton.dataset.filename = item.filename;
+            deleteButton.setAttribute('aria-label', '删除“' + (item.title || item.filename) + '”');
+            deleteButton.title = '删除文件';
+            deleteButton.appendChild(icon('#i-trash'));
+            li.append(button, deleteButton);
             return li;
         }));
 
@@ -1481,6 +1645,14 @@
     });
 
     playlistItems.addEventListener('click', function (event) {
+        var deleteButton = event.target.closest('.dl-playlist-delete');
+        if (deleteButton && mediaLibrary) {
+            var deleteItem = (mediaLibrary[libraryTab] || []).find(function (candidate) {
+                return candidate.filename === deleteButton.dataset.filename;
+            });
+            if (deleteItem) openMediaDelete(deleteItem, deleteButton);
+            return;
+        }
         var button = event.target.closest('.dl-playlist-item');
         if (!button || !mediaLibrary) return;
         var item = (mediaLibrary[libraryTab] || []).find(function (candidate) {
@@ -1488,6 +1660,37 @@
         });
         // 点击是用户手势，直接开播；复用媒体元素也让后续自动下一个获得授权。
         if (item) playMedia(item, { autoplay: true });
+    });
+
+    mediaDeleteCancel.addEventListener('click', function () {
+        closeMediaDelete(false);
+    });
+    mediaDeleteConfirm.addEventListener('click', deleteMedia);
+    mediaDeleteOverlay.addEventListener('click', function (event) {
+        if (event.target === mediaDeleteOverlay) closeMediaDelete(false);
+    });
+    document.addEventListener('keydown', function (event) {
+        if (mediaDeleteOverlay.hidden) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeMediaDelete(false);
+            return;
+        }
+        if (event.key !== 'Tab') return;
+        var controls = Array.prototype.filter.call(
+            mediaDeleteDialog.querySelectorAll('button'),
+            function (button) { return !button.disabled; }
+        );
+        if (!controls.length) return;
+        var first = controls[0];
+        var last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
     });
 
     /* 表单 */

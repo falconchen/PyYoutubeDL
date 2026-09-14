@@ -2158,7 +2158,17 @@ def sync_media_ownership():
         except (OSError, json.JSONDecodeError):
             continue
         for filename in result.get('files', []):
-            if isinstance(filename, str) and filename not in known:
+            filepath = (
+                safe_join(FILES_DIR, filename)
+                if isinstance(filename, str)
+                and filename == os.path.basename(filename)
+                else None
+            )
+            if (
+                filepath
+                and os.path.isfile(filepath)
+                and filename not in known
+            ):
                 if user_owner:
                     user_store.record_media(
                         USER_DB_PATH, filename, user_owner, task_id
@@ -2568,6 +2578,40 @@ def api_media_list():
         app.logger.error("读取媒体库目录失败: %s", exc)
         return jsonify({"success": False, "msg": "读取媒体目录失败"}), 500
     return jsonify({"success": True, "video": videos, "audio": audios})
+
+
+@app.route('/api/media_delete', methods=['POST'])
+def api_media_delete():
+    """永久删除当前主体拥有的单个媒体文件，不改写关联任务记录。"""
+    data = request.get_json(silent=True) or {}
+    filename = data.get('filename') if isinstance(data, dict) else None
+    if (
+        not isinstance(filename, str)
+        or not filename
+        or filename in {'.', '..'}
+        or filename != os.path.basename(filename)
+        or '/' in filename
+        or '\\' in filename
+    ):
+        return jsonify({"success": False, "msg": "Invalid filename"}), 400
+
+    # 先验证归属再判断文件是否存在；跨用户与不存在统一为 404，避免泄露资源。
+    require_media_access(filename)
+    filepath = safe_join(FILES_DIR, filename)
+    if not filepath or not os.path.isfile(filepath):
+        abort(404)
+
+    try:
+        os.remove(filepath)
+    except FileNotFoundError:
+        abort(404)
+    except OSError as exc:
+        app.logger.error("删除媒体文件失败 %s: %s", filename, exc)
+        return jsonify({"success": False, "msg": "删除文件失败"}), 500
+
+    user_store.delete_media(USER_DB_PATH, filename)
+    user_store.delete_anonymous_media(USER_DB_PATH, filename)
+    return jsonify({"success": True, "filename": filename})
 
 
 @app.route('/player')

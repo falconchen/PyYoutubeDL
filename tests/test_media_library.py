@@ -184,3 +184,157 @@ def test_anonymous_can_open_pages_and_an_empty_private_library():
     assert payload['success'] is True
     assert payload['video'] == []
     assert payload['audio'] == []
+
+
+def test_delete_owned_media_removes_only_file_and_ownership():
+    with logged_in_client() as (client, user, db_path), TemporaryDirectory() as files_dir:
+        filename = 'delete-me.mp4'
+        filepath = Path(files_dir, filename)
+        filepath.write_bytes(b'media')
+        user_store.record_tasks(
+            db_path, ['v20260914000000Keep'], user['id']
+        )
+        user_store.record_media(
+            db_path, filename, user['id'], 'v20260914000000Keep'
+        )
+
+        with patch('app.FILES_DIR', files_dir):
+            response = client.post('/api/media_delete', json={'filename': filename})
+
+        assert response.status_code == 200
+        assert response.get_json() == {'success': True, 'filename': filename}
+        assert not filepath.exists()
+        assert user_store.media_owner(db_path, filename) is None
+        assert user_store.task_owner(db_path, 'v20260914000000Keep') == user['id']
+
+
+def test_delete_media_never_touches_another_owners_file():
+    with logged_in_client() as (client, _user, db_path), TemporaryDirectory() as files_dir:
+        filename = 'theirs.mp4'
+        filepath = Path(files_dir, filename)
+        filepath.write_bytes(b'media')
+        stranger = other_user(db_path)
+        user_store.record_media(db_path, filename, stranger['id'])
+
+        with patch('app.FILES_DIR', files_dir):
+            response = client.post('/api/media_delete', json={'filename': filename})
+
+        assert response.status_code == 404
+        assert filepath.exists()
+        assert user_store.media_owner(db_path, filename) == stranger['id']
+
+
+def test_anonymous_owner_can_delete_own_media():
+    with TemporaryDirectory() as directory, TemporaryDirectory() as files_dir:
+        db_path = str(Path(directory, 'users.sqlite3'))
+        user_store.init_db(db_path)
+        filename = 'anonymous.mp3'
+        filepath = Path(files_dir, filename)
+        filepath.write_bytes(b'audio')
+        anonymous_id = 'anonymous-owner'
+        user_store.record_anonymous_media(db_path, filename, anonymous_id)
+        app_module.app.testing = True
+        client = app_module.app.test_client()
+        with client.session_transaction() as session:
+            session[app_module.SESSION_ANONYMOUS_KEY] = anonymous_id
+
+        with (
+            patch('app.USER_DB_PATH', db_path),
+            patch('app.FILES_DIR', files_dir),
+        ):
+            response = client.post('/api/media_delete', json={'filename': filename})
+
+        assert response.status_code == 200
+        assert not filepath.exists()
+        assert user_store.anonymous_media_owner(db_path, filename) is None
+
+
+def test_delete_media_rejects_invalid_or_missing_filename():
+    with logged_in_client() as (client, _user, _db):
+        for payload in (
+            {},
+            [],
+            {'filename': ''},
+            {'filename': '../video.mp4'},
+            {'filename': r'folder\video.mp4'},
+            {'filename': 123},
+        ):
+            response = client.post('/api/media_delete', json=payload)
+            assert response.status_code == 400, payload
+
+
+def test_delete_missing_owned_media_returns_not_found():
+    with logged_in_client() as (client, user, db_path), TemporaryDirectory() as files_dir:
+        user_store.record_media(db_path, 'missing.mp4', user['id'])
+        with patch('app.FILES_DIR', files_dir):
+            response = client.post(
+                '/api/media_delete', json={'filename': 'missing.mp4'}
+            )
+
+    assert response.status_code == 404
+
+
+def test_delete_media_filesystem_error_keeps_file_and_ownership():
+    with logged_in_client() as (client, user, db_path), TemporaryDirectory() as files_dir:
+        filename = 'busy.mp4'
+        filepath = Path(files_dir, filename)
+        filepath.write_bytes(b'media')
+        user_store.record_media(db_path, filename, user['id'])
+
+        with (
+            patch('app.FILES_DIR', files_dir),
+            patch('app.os.remove', side_effect=PermissionError('busy')),
+        ):
+            response = client.post('/api/media_delete', json={'filename': filename})
+
+        assert response.status_code == 500
+        assert response.get_json()['msg'] == '删除文件失败'
+        assert filepath.exists()
+        assert user_store.media_owner(db_path, filename) == user['id']
+
+
+def test_sync_media_ownership_skips_result_files_that_no_longer_exist():
+    with (
+        logged_in_client() as (_client, user, db_path),
+        TemporaryDirectory() as files_dir,
+        TemporaryDirectory() as urls_dir,
+    ):
+        task_id = 'v20260914000000Gone'
+        user_store.record_tasks(db_path, [task_id], user['id'])
+        Path(urls_dir, f'{task_id}.result.json').write_text(
+            '{"files":["gone.mp4"]}', encoding='utf-8'
+        )
+
+        with (
+            patch('app.FILES_DIR', files_dir),
+            patch('app.URLS_DIR', urls_dir),
+        ):
+            owners = app_module.sync_media_ownership()
+
+        assert 'gone.mp4' not in owners
+        assert user_store.media_owner(db_path, 'gone.mp4') is None
+
+
+def test_library_delete_ui_has_separate_controls_and_confirmation():
+    with logged_in_client() as (client, _user, _db):
+        html = client.get('/player').get_data(as_text=True)
+    script = Path(app_module.app.static_folder, 'dropload.js').read_text(
+        encoding='utf-8',
+    )
+    stylesheet = Path(app_module.app.static_folder, 'dropload.css').read_text(
+        encoding='utf-8',
+    )
+
+    assert 'class="dl-media-delete-dialog"' in html
+    assert 'aria-modal="true"' in html
+    assert "deleteButton.className = 'dl-playlist-delete';" in script
+    assert "fetch('/api/media_delete'" in script
+    assert "body: JSON.stringify({ filename: item.filename })" in script
+    assert 'writeStorage(progressKey(item), null);' in script
+    assert 'if (deletingCurrent) destroyPlayer();' in script
+    assert 'if (replacement) playMedia(replacement, { autoplay: false });' in script
+    assert '@media (min-width: 640px) and (hover: hover) and (pointer: fine)' in stylesheet
+    assert '.dl-playlist-row:hover .dl-playlist-delete' in stylesheet
+    assert 'opacity: 0;' in stylesheet
+    assert '.dl-playlist-item-playing {' in stylesheet
+    assert 'align-self: center;' in stylesheet

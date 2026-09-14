@@ -269,7 +269,33 @@
                     <ul class="dl-playlist-items"></ul>
                     <p class="dl-playlist-empty">正在载入媒体列表…</p>
                 </div>
+                <p class="dl-library-action-message" role="status" aria-live="polite" hidden></p>
             </aside>
+        </section>
+    </div>
+
+    <div class="dl-media-delete-overlay" hidden>
+        <section class="dl-media-delete-dialog" role="alertdialog" aria-modal="true"
+                 aria-labelledby="dl-media-delete-title" aria-describedby="dl-media-delete-description">
+            <div class="dl-media-delete-heading">
+                <span class="dl-media-delete-icon"><svg class="dl-icon" aria-hidden="true"><use href="#i-trash"></use></svg></span>
+                <div>
+                    <h2 id="dl-media-delete-title">永久删除这个文件？</h2>
+                    <p id="dl-media-delete-description">文件将从服务器永久删除，此操作不可恢复。</p>
+                </div>
+            </div>
+            <div class="dl-media-delete-target">
+                <img class="dl-media-delete-cover" src="{{ url_for('static', filename='images/media-cover-default.svg') }}" alt="">
+                <div>
+                    <p class="dl-media-delete-name"></p>
+                    <p class="dl-media-delete-meta"></p>
+                </div>
+            </div>
+            <p class="dl-media-delete-error" role="status" hidden></p>
+            <div class="dl-media-delete-actions">
+                <button class="dl-task-btn" type="button" data-media-delete="cancel">取消</button>
+                <button class="dl-task-btn dl-task-btn-danger-solid" type="button" data-media-delete="confirm">永久删除</button>
+            </div>
         </section>
     </div>
 

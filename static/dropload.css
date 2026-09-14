@@ -503,9 +503,26 @@
     list-style: none;
 }
 
+.dl-playlist-row {
+    display: flex;
+    align-items: center;
+    border-radius: 12px;
+    transition: background-color 0.15s ease;
+}
+
+.dl-playlist-row:hover,
+.dl-playlist-row:focus-within {
+    background: #f7f9fc;
+}
+
+.dl-playlist-row.is-current {
+    background: #eef5ff;
+}
+
 .dl-playlist-item {
     display: flex;
-    width: 100%;
+    min-width: 0;
+    flex: 1;
     align-items: flex-start;
     gap: 12px;
     padding: 12px;
@@ -519,11 +536,17 @@
 }
 
 .dl-playlist-item:hover {
-    background: #f7f9fc;
+    background: transparent;
 }
 
 .dl-playlist-item[aria-current="true"] {
-    background: #eef5ff;
+    background: transparent;
+}
+
+.dl-playlist-item:focus-visible,
+.dl-playlist-delete:focus-visible {
+    outline: 2px solid #1769e0;
+    outline-offset: -2px;
 }
 
 .dl-playlist-item-cover {
@@ -559,12 +582,61 @@
 
 .dl-playlist-item-playing {
     flex: none;
+    align-self: center;
     width: 14px;
     height: 14px;
-    margin-top: 4px;
     fill: #1769e0;
     stroke: none;
     color: #1769e0;
+}
+
+.dl-playlist-delete {
+    display: flex;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
+    margin-right: 2px;
+    padding: 0;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: #a65b57;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.dl-playlist-delete:hover {
+    background: #fbeceb;
+    color: #b4322c;
+}
+
+.dl-playlist-delete:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.dl-playlist-delete .dl-icon {
+    width: 17px;
+    height: 17px;
+}
+
+@media (min-width: 640px) and (hover: hover) and (pointer: fine) {
+    .dl-playlist-delete {
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .dl-playlist-row:hover .dl-playlist-delete,
+    .dl-playlist-delete:focus-visible {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .dl-playlist-row:hover .dl-playlist-delete:disabled {
+        opacity: 0.45;
+    }
 }
 
 .dl-playlist-empty {
@@ -577,6 +649,150 @@
 
 .dl-playlist-empty[hidden] {
     display: none;
+}
+
+.dl-library-action-message {
+    margin: 0;
+    padding: 10px 16px;
+    border-top: 1px solid #d9f0e2;
+    background: #f0faf4;
+    font-size: 12px;
+    color: #287a4a;
+}
+
+.dl-library-action-message[hidden] {
+    display: none;
+}
+
+/* 媒体库：永久删除确认 */
+
+.dl-media-delete-overlay {
+    position: fixed;
+    inset: 0;
+    /* zwplayer 的控制栏和浮层可到 100001，确认框必须始终在播放器之上。 */
+    z-index: 1000000;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgba(19, 33, 59, 0.36);
+}
+
+.dl-media-delete-overlay[hidden] {
+    display: none;
+}
+
+.dl-media-delete-dialog {
+    width: min(100%, 440px);
+    padding: 24px;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 25px 60px rgba(19, 33, 59, 0.3);
+}
+
+.dl-media-delete-heading {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+}
+
+.dl-media-delete-icon {
+    display: flex;
+    flex: none;
+    width: 40px;
+    height: 40px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px;
+    background: #fbeceb;
+    color: #b4322c;
+}
+
+.dl-media-delete-icon .dl-icon {
+    width: 19px;
+    height: 19px;
+}
+
+.dl-media-delete-heading h2 {
+    margin: 0;
+    font-size: 18px;
+    color: #172033;
+}
+
+.dl-media-delete-heading p {
+    margin: 6px 0 0;
+    font-size: 13px;
+    line-height: 20px;
+    color: #65748a;
+}
+
+.dl-media-delete-target {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 20px;
+    padding: 12px;
+    border: 1px solid #e7edf5;
+    border-radius: 12px;
+    background: #f8fafc;
+}
+
+.dl-media-delete-cover {
+    display: block;
+    flex: none;
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    background: #e7edf5;
+    object-fit: cover;
+}
+
+.dl-media-delete-target > div {
+    min-width: 0;
+}
+
+.dl-media-delete-name,
+.dl-media-delete-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dl-media-delete-name {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #334155;
+}
+
+.dl-media-delete-meta {
+    margin: 5px 0 0;
+    font-size: 12px;
+    color: #718096;
+}
+
+.dl-media-delete-error {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: #fdf0ef;
+    font-size: 12px;
+    color: #b4322c;
+}
+
+.dl-media-delete-error[hidden] {
+    display: none;
+}
+
+.dl-media-delete-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 20px;
+}
+
+.dl-media-delete-actions .dl-task-btn {
+    min-height: 44px;
 }
 
 .dl-card {
