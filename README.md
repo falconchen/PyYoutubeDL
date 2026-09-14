@@ -93,12 +93,12 @@ docker compose ps
 
 | 环境变量 | 默认值 | 容器路径 |
 |---|---|---|
-| `PYYOUTUBEDL_CONFIG_DIR` | `.` | `/app/runtime-config`（只读） |
-| `PYYOUTUBEDL_URLS_PATH` | `./urls` | `/app/urls` |
-| `PYYOUTUBEDL_TMP_PATH` | `./tmp` | `/app/tmp` |
-| `PYYOUTUBEDL_FILES_PATH` | `./files` | `/app/files` |
-| `PYYOUTUBEDL_LOGS_PATH` | `./logs` | `/app/logs` |
-| `PYYOUTUBEDL_DATA_PATH` | `./data` | `/app/data` |
+| `DROPLOAD_CONFIG_DIR` | `.` | `/app/runtime-config`（只读） |
+| `DROPLOAD_URLS_PATH` | `./urls` | `/app/urls` |
+| `DROPLOAD_TMP_PATH` | `./tmp` | `/app/tmp` |
+| `DROPLOAD_FILES_PATH` | `./files` | `/app/files` |
+| `DROPLOAD_LOGS_PATH` | `./logs` | `/app/logs` |
+| `DROPLOAD_DATA_PATH` | `./data` | `/app/data` |
 
 不创建 `.env` 时直接使用上述默认值。真实 `.env` 已被 Git 忽略，仓库仅提供
 `.env.example` 模板。
@@ -107,13 +107,13 @@ docker compose ps
 排除，不会进入镜像构建上下文。若使用独立配置目录，应先放入三个必需文件：
 
 ```text
-/etc/pyyoutubedl/
+/etc/dropload/
 ├── config.json
 ├── yt-dlp.conf
 └── yta-dlp.conf
 ```
 
-然后在 `.env` 中设置 `PYYOUTUBEDL_CONFIG_DIR=/etc/pyyoutubedl`。Cookie 或
+然后在 `.env` 中设置 `DROPLOAD_CONFIG_DIR=/etc/dropload`。Cookie 或
 `*.local.conf` 也可放在该目录；配置中的 Cookie 路径应使用容器路径，例如
 `/app/runtime-config/youtube-cookies.txt`。配置中的 `localhost` 指向容器自身；
 访问宿主机上的 YTC、代理或 bgutil provider 时，需改为容器可达的宿主机地址。
@@ -127,8 +127,8 @@ Docker 自动创建的 `root:root` 绑定目录，默认覆盖为 `0:0` 运行�
 普通用户，建议在项目的 `.env` 中设置实际 UID/GID，恢复非 root 运行：
 
 ```dotenv
-PYYOUTUBEDL_UID=1000
-PYYOUTUBEDL_GID=1000
+DROPLOAD_UID=1000
+DROPLOAD_GID=1000
 ```
 
 推送到 `master` 或创建 `v*` 版本标签后，GitHub Actions 会自动构建
@@ -181,7 +181,7 @@ docker pull ghcr.io/falconchen/pydl:latest
 ./runner.sh --upgrade
 ```
 
-环境变量写法 `PYTUBEDL_UPDATE_DEPS=1 ./runner.sh restart` 仍保留兼容，执行相同的升级流程。
+环境变量写法 `DROPLOAD_UPDATE_DEPS=1 ./runner.sh restart` 仍保留兼容，执行相同的升级流程。
 
 从 systemd 切换到 Supervisor（含配置模板与安装脚本）：
 
@@ -190,7 +190,7 @@ docker pull ghcr.io/falconchen/pydl:latest
 ./deploy/supervisor/install.sh             # 实际切换，需 root
 ```
 
-Supervisor 的 program 定义在 `deploy/supervisor/pyyoutubedl.conf`（路径用 `__PROJECT_DIR__` 占位，由 `install.sh` 渲染到 `/etc/supervisor/conf.d/`）。ai / webdav / playlist 三个可选服务由 `deploy/supervisor/service-guard.sh` 读取 `config.json` 判定是否启动，未启用时状态停在 `EXITED` 而非 `FATAL`。完整的切换步骤、风险清单与回滚方式见 [docs/supervisor-migration.md](docs/supervisor-migration.md)。
+Supervisor 的 program 定义在 `deploy/supervisor/dropload.conf`（路径用 `__PROJECT_DIR__` 占位，由 `install.sh` 渲染到 `/etc/supervisor/conf.d/`）。ai / webdav / playlist 三个可选服务由 `deploy/supervisor/service-guard.sh` 读取 `config.json` 判定是否启动，未启用时状态停在 `EXITED` 而非 `FATAL`。完整的切换步骤、风险清单与回滚方式见 [docs/supervisor-migration.md](docs/supervisor-migration.md)。
 
 **切换后不要再使用 `runner.sh` 和 `stop.py`**：`stop.py` 会杀掉 Supervisor 托管的进程（随即被拉起，表现为「杀不掉」），`runner.sh restart` 会用 `nohup` 再起一套脱离 Supervisor 的进程并抢占端口和任务文件。统一改用 `supervisor-runner.sh`。
 
@@ -209,7 +209,7 @@ Supervisor 的 program 定义在 `deploy/supervisor/pyyoutubedl.conf`（路径�
 ./supervisor-runner.sh  # 默认 restart 全部服务
 ```
 
-该脚本要求项目虚拟环境位于 `venv/`，并要求 `/usr/bin/supervisorctl` 可用。支持的服务映射为 `app` → `pyyoutubedl-app`、`downloader` → `pyyoutubedl-downloader`、`ai` → `pyyoutubedl-ai-summary`、`webdav` → `pyyoutubedl-webdav`、`playlist` → `pyyoutubedl-playlist-monitor`。`-u` / `--upgrade` 会升级 pip 和全部依赖后重启所有 Supervisor program；环境变量写法 `PYTUBEDL_UPDATE_DEPS=1 ./supervisor-runner.sh restart` 仍保留兼容。定时执行时建议使用 `flock` 防止任务重叠，并将输出重定向到日志文件。
+该脚本要求项目虚拟环境位于 `venv/`，并要求 `/usr/bin/supervisorctl` 可用。支持的服务映射为 `app` → `dropload-app`、`downloader` → `dropload-downloader`、`ai` → `dropload-ai-summary`、`webdav` → `dropload-webdav`、`playlist` → `dropload-playlist-monitor`。`-u` / `--upgrade` 会升级 pip 和全部依赖后重启所有 Supervisor program；环境变量写法 `DROPLOAD_UPDATE_DEPS=1 ./supervisor-runner.sh restart` 仍保留兼容。定时执行时建议使用 `flock` 防止任务重叠，并将输出重定向到日志文件。
 
 ### 5. 两台 VPS 一键发布
 
@@ -240,7 +240,7 @@ cd /path/to/DropLoad
 git log --oneline -5
 git reset --hard <已确认的旧 commit>
 ./supervisor-runner.sh restart
-# systemd 环境改用 systemctl restart pyyoutubedl
+# systemd 环境改用 systemctl restart dropload
 ```
 
 `/healthz` 只返回 `status` 和当前 Git commit，供部署检查和反向代理探活使用，不包含配置、令牌或任务数据。
@@ -267,7 +267,7 @@ sudo ./deploy/supervisor/install.sh             # 实际安装并接管
 ```bash
 ./supervisor-runner.sh status              # 查看全部服务状态
 ./supervisor-runner.sh restart downloader  # 只重启下载器
-supervisorctl tail -f pyyoutubedl-downloader   # 实时日志
+supervisorctl tail -f dropload-downloader   # 实时日志
 ```
 
 服务日志落在 `logs/supervisor/<program>.log`，任务级日志仍在 `logs/<taskid>.log`。
@@ -277,14 +277,14 @@ supervisorctl tail -f pyyoutubedl-downloader   # 实时日志
 <summary>可选：改用 systemd 托管</summary>
 
 ```bash
-sudo bash setup_pyyoutubedl_service.sh
+sudo bash setup_dropload_service.sh
 ```
 
 ```bash
-systemctl start  pyyoutubedl    # 启动
-systemctl stop   pyyoutubedl    # 停止
-systemctl status pyyoutubedl    # 查看状态
-journalctl -u pyyoutubedl -f    # 实时日志
+systemctl start  dropload    # 启动
+systemctl stop   dropload    # 停止
+systemctl status dropload    # 查看状态
+journalctl -u dropload -f    # 实时日志
 ```
 
 注意该 unit 是 `Type=oneshot`，只负责调用 `runner.sh` 拉起进程，systemd 本身不监管
@@ -743,7 +743,7 @@ DropLoad/
 ├── deploy/               # 开发机与远端发布脚本
 │   └── supervisor/       # Supervisor program 配置、守卫脚本与安装脚本
 ├── stop.py               # 停止脚本
-├── setup_pyyoutubedl_service.sh  # systemd 服务安装脚本
+├── setup_dropload_service.sh  # systemd 服务安装脚本
 ├── config.json           # 配置文件
 ├── config.sample.json    # 配置示例
 ├── config_util.py        # 配置加载工具

@@ -5,16 +5,16 @@ services:
     image: pydl:latest
     restart: unless-stopped
     # Docker 自动创建的绑定目录通常属于 root。目录已授权给普通用户时，
-    # 可在 .env 中设置 PYYOUTUBEDL_UID/PYYOUTUBEDL_GID 覆盖默认值。
-    user: "${PYYOUTUBEDL_UID:-0}:${PYYOUTUBEDL_GID:-0}"
+    # 可在 .env 中设置 DROPLOAD_UID/DROPLOAD_GID 覆盖默认值。
+    user: "${DROPLOAD_UID:-0}:${DROPLOAD_GID:-0}"
     environment:
-      PYYOUTUBEDL_RUNTIME_CONFIG_DIR: /app/runtime-config
+      DROPLOAD_RUNTIME_CONFIG_DIR: /app/runtime-config
     ports:
       - "5100:5100"
     volumes:
-      - ${PYYOUTUBEDL_CONFIG_DIR:-.}:/app/runtime-config:ro
-      - ${PYYOUTUBEDL_URLS_PATH:-./urls}:/app/urls
-      - ${PYYOUTUBEDL_TMP_PATH:-./tmp}:/app/tmp
-      - ${PYYOUTUBEDL_FILES_PATH:-./files}:/app/files
-      - ${PYYOUTUBEDL_LOGS_PATH:-./logs}:/app/logs
-      - ${PYYOUTUBEDL_DATA_PATH:-./data}:/app/data
+      - ${DROPLOAD_CONFIG_DIR:-.}:/app/runtime-config:ro
+      - ${DROPLOAD_URLS_PATH:-./urls}:/app/urls
+      - ${DROPLOAD_TMP_PATH:-./tmp}:/app/tmp
+      - ${DROPLOAD_FILES_PATH:-./files}:/app/files
+      - ${DROPLOAD_LOGS_PATH:-./logs}:/app/logs
+      - ${DROPLOAD_DATA_PATH:-./data}:/app/data

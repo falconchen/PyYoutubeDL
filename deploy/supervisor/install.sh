@@ -12,17 +12,17 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 PROJECT_DIR=$(cd -- "$SCRIPT_DIR/../.." &>/dev/null && pwd)
-TEMPLATE="$SCRIPT_DIR/pyyoutubedl.conf"
-TARGET_CONF="${TARGET_CONF:-/etc/supervisor/conf.d/pyyoutubedl.conf}"
+TEMPLATE="$SCRIPT_DIR/dropload.conf"
+TARGET_CONF="${TARGET_CONF:-/etc/supervisor/conf.d/dropload.conf}"
 SUPERVISORCTL_BIN="${SUPERVISORCTL_BIN:-/usr/bin/supervisorctl}"
 PYTHON_BIN="$PROJECT_DIR/venv/bin/python"
-SYSTEMD_UNIT="${SYSTEMD_UNIT:-pyyoutubedl}"
+SYSTEMD_UNIT="${SYSTEMD_UNIT:-dropload}"
 PROGRAMS=(
-    pyyoutubedl-app
-    pyyoutubedl-downloader
-    pyyoutubedl-ai-summary
-    pyyoutubedl-webdav
-    pyyoutubedl-playlist-monitor
+    dropload-app
+    dropload-downloader
+    dropload-ai-summary
+    dropload-webdav
+    dropload-playlist-monitor
 )
 
 DRY_RUN=false

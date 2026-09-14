@@ -2,14 +2,14 @@
 
 ## 为什么要换
 
-现有的 `pyyoutubedl.service` 是 `Type=oneshot` + `RemainAfterExit=yes`，只执行一次
+现有的 `dropload.service` 是 `Type=oneshot` + `RemainAfterExit=yes`，只执行一次
 `runner.sh`，而 `runner.sh` 用 `nohup` 把 5 个进程扔到后台后自己就退出了。结果是
 **systemd 并没有真正监管任何进程**：
 
 - 单个 worker 崩溃不会被拉起，`systemctl status` 永远显示 `active (exited)`；
 - 没有按服务粒度的 start/stop/restart，只能整组操作；
 - `runner.sh` 建的启动日志在 1 秒后就被删除，启动失败原因一闪而过；
-- `journalctl -u pyyoutubedl` 基本是空的，因为进程的 stdout 早已脱离该 unit。
+- `journalctl -u dropload` 基本是空的，因为进程的 stdout 早已脱离该 unit。
 
 Supervisor 按 program 粒度管理、自带 autorestart 与日志落盘，更贴合本项目 5 个常驻进程的形态。
 
@@ -17,7 +17,7 @@ Supervisor 按 program 粒度管理、自带 autorestart 与日志落盘，更�
 
 | 文件 | 作用 |
 |---|---|
-| `deploy/supervisor/pyyoutubedl.conf` | 5 个 program 定义模板，路径用 `__PROJECT_DIR__` 占位 |
+| `deploy/supervisor/dropload.conf` | 5 个 program 定义模板，路径用 `__PROJECT_DIR__` 占位 |
 | `deploy/supervisor/service-guard.sh` | 可选服务（ai / webdav / playlist）的启用判定守卫 |
 | `deploy/supervisor/install.sh` | 安装并切换，幂等，支持 `--dry-run` |
 | `supervisor-runner.sh` | 切换后的日常运维入口，参数与 `runner.sh` 一致 |
@@ -38,8 +38,8 @@ Supervisor 按 program 粒度管理、自带 autorestart 与日志落盘，更�
 ```
 
 脚本依次完成：检查前置条件 → 确认无进行中的下载/上传 → `apt-get install supervisor` →
-**停止并 disable** `pyyoutubedl.service` 并用 `stop.py` 兜底清理 → 渲染 program 配置到
-`/etc/supervisor/conf.d/pyyoutubedl.conf` → `supervisorctl reread && update && start`。
+**停止并 disable** `dropload.service` 并用 `stop.py` 兜底清理 → 渲染 program 配置到
+`/etc/supervisor/conf.d/dropload.conf` → `supervisorctl reread && update && start`。
 
 切换后把 `deploy/targets.conf` 中本机那一行的服务管理器字段由 `systemd` 改为 `supervisor`。
 
@@ -133,7 +133,7 @@ supervisor 的 `exitcodes` / `autorestart=unexpected` 只在进程 RUNNING 满 `
 | 任务级日志 | `logs/<taskid>.log` | 不变 |
 
 ```bash
-supervisorctl tail -f pyyoutubedl-downloader
+supervisorctl tail -f dropload-downloader
 tail -f logs/supervisor/downloader.log
 ```
 
@@ -164,7 +164,7 @@ systemctl restart supervisor
 - **必须重启 supervisord 本身**（`systemctl restart supervisor`），`reread` / `update`
   不会创建监听套接字。重启会连带重启所有 program，操作前先确认没有进行中的下载和上传。
 - **配置要独立成文件**：不要写进 `/etc/supervisor/supervisord.conf`（apt 升级可能覆盖），
-  也不要写进 `pyyoutubedl.conf`（`install.sh` 每次都会重新渲染该文件）。
+  也不要写进 `dropload.conf`（`install.sh` 每次都会重新渲染该文件）。
 - **`[inet_http_server]` 只接受一个 `port` 值**，不能列多个地址，也不能写两个 section。
   因此机器有多个网段时，绑具体地址只有那一个网段可达；要覆盖多个网段只能用
   `*:9002`，代价是连同所有 docker 网桥（`172.16.0.0/12`）一起监听 —— 本机每个容器
@@ -182,10 +182,10 @@ systemctl restart supervisor
 ## 回滚
 
 ```bash
-supervisorctl stop pyyoutubedl-app pyyoutubedl-downloader pyyoutubedl-ai-summary pyyoutubedl-webdav pyyoutubedl-playlist-monitor
-rm /etc/supervisor/conf.d/pyyoutubedl.conf
+supervisorctl stop dropload-app dropload-downloader dropload-ai-summary dropload-webdav dropload-playlist-monitor
+rm /etc/supervisor/conf.d/dropload.conf
 supervisorctl update
-systemctl enable --now pyyoutubedl
+systemctl enable --now dropload
 ```
 
-`setup_pyyoutubedl_service.sh` 和 systemd unit 都保留着，随时可以切回。
+`setup_dropload_service.sh` 和 systemd unit 都保留着，随时可以切回。

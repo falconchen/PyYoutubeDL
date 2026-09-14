@@ -34,7 +34,7 @@ PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def get_release_commit():
     """返回当前部署版本；Git 不可用时返回 unknown。"""
-    release = os.environ.get('PYTUBEDL_RELEASE', '').strip()
+    release = os.environ.get('DROPLOAD_RELEASE', '').strip()
     if release:
         return release
     try:

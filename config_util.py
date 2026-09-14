@@ -4,9 +4,9 @@ from datetime import datetime
 import json5
 import pytz
 
-MOVE_STAGING_PREFIX = '.pyyoutubedl-moving-'
+MOVE_STAGING_PREFIX = '.dropload-moving-'
 DEFAULT_PLAYLIST_MAX_ITEMS = 20
-RUNTIME_CONFIG_DIR_ENV = 'PYYOUTUBEDL_RUNTIME_CONFIG_DIR'
+RUNTIME_CONFIG_DIR_ENV = 'DROPLOAD_RUNTIME_CONFIG_DIR'
 
 # 默认配置
 DEFAULT_CONFIG = {

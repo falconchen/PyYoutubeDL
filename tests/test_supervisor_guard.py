@@ -96,7 +96,7 @@ class TestServiceGuard(unittest.TestCase):
     def test_disabled_exit_codes_match_supervisor_config(self):
         """守卫的禁用退出码必须全部列在 program 的 exitcodes 中。"""
         template = (PROJECT_DIR / 'deploy' / 'supervisor'
-                    / 'pyyoutubedl.conf').read_text(encoding='utf-8')
+                    / 'dropload.conf').read_text(encoding='utf-8')
         declared = [
             line.split('=', 1)[1].strip()
             for line in template.splitlines()

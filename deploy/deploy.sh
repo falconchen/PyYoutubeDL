@@ -4,7 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 PROJECT_DIR=$(cd -- "$SCRIPT_DIR/.." &>/dev/null && pwd)
 CONFIG_FILE="$SCRIPT_DIR/targets.conf"
-LOCK_DIR="${TMPDIR:-/tmp}/pyyoutubedl-deploy.lock"
+LOCK_DIR="${TMPDIR:-/tmp}/dropload-deploy.lock"
 
 die() { echo "错误: $*" >&2; exit 1; }
 [ -f "$CONFIG_FILE" ] || die "未找到 $CONFIG_FILE，请复制 targets.conf.example 并填写。"

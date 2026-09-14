@@ -5,7 +5,7 @@
 ;
 ; 独立成 include 文件，不要写进 /etc/supervisor/supervisord.conf ——
 ; 那是发行版自带文件，apt 升级时可能被覆盖。
-; 也不要写进 pyyoutubedl.conf —— install.sh 每次都会重新渲染该文件。
+; 也不要写进 dropload.conf —— install.sh 每次都会重新渲染该文件。
 ;
 ; 安全要点：
 ;   * 面板可启停进程、读取日志，权限等同 root 操作服务，切勿暴露到公网。

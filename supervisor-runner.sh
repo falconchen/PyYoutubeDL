@@ -16,11 +16,11 @@ show_usage() {
 
 show_services() {
     echo "可用服务:"
-    echo "  app         pyyoutubedl-app"
-    echo "  downloader  pyyoutubedl-downloader"
-    echo "  ai          pyyoutubedl-ai-summary"
-    echo "  webdav      pyyoutubedl-webdav"
-    echo "  playlist    pyyoutubedl-playlist-monitor"
+    echo "  app         dropload-app"
+    echo "  downloader  dropload-downloader"
+    echo "  ai          dropload-ai-summary"
+    echo "  webdav      dropload-webdav"
+    echo "  playlist    dropload-playlist-monitor"
 }
 
 select_programs() {
@@ -29,27 +29,27 @@ select_programs() {
     case "$service" in
         all)
             SUPERVISOR_PROGRAMS=(
-                pyyoutubedl-app
-                pyyoutubedl-downloader
-                pyyoutubedl-ai-summary
-                pyyoutubedl-webdav
-                pyyoutubedl-playlist-monitor
+                dropload-app
+                dropload-downloader
+                dropload-ai-summary
+                dropload-webdav
+                dropload-playlist-monitor
             )
             ;;
         app)
-            SUPERVISOR_PROGRAMS=(pyyoutubedl-app)
+            SUPERVISOR_PROGRAMS=(dropload-app)
             ;;
         downloader)
-            SUPERVISOR_PROGRAMS=(pyyoutubedl-downloader)
+            SUPERVISOR_PROGRAMS=(dropload-downloader)
             ;;
         ai)
-            SUPERVISOR_PROGRAMS=(pyyoutubedl-ai-summary)
+            SUPERVISOR_PROGRAMS=(dropload-ai-summary)
             ;;
         webdav)
-            SUPERVISOR_PROGRAMS=(pyyoutubedl-webdav)
+            SUPERVISOR_PROGRAMS=(dropload-webdav)
             ;;
         playlist)
-            SUPERVISOR_PROGRAMS=(pyyoutubedl-playlist-monitor)
+            SUPERVISOR_PROGRAMS=(dropload-playlist-monitor)
             ;;
         *)
             return 1
@@ -65,7 +65,7 @@ upgrade_dependencies() {
 }
 
 update_dependencies() {
-    if [ "${PYTUBEDL_UPDATE_DEPS:-0}" != "1" ]; then
+    if [ "${DROPLOAD_UPDATE_DEPS:-0}" != "1" ]; then
         return 0
     fi
 

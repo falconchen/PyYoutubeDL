@@ -40,14 +40,14 @@ OLD_COMMIT=$(git rev-parse HEAD)
 
 restart_services() {
     if [ "$SERVICE_MANAGER" = systemd ]; then
-        systemctl restart pyyoutubedl
+        systemctl restart dropload
     else
         /usr/bin/supervisorctl restart \
-            pyyoutubedl-app \
-            pyyoutubedl-downloader \
-            pyyoutubedl-ai-summary \
-            pyyoutubedl-webdav \
-            pyyoutubedl-playlist-monitor
+            dropload-app \
+            dropload-downloader \
+            dropload-ai-summary \
+            dropload-webdav \
+            dropload-playlist-monitor
     fi
 }
 
@@ -56,16 +56,16 @@ service_status() {
     ai_enabled=$($PYTHON_BIN -c 'from config_util import is_ai_summary_enabled, load_config; print(int(is_ai_summary_enabled(load_config())))')
     webdav_enabled=$($PYTHON_BIN -c 'from config_util import is_webdav_upload_enabled, load_config; print(int(is_webdav_upload_enabled(load_config())))')
     if [ "$SERVICE_MANAGER" = systemd ]; then
-        systemctl is-active --quiet pyyoutubedl || return 1
+        systemctl is-active --quiet dropload || return 1
         pgrep -f "$PROJECT_DIR/downloader.py" >/dev/null || return 1
         [ "$ai_enabled" -eq 0 ] || pgrep -f "$PROJECT_DIR/ai_summary_worker.py" >/dev/null || return 1
         [ "$webdav_enabled" -eq 0 ] || pgrep -f "$PROJECT_DIR/webdav_uploader.py" >/dev/null || return 1
     else
         /usr/bin/supervisorctl status \
-            pyyoutubedl-app \
-            pyyoutubedl-downloader | grep -qE 'RUNNING' || return 1
-        [ "$ai_enabled" -eq 0 ] || /usr/bin/supervisorctl status pyyoutubedl-ai-summary | grep -qE 'RUNNING' || return 1
-        [ "$webdav_enabled" -eq 0 ] || /usr/bin/supervisorctl status pyyoutubedl-webdav | grep -qE 'RUNNING' || return 1
+            dropload-app \
+            dropload-downloader | grep -qE 'RUNNING' || return 1
+        [ "$ai_enabled" -eq 0 ] || /usr/bin/supervisorctl status dropload-ai-summary | grep -qE 'RUNNING' || return 1
+        [ "$webdav_enabled" -eq 0 ] || /usr/bin/supervisorctl status dropload-webdav | grep -qE 'RUNNING' || return 1
     fi
 }
 

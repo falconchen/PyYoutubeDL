@@ -3,7 +3,7 @@
 # 运行此脚本前请先 cd 到 DropLoad 项目目录
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-SERVICE_NAME="pyyoutubedl"
+SERVICE_NAME="dropload"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
 echo "项目目录: ${SCRIPT_DIR}"

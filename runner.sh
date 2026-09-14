@@ -11,7 +11,7 @@ start_service() {
     local exit_code
     local reason
 
-    startup_log=$(mktemp "${TMPDIR:-/tmp}/pyyoutubedl-${script_name%.py}.XXXXXX") || {
+    startup_log=$(mktemp "${TMPDIR:-/tmp}/dropload-${script_name%.py}.XXXXXX") || {
         echo "正在启动${service_name}...（启动失败，原因: 无法创建临时日志文件）"
         return 1
     }
@@ -113,7 +113,7 @@ upgrade_dependencies() {
 }
 
 update_dependencies() {
-    if [ "${PYTUBEDL_UPDATE_DEPS:-0}" != "1" ]; then
+    if [ "${DROPLOAD_UPDATE_DEPS:-0}" != "1" ]; then
         return 0
     fi
 

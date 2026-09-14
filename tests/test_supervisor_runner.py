@@ -10,11 +10,11 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 RUNNER = PROJECT_DIR / 'supervisor-runner.sh'
 SERVICES = ('app', 'downloader', 'ai', 'webdav', 'playlist')
 PROGRAMS = (
-    'pyyoutubedl-app',
-    'pyyoutubedl-downloader',
-    'pyyoutubedl-ai-summary',
-    'pyyoutubedl-webdav',
-    'pyyoutubedl-playlist-monitor',
+    'dropload-app',
+    'dropload-downloader',
+    'dropload-ai-summary',
+    'dropload-webdav',
+    'dropload-playlist-monitor',
 )
 
 
@@ -56,9 +56,9 @@ class TestSupervisorRunner(unittest.TestCase):
 
     def test_actions_can_select_one_service(self):
         cases = (
-            ('start', 'downloader', 'start pyyoutubedl-downloader'),
-            ('stop', 'webdav', 'stop pyyoutubedl-webdav'),
-            ('restart', 'app', 'restart pyyoutubedl-app'),
+            ('start', 'downloader', 'start dropload-downloader'),
+            ('stop', 'webdav', 'stop dropload-webdav'),
+            ('restart', 'app', 'restart dropload-app'),
         )
         for action, service, expected_call in cases:
             with self.subTest(action=action, service=service):
@@ -77,7 +77,7 @@ class TestSupervisorRunner(unittest.TestCase):
         result, calls = self.run_runner('status', 'app')
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, ['status pyyoutubedl-app'])
+        self.assertEqual(calls, ['status dropload-app'])
 
     def test_list_prints_all_services_without_calling_supervisor(self):
         for option in ('-l', '--list'):

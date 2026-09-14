@@ -20,12 +20,12 @@ COPY static/ ./static/
 COPY assets/ ./assets/
 COPY deploy/docker/config.json ./config.json
 
-RUN groupadd --gid 1000 pyyoutubedl \
-    && useradd --uid 1000 --gid pyyoutubedl --create-home pyyoutubedl \
+RUN groupadd --gid 1000 dropload \
+    && useradd --uid 1000 --gid dropload --create-home dropload \
     && mkdir -p /app/urls /app/tmp /app/files /app/logs /app/data \
-    && chown -R pyyoutubedl:pyyoutubedl /app
+    && chown -R dropload:dropload /app
 
-USER pyyoutubedl
+USER dropload
 
 EXPOSE 5100
 VOLUME ["/app/urls", "/app/tmp", "/app/files", "/app/logs", "/app/data"]

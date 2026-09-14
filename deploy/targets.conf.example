@@ -2,6 +2,6 @@
 # 每行格式：名称|SSH alias|远程项目目录|supervisor 或 systemd|健康检查 URL
 # 服务管理器推荐 supervisor（见 docs/supervisor-migration.md）；systemd 仍受支持。
 DEPLOY_TARGETS=(
-    "vps-1|pyyoutubedl-vps-1|/srv/PyYoutubeDL|supervisor|http://127.0.0.1:5100/healthz"
-    "vps-2|pyyoutubedl-vps-2|/srv/PyYoutubeDL|systemd|http://127.0.0.1:5100/healthz"
+    "vps-1|dropload-vps-1|/srv/DropLoad|supervisor|http://127.0.0.1:5100/healthz"
+    "vps-2|dropload-vps-2|/srv/DropLoad|systemd|http://127.0.0.1:5100/healthz"
 )
