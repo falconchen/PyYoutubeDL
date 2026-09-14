@@ -35,6 +35,8 @@ new ZWPlayer({ playerElm: mount, url, poster, fluid: true, autoplay, speedButton
 
 按需求采用设计稿的简化播放器，以下原有能力已从界面移除：内嵌／外挂字幕轨道与字幕语言偏好、音频歌词同步滚动、播放器内的 AI 总结、音频频谱与封面模糊背景、播放页的 Waline 评论。倍速、播放进度记忆、自动播放下一个和锁屏控制已在 zwplayer 上补回，见下节。
 
+「正在播放」卡片补回了旧播放页的「原始链接」和可展开的「简介」：`/api/media_list` 的每个条目带 `source_url` 和 `description`（来自媒体标签 `purl`／`comment` 与 `description`／`synopsis`，与旧页相同），字段为空时对应元素隐藏。原始链接与作者、格式信息同一行；简介默认展开，保留原文换行，超过 240px 在框内滚动，切换条目时重新展开。旧页的专辑、日期、类型未补回。
+
 ### 倍速、进度、自动下一个与锁屏控制
 
 均在 `static/dropload.js` 的媒体库段实现，没有使用 zwplayer 自带的播放列表模块（它按 ZWMAP JSON 驱动，没有「切换条目」回调，和右侧列表对不上）。

@@ -106,6 +106,9 @@
     var nowTitle = document.querySelector('.dl-now-title');
     var nowMeta = document.querySelector('.dl-now-meta');
     var nowDownload = document.querySelector('.dl-now-download');
+    var nowSource = document.querySelector('.dl-now-source');
+    var nowDescription = document.querySelector('.dl-now-description');
+    var nowDescriptionText = document.querySelector('.dl-now-description-text');
     var tabButtons = Array.prototype.slice.call(document.querySelectorAll('.dl-tab'));
     var playlistItems = document.querySelector('.dl-playlist-items');
     var playlistEmpty = document.querySelector('.dl-playlist-empty');
@@ -1251,7 +1254,21 @@
         setSessionPlaybackState('none');
     }
 
+    function renderNowSource(item) {
+        var sourceUrl = (item && item.source_url) || '';
+        nowSource.hidden = !sourceUrl;
+        if (sourceUrl) nowSource.href = sourceUrl;
+        else nowSource.removeAttribute('href');
+
+        var description = (item && item.description) || '';
+        nowDescriptionText.textContent = description;
+        nowDescription.hidden = !description;
+        // 默认展开；用户收起后，换一条媒体时重新展开
+        nowDescription.open = true;
+    }
+
     function renderNowPlaying(item) {
+        renderNowSource(item);
         if (!item) {
             nowTitle.textContent = '未选择媒体';
             nowMeta.textContent = '从右侧播放列表中选择已下载的媒体';

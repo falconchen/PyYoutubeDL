@@ -2522,6 +2522,7 @@ def build_media_library_items(owner=None):
             'title': media_display_title(metadata.get('title'), filename),
             'artist': metadata.get('artist', ''),
             'source_url': metadata.get('source_url', ''),
+            'description': metadata.get('description', ''),
             'poster': next(iter(metadata.get('cover_candidates') or []), ''),
             'thumbnail_candidates': cover_candidates,
         })
@@ -2539,6 +2540,7 @@ def build_media_library_items(owner=None):
             ),
             'artist': metadata.get('artist', ''),
             'source_url': metadata.get('source_url', ''),
+            'description': metadata.get('description', ''),
             'poster': next(iter(metadata.get('cover_candidates') or []), ''),
             'thumbnail_candidates': cover_candidates,
         })

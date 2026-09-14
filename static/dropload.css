@@ -328,10 +328,65 @@
     white-space: nowrap;
 }
 
+.dl-now-meta-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 12px;
+    margin-top: 4px;
+}
+
 .dl-now-meta {
-    margin: 4px 0 0;
+    margin: 0;
     font-size: 14px;
     color: #8491a3;
+}
+
+.dl-now-source {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #1769e0;
+    white-space: nowrap;
+    text-decoration: none;
+}
+
+.dl-now-source:hover {
+    text-decoration: underline;
+}
+
+.dl-now-source .dl-icon {
+    width: 14px;
+    height: 14px;
+}
+
+.dl-now-source[hidden],
+.dl-now-description[hidden] {
+    display: none;
+}
+
+.dl-now-description {
+    margin-top: 8px;
+    font-size: 13px;
+    color: #4f5d73;
+}
+
+.dl-now-description summary {
+    width: fit-content;
+    font-weight: 600;
+    color: #1e2b42;
+    cursor: pointer;
+}
+
+.dl-now-description-text {
+    max-height: 240px;
+    margin: 8px 0 0;
+    overflow-y: auto;
+    line-height: 1.6;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
 }
 
 .dl-now-download {

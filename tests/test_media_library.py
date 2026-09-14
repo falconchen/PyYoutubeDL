@@ -81,6 +81,36 @@ def test_media_list_splits_video_and_audio():
         )
 
 
+def test_media_list_carries_source_link_and_description():
+    video_metadata = {
+        'title': '视频标题',
+        'artist': '作者',
+        'description': '第一行\n第二行',
+        'source_url': 'https://www.youtube.com/watch?v=abc',
+        'cover_candidates': [],
+    }
+    audio_metadata = dict(
+        video_metadata,
+        description='',
+        source_url='https://www.bilibili.com/video/BV1',
+    )
+    with logged_in_client() as (client, _user, _db), TemporaryDirectory() as files_dir:
+        for name in ['video.mp4', 'audio.mp3']:
+            Path(files_dir, name).touch()
+        with (
+            patch('app.FILES_DIR', files_dir),
+            patch('app.get_video_metadata', return_value=video_metadata),
+            patch('app.get_audio_metadata', return_value=audio_metadata),
+        ):
+            payload = client.get('/api/media_list').get_json()
+
+    video, audio = payload['video'][0], payload['audio'][0]
+    assert video['source_url'] == 'https://www.youtube.com/watch?v=abc'
+    assert video['description'] == '第一行\n第二行'
+    assert audio['source_url'] == 'https://www.bilibili.com/video/BV1'
+    assert audio['description'] == ''
+
+
 def test_media_list_applies_exclude_keywords():
     with logged_in_client() as (client, _user, _db), TemporaryDirectory() as files_dir:
         for name in ['keep.mp4', 'skip-me.mp4']:

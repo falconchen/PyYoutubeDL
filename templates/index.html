@@ -229,7 +229,17 @@
                     <span class="dl-now-icon"><svg class="dl-icon" aria-hidden="true"><use href="#i-video"></use></svg></span>
                     <div class="dl-now-body">
                         <h2 class="dl-now-title">未选择媒体</h2>
-                        <p class="dl-now-meta">从右侧播放列表中选择已下载的媒体</p>
+                        <div class="dl-now-meta-line">
+                            <p class="dl-now-meta">从右侧播放列表中选择已下载的媒体</p>
+                            <a class="dl-now-source" href="" target="_blank" rel="noopener noreferrer" hidden>
+                                <svg class="dl-icon" aria-hidden="true"><use href="#i-link"></use></svg>
+                                原始链接
+                            </a>
+                        </div>
+                        <details class="dl-now-description" open hidden>
+                            <summary>简介</summary>
+                            <p class="dl-now-description-text"></p>
+                        </details>
                     </div>
                     <a class="dl-now-download" href="" download hidden title="下载文件" aria-label="下载文件">
                         <svg class="dl-icon" aria-hidden="true"><use href="#i-download"></use></svg>
