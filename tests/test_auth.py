@@ -129,8 +129,8 @@ class TestLoginBehaviour(AuthTestCase):
 
         user_store.set_status(self.db_path, user['id'], user_store.STATUS_DISABLED)
 
-        # 停用后旧 cookie 立即失效；首页对匿名开放，故改看受保护接口
-        self.assertEqual(self.client.get('/api/media_list').status_code, 401)
+        # 停用后旧 cookie 立即失效，并退回匿名媒体库身份。
+        self.assertEqual(self.client.get('/api/media_list').status_code, 200)
         self.assertNotIn('退出登录', self.client.get('/').get_data(as_text=True))
 
     def test_logout_clears_the_session(self):
@@ -138,7 +138,8 @@ class TestLoginBehaviour(AuthTestCase):
 
         self.client.post('/logout')
 
-        self.assertEqual(self.client.get('/api/media_list').status_code, 401)
+        self.assertEqual(self.client.get('/api/media_list').status_code, 200)
+        self.assertNotIn('退出登录', self.client.get('/').get_data(as_text=True))
 
     def test_login_only_redirects_to_local_paths(self):
         self.register('first@example.com')
@@ -305,45 +306,56 @@ class TestAnonymousHomepage(AuthTestCase):
         self.assertIn('登录 / 注册', html)
         self.assertNotIn('dl-account-menu', html)
 
-    def test_anonymous_task_panel_lists_supported_sources(self):
+    def test_anonymous_task_panel_explains_quota_and_retention(self):
         html = self.client.get('/').get_data(as_text=True)
 
-        # 未登录时用示例条目说明支持哪些站点，而不是空状态
-        for label in [
-            'YouTube 视频', 'YouTube 音频', 'Bilibili 视频', '小红书视频', 'Vimeo 视频',
-        ]:
-            self.assertIn(label, html)
-        self.assertIn('支持的站点', html)
-        self.assertNotIn('还没有任务', html)
+        self.assertIn('匿名用户每天可下载 3 条', html)
+        self.assertIn('文件保留 24 小时', html)
+        self.assertIn('YouTube 视频', html)
+        self.assertIn('Bilibili 视频', html)
 
-    def test_signed_in_task_panel_has_no_demo_rows(self):
+    def test_signed_in_empty_task_panel_keeps_demo_rows(self):
         self.register('first@example.com')
 
         html = self.client.get('/').get_data(as_text=True)
 
-        self.assertNotIn('dl-task-demo', html)
-        self.assertIn('还没有任务', html)
+        self.assertIn('dl-task-demo', html)
+        self.assertIn('支持的站点', html)
 
-    def test_adding_a_task_prompts_login_and_remembers_the_submission(self):
-        response = self.client.post(
-            '/api/add_task',
-            json={'url': 'https://example.com/v', 'types': ['video']},
-        )
-        payload = response.get_json()
-
-        self.assertEqual(response.status_code, 401)
-        self.assertTrue(payload['login_required'])
-        self.assertEqual(payload['login_url'], '/login')
-        with self.client.session_transaction() as session:
-            self.assertEqual(
-                session[app_module.PENDING_TASK_KEY],
-                {'url': 'https://example.com/v', 'types': ['video']},
+    def test_anonymous_ip_gets_three_tasks_then_must_log_in(self):
+        task_ids = []
+        for index in range(3):
+            response = self.client.post(
+                '/api/add_task',
+                json={
+                    'url': f'https://example.com/v{index}',
+                    'types': ['video'],
+                },
             )
+            self.assertEqual(response.status_code, 200)
+            task_ids.extend(response.get_json()['tasks'])
+
+        blocked = self.client.post(
+            '/api/add_task',
+            json={'url': 'https://example.com/v4', 'types': ['video']},
+        )
+        payload = blocked.get_json()
+
+        self.assertEqual(blocked.status_code, 401)
+        self.assertTrue(payload['login_required'])
+        self.assertEqual(payload['anonymous_used'], 3)
+        self.assertEqual(payload['login_url'], '/login')
+        self.assertEqual(len(task_ids), 3)
 
     def test_pending_task_is_created_right_after_registering(self):
+        for index in range(3):
+            self.client.post(
+                '/api/add_task',
+                json={'url': f'https://example.com/v{index}', 'types': ['video']},
+            )
         self.client.post(
             '/api/add_task',
-            json={'url': 'https://example.com/v', 'types': ['video']},
+            json={'url': 'https://example.com/pending', 'types': ['video']},
         )
 
         with patch(
@@ -354,11 +366,16 @@ class TestAnonymousHomepage(AuthTestCase):
         owner = user_store.get_user_by_email(self.db_path, 'first@example.com')
         created = user_store.user_task_ids(self.db_path, owner['id'])
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(len(created), 1)
+        self.assertEqual(len(created), 4)
         # 注册后直接跳到带任务的首页，用户不必重新粘贴链接
-        self.assertIn(created[0], response.headers['Location'])
+        self.assertIn('tasks=', response.headers['Location'])
         with self.client.session_transaction() as session:
             self.assertNotIn(app_module.PENDING_TASK_KEY, session)
+
+        for task_id in created:
+            self.assertIsNone(
+                user_store.anonymous_task_owner(self.db_path, task_id)
+            )
 
     def test_pending_task_is_created_right_after_logging_in(self):
         self.register('first@example.com')
@@ -379,12 +396,116 @@ class TestAnonymousHomepage(AuthTestCase):
         self.assertEqual(len(created), 1)
         self.assertTrue(created[0].startswith('a'))
 
-    def test_form_submission_without_session_redirects_to_login(self):
+    def test_form_submission_without_session_creates_anonymous_task(self):
         response = self.client.post(
             '/', data={'url': 'https://example.com/v', 'type': ['video']}
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertIn('/login', response.headers['Location'])
+        self.assertIn('tasks=', response.headers['Location'])
         with self.client.session_transaction() as session:
-            self.assertIn(app_module.PENDING_TASK_KEY, session)
+            self.assertIn(app_module.SESSION_ANONYMOUS_KEY, session)
+
+
+class TestAnonymousIsolationAndRetention(AuthTestCase):
+    def create_anonymous_task(self, client=None):
+        response = (client or self.client).post(
+            '/api/add_task',
+            json={'url': 'https://example.com/anonymous', 'types': ['video']},
+        )
+        self.assertEqual(response.status_code, 200)
+        return response.get_json()['tasks'][0]
+
+    def test_anonymous_task_is_visible_only_to_the_same_session(self):
+        task_id = self.create_anonymous_task()
+
+        own = self.client.post('/api/task_info', json={'tasks': [task_id]})
+        other = app.test_client().post(
+            '/api/task_info', json={'tasks': [task_id]}
+        )
+
+        self.assertTrue(own.get_json()['tasks'][0]['exists'])
+        self.assertFalse(other.get_json()['tasks'][0]['exists'])
+
+    def test_first_admin_does_not_adopt_another_anonymous_session(self):
+        anonymous_client = app.test_client()
+        task_id = self.create_anonymous_task(anonymous_client)
+        anonymous_id = user_store.anonymous_task_owner(self.db_path, task_id)
+
+        self.register('first@example.com')
+
+        self.assertIsNone(user_store.task_owner(self.db_path, task_id))
+        self.assertEqual(
+            user_store.anonymous_task_owner(self.db_path, task_id),
+            anonymous_id,
+        )
+
+    def test_quota_is_shared_by_sessions_with_the_same_ip(self):
+        first = app.test_client()
+        second = app.test_client()
+        for index in range(3):
+            response = first.post(
+                '/api/add_task',
+                json={'url': f'https://example.com/{index}', 'types': ['video']},
+                environ_base={'REMOTE_ADDR': '198.51.100.8'},
+            )
+            self.assertEqual(response.status_code, 200)
+
+        blocked = second.post(
+            '/api/add_task',
+            json={'url': 'https://example.com/blocked', 'types': ['video']},
+            environ_base={'REMOTE_ADDR': '198.51.100.8'},
+        )
+        allowed = second.post(
+            '/api/add_task',
+            json={'url': 'https://example.com/allowed', 'types': ['video']},
+            environ_base={'REMOTE_ADDR': '198.51.100.9'},
+        )
+
+        self.assertEqual(blocked.status_code, 401)
+        self.assertEqual(allowed.status_code, 200)
+
+    def test_anonymous_media_can_be_listed_played_and_not_cross_accessed(self):
+        task_id = self.create_anonymous_task()
+        urls_dir = Path(app_module.URLS_DIR)
+        files_dir = Path(app_module.FILES_DIR)
+        filename = 'anonymous.mp4'
+        (urls_dir / f'{task_id}.result.json').write_text(
+            '{"files":["anonymous.mp4"]}', encoding='utf-8'
+        )
+        (files_dir / filename).write_bytes(b'media')
+
+        with (
+            patch('app.get_media_dimensions', return_value=(0, 0)),
+            patch('app.get_video_metadata', return_value={}),
+        ):
+            listing = self.client.get('/api/media_list').get_json()
+
+        self.assertEqual([item['filename'] for item in listing['video']], [filename])
+        self.assertEqual(self.client.get(f'/files/{filename}').status_code, 200)
+        self.assertEqual(app.test_client().get(f'/files/{filename}').status_code, 404)
+
+    def test_expired_anonymous_media_is_deleted(self):
+        task_id = self.create_anonymous_task()
+        filename = 'expired.mp4'
+        filepath = Path(app_module.FILES_DIR, filename)
+        filepath.write_bytes(b'old')
+        with self.client.session_transaction() as session:
+            anonymous_id = session[app_module.SESSION_ANONYMOUS_KEY]
+        user_store.record_anonymous_media(
+            self.db_path, filename, anonymous_id, task_id
+        )
+        with user_store.connect(self.db_path) as db:
+            db.execute(
+                '''UPDATE anonymous_media_owners SET created_at = ?
+                   WHERE filename = ?''',
+                (user_store.now_ts() - 25 * 3600, filename),
+            )
+
+        response = self.client.get('/api/media_list')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(filepath.exists())
+        self.assertIsNone(
+            user_store.anonymous_media_owner(self.db_path, filename)
+        )

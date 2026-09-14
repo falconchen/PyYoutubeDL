@@ -74,6 +74,13 @@
   // 是否允许自助注册。首个账号不受此开关限制（它会成为管理员），
   // 其余注册者一律进入待审批，需管理员在 /admin 放行
   "REGISTRATION_OPEN": true,
+  // 匿名访客按客户端 IP 每天最多创建 3 个任务；一条 URL 同时选择
+  // 视频和音频会计为 2 个任务。匿名媒体从登记完成起保留 24 小时。
+  "ANONYMOUS_DAILY_TASK_LIMIT": 3,
+  "ANONYMOUS_FILES_EXPIRE_HOURS": 24,
+  // 仅当应用确实位于可信反向代理后时填写代理层数。单层 Nginx 通常为 1；
+  // 直接暴露 Flask 时保持 0，避免伪造 X-Forwarded-For 绕过额度。
+  "TRUSTED_PROXY_COUNT": 0,
   // HTTPS 部署时置为 true，给会话 cookie 加上 Secure
   "SESSION_COOKIE_SECURE": false,
   "FLASK_DEBUG": false,

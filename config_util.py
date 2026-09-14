@@ -32,6 +32,9 @@ DEFAULT_CONFIG = {
     "AI_SUMMARY_DB_PATH": "./data/ai_summaries.sqlite3", # AI 总结持久化数据库
     "USER_DB_PATH": "./data/users.sqlite3",  # 用户、身份与 Google 令牌数据库
     "REGISTRATION_OPEN": True,       # 是否允许自助注册；关闭后仅管理员可创建账号
+    "ANONYMOUS_DAILY_TASK_LIMIT": 3, # 同一 IP 每个自然日可创建的匿名下载任务数
+    "ANONYMOUS_FILES_EXPIRE_HOURS": 24, # 匿名媒体本地保留小时数
+    "TRUSTED_PROXY_COUNT": 0,        # 可信反向代理层数；用于安全解析客户端 IP
     "AI_SUMMARY_ACCESS_TOKEN": "",  # Chrome 扩展调用 AI 总结接口的独立令牌
     "AI_SUMMARY_JOB_RETENTION_DAYS": 30, # 已完成/失败 AI 任务记录保留天数
     "BARK_DEVICE_TOKEN": "",        # Bark 通知推送 Token

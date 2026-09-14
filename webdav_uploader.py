@@ -12,6 +12,7 @@ from config_util import MOVE_STAGING_PREFIX, load_config
 from log_util import setup_logger
 import requests
 import pytz
+import anonymous_cleanup
 
 # 加载配置
 config = load_config()
@@ -502,10 +503,30 @@ def cleanup_expired_files(directory, days):
     except Exception as e:
         logger.error(f"扫描目录失败 {directory}: {e}")
 
+
+def cleanup_expired_anonymous_media():
+    """同步并删除超过独立匿名保留期的文件。"""
+    anonymous_cleanup.cleanup_expired_media(config, logger)
+
+
+def anonymous_cleanup_loop(stop_event):
+    cleanup_expired_anonymous_media()
+    while not stop_event.wait(3600):
+        cleanup_expired_anonymous_media()
+
 def main():
     """
     程序主入口，初始化文件监控器并启动观察者。
     """
+    anonymous_cleanup_stop = threading.Event()
+    anonymous_cleanup_thread = threading.Thread(
+        target=anonymous_cleanup_loop,
+        args=(anonymous_cleanup_stop,),
+        name='anonymous-media-cleanup',
+        daemon=True,
+    )
+    anonymous_cleanup_thread.start()
+
     if not config.get("ENABLE_WEBDAV_UPLOAD", True):
         logger.info("WebDAV上传已关闭，上传器保持空闲，下载文件将保留在本地")
         try:
@@ -513,6 +534,9 @@ def main():
                 time.sleep(1)
         except KeyboardInterrupt:
             logger.info("上传器已停止")
+        finally:
+            anonymous_cleanup_stop.set()
+            anonymous_cleanup_thread.join(timeout=1)
         return
 
     initialize_webdav_clients()
@@ -545,9 +569,11 @@ def main():
         logger.info("监控已停止")
     finally:
         reconnect_stop_event.set()
+        anonymous_cleanup_stop.set()
 
     observer.join()
     reconnect_thread.join(timeout=1)
+    anonymous_cleanup_thread.join(timeout=1)
 
 if __name__ == '__main__':
     main() 

@@ -1784,7 +1784,7 @@
 }
 
 
-/* 未登录时的示例任务条目 */
+/* 空任务态的平台示例条目 */
 
 .dl-task-demo {
     cursor: default;
@@ -1797,6 +1797,33 @@
 .dl-task-demo .dl-task-icon {
     background: #f1f5fa;
     color: #9aa8ba;
+}
+
+.dl-task-demo .dl-platform-logo {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+    stroke: none;
+}
+
+.dl-task-demo .dl-platform-youtube {
+    background: #fff0f0;
+    color: #ff0000;
+}
+
+.dl-task-demo .dl-platform-bilibili {
+    background: #edfaff;
+    color: #00a1d6;
+}
+
+.dl-task-demo .dl-platform-xiaohongshu {
+    background: #fff0f3;
+    color: #ff2442;
+}
+
+.dl-task-demo .dl-platform-vimeo {
+    background: #ecfaff;
+    color: #1ab7ea;
 }
 
 .dl-task-demo .dl-task-title {

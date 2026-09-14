@@ -47,6 +47,10 @@
     );
     var heroSection = document.querySelector('.dl-hero-inner');
     var listElement = document.querySelector('.dl-task-list');
+    var demoRows = Array.prototype.map.call(
+        document.querySelectorAll('.dl-task-demo'),
+        function (item) { return item.cloneNode(true); }
+    );
     var emptyElement = document.querySelector('.dl-task-empty');
     var countElement = document.querySelector('.dl-task-count');
     var overlay = document.querySelector('.dl-drawer-overlay');
@@ -286,27 +290,26 @@
     }
 
     function render() {
-        // 未登录时任务列表由模板渲染的示例条目占位，这里不接管，
-        // 也不展示 localStorage 里上一个会话留下的任务。
-        if (!signedIn) {
-            if (emptyElement) emptyElement.hidden = true;
-            return;
-        }
-
         var existing = Object.create(null);
         Array.prototype.forEach.call(listElement.children, function (item) {
             existing[item.dataset.task] = item;
         });
 
-        var rows = tasks.map(function (task) {
-            var item = existing[task.id] || buildRow(task);
-            renderRow(item, task);
-            return item;
-        });
+        var rows = tasks.length
+            ? tasks.map(function (task) {
+                var item = existing[task.id] || buildRow(task);
+                renderRow(item, task);
+                return item;
+            })
+            : demoRows.map(function (item) { return item.cloneNode(true); });
         listElement.replaceChildren.apply(listElement, rows);
 
-        if (emptyElement) emptyElement.hidden = tasks.length > 0;
-        if (countElement) countElement.textContent = tasks.length + ' 个任务';
+        if (emptyElement) emptyElement.hidden = true;
+        if (countElement) {
+            countElement.textContent = tasks.length
+                ? tasks.length + ' 个任务'
+                : '支持的站点';
+        }
         if (openTaskId) renderDrawerMeta();
     }
 
@@ -820,20 +823,9 @@
             if (mediaLibrary) selectInitialMedia(preferredFile);
             return;
         }
-        if (!signedIn) {
-            playlistEmpty.hidden = false;
-            playlistEmpty.textContent = '登录后查看你的媒体库。';
-            renderNowPlaying(null);
-            return;
-        }
         libraryLoading = true;
         try {
             var response = await fetch('/api/media_list');
-            if (response.status === 401) {
-                playlistEmpty.hidden = false;
-                playlistEmpty.textContent = '登录后查看你的媒体库。';
-                return;
-            }
             if (!response.ok) throw new Error('HTTP ' + response.status);
             var data = await response.json();
             if (!data.success) throw new Error(data.msg || '读取媒体列表失败');
@@ -968,7 +960,7 @@
             });
             var data = await response.json();
             if (response.status === 401 && data.login_required) {
-                // 服务端已记住这次提交，登录或注册成功后会自动入队
+                // 匿名额度已用完；服务端记住提交，登录后会自动入队。
                 window.location.href = data.login_url || loginUrl;
                 return;
             }
@@ -1040,14 +1032,14 @@
             typeBoxes[0].checked = true;
         }
 
-        // 登录态要先确定，后面的轮询与媒体库加载都依赖它
+        // 登录态只影响账号 UI；匿名会话同样可以轮询任务和读取媒体库。
         signedIn = Boolean(payload.signedIn);
         loginUrl = payload.loginUrl || '/login';
         if (payload.tab === 'audio') libraryTab = 'audio';
 
         syncSubmitState();
         render();
-        if (signedIn && tasks.length) pollTasks();
+        if (tasks.length) pollTasks();
         setView(payload.view, payload.file);
     }
 

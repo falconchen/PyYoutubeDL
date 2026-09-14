@@ -300,9 +300,13 @@ journalctl -u pyyoutubedl -f    # 实时日志
 
 ### 账号与多用户
 
-本站需要登录使用。**第一个注册的账号自动成为管理员**并直接可用，同时接管升级前已有的下载任务、`FILES_DIR` 中的文件和原先的全局 Google 令牌；之后注册的账号一律进入待审批状态，由管理员在 `/admin` 放行或停用。把 `REGISTRATION_OPEN` 置为 `false` 可以彻底关闭自助注册（对第一个管理员账号不生效，否则会无法初始化）。
+本站允许匿名下载：同一客户端 IP 每个自然日默认最多创建 3 个下载任务，超过后必须登录。额度按实际任务数计算，例如同一链接同时选择视频和音频会占用 2 条；播放列表展开后的每个条目也分别计数。匿名访客可查看、播放和下载当前匿名会话自己的媒体，匿名文件默认保留 24 小时。
 
-任务和媒体按用户隔离：每个人只能看到自己提交的任务与自己下载的文件，跨用户访问 `/files`、`/downloads`、`/api/task_info` 等一律按「不存在」处理，不区分「无权限」和「不存在」。
+匿名媒体归属使用签名会话中的随机标识隔离，IP 只经过 HMAC 脱敏后用于每日额度统计，不作为媒体访问凭据。清除浏览器站点数据会失去原匿名媒体的访问身份；在同一会话中登录后，已有匿名任务和媒体会转入该账号。
+
+**第一个注册的账号自动成为管理员**并直接可用，同时接管升级前真正无归属的下载任务、`FILES_DIR` 中的文件和原先的全局 Google 令牌；之后注册的账号一律进入待审批状态，由管理员在 `/admin` 放行或停用。已有匿名归属的数据不会被首个管理员接管。把 `REGISTRATION_OPEN` 置为 `false` 可以彻底关闭自助注册（对第一个管理员账号不生效，否则会无法初始化）。
+
+任务和媒体按登录用户或匿名会话隔离：每个主体只能看到自己提交的任务与下载文件，跨主体访问 `/files`、`/downloads`、`/api/task_info` 等一律按「不存在」处理，不区分「无权限」和「不存在」。
 
 登录方式有两种，可以混用：
 
@@ -318,7 +322,7 @@ journalctl -u pyyoutubedl -f    # 实时日志
 
 账号、身份绑定、令牌与归属关系都存放在 `USER_DB_PATH` 指定的 SQLite 库（默认 `./data/users.sqlite3`，WAL 模式）。该目录已在 `.gitignore` 中。
 
-> **从单用户升级**：首次启动后立即注册你自己的管理员账号，历史数据会归到该账号名下。在此之前页面会把所有访问重定向到登录页。原先的 `GOOGLE_OAUTH_TOKEN_FILE` 仅用于一次性接管，之后令牌以数据库中的为准。Google OAuth 的回调地址仍是 `/oauth/callback`，无需在 Google 控制台改配置，但新增的 Drive scope 需要重新授权一次才会生效。
+> **从单用户升级**：首次启动后注册你自己的管理员账号，升级前无归属的历史数据会归到该账号名下，已有匿名归属的数据除外。原先的 `GOOGLE_OAUTH_TOKEN_FILE` 仅用于一次性接管，之后令牌以数据库中的为准。Google OAuth 的回调地址仍是 `/oauth/callback`，无需在 Google 控制台改配置，但新增的 Drive scope 需要重新授权一次才会生效。
 
 页面是单页双模式，顶栏的分段控件在「下载器」和「媒体库」之间切换。媒体库播放 `FILES_DIR` 中已下载的视频和音频，列表来自 `/api/media_list`，播放器使用 [zwplayer](https://github.com/chenfanyu/zwplayer-release)（静态资源在 `static/zwplayer/`）。`/player` 和 `/audio-player` 仍然可用，直接打开媒体库并分别默认选中视频或音频；带 `file` 参数时定位到该文件。
 
@@ -435,7 +439,7 @@ curl http://localhost:5100/api/ai_summaries/jobs/<job_id> \
 
 `/api/task_info` 会返回任务的 `state`（`queued`、`downloading`、`completed`、`failed` 或 `missing`）和 `progress`。下载中任务的 `progress` 包含可用的 `percent`、`downloaded`、`total`、`speed`、`eta` 等字段；新任务完成后包含 `final_size_bytes`、`elapsed_seconds`、`average_speed_bytes_per_second`。视频或音频任务完成并且主媒体产物仍在本地时，还会返回对应的 `player_url`。
 
-除 `/healthz` 与公开信息页外，页面和接口都需要登录；未登录时页面重定向到 `/login`，`/api/*` 返回 401。下列 curl 示例需要先带上登录后的会话 cookie。
+下载页、匿名任务查询、匿名媒体库以及其文件访问不要求登录，但必须携带同一签名会话 cookie 才能继续访问自己的匿名资源。匿名额度耗尽时 `/api/add_task` 返回 401 和 `login_required: true`。账号管理、Google 授权及其他受保护接口仍要求登录。下列 curl 示例若要连续查询同一匿名任务，也需要保存并复用 cookie。
 
 `/api/media_list` 返回媒体库需要的视频与音频条目，各自按修改时间倒序，沿用 `PLAYER_FILENAME_EXCLUDE_KEYWORDS` 过滤。每个条目包含文件名、标题、作者、来源链接、封面、扩展名、时长、视频高度、文件大小以及播放和下载地址。时长和高度由 `ffprobe` 读取并按文件属性缓存，目录中文件较多时首次请求需要数秒。
 
@@ -512,6 +516,9 @@ video (2).mp4
 | `EXTENSION_LOG_TOKEN` | string | Chrome 扩展读取 `downloader.log` 的访问令牌；为空时禁用日志接口 |
 | `USER_DB_PATH` | string | 用户、身份绑定与 Google 令牌数据库，默认 `./data/users.sqlite3` |
 | `REGISTRATION_OPEN` | bool | 是否允许自助注册，默认 `true`；首个管理员账号不受限制 |
+| `ANONYMOUS_DAILY_TASK_LIMIT` | int | 同一客户端 IP 每个自然日可创建的匿名任务数，默认 3 |
+| `ANONYMOUS_FILES_EXPIRE_HOURS` | number | 匿名媒体从登记完成起的本地保留小时数，默认 24 |
+| `TRUSTED_PROXY_COUNT` | int | 可信反向代理层数，默认 0；单层 Nginx 通常设为 1，错误配置可能导致所有访客共用代理 IP 或信任伪造来源 IP |
 | `SESSION_COOKIE_SECURE` | bool | HTTPS 部署时置为 `true`，给会话 cookie 加 Secure，默认 `false` |
 | `AI_SUMMARY_DB_PATH` | string | AI 总结 SQLite 数据库路径，默认 `./data/ai_summaries.sqlite3` |
 | `AI_SUMMARY_ACCESS_TOKEN` | string | Chrome 扩展调用 AI 总结接口的独立访问令牌；为空时禁用扩展接口 |

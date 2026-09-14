@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import hashlib
 import hmac
 from werkzeug.utils import safe_join
+from werkzeug.middleware.proxy_fix import ProxyFix
 from config_util import get_playlist_max_items, get_ytdlp_config_path, load_config
 import pytz
 from datetime import datetime
@@ -20,6 +21,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 from log_util import setup_logger
 import ai_summary_store
+import anonymous_cleanup
 import task_queue
 import user_store
 import youtube_auth
@@ -48,6 +50,14 @@ def get_release_commit():
 # 加载配置
 config = load_config()
 
+trusted_proxy_count = config.get('TRUSTED_PROXY_COUNT', 0)
+if (
+    isinstance(trusted_proxy_count, int)
+    and not isinstance(trusted_proxy_count, bool)
+    and trusted_proxy_count > 0
+):
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=trusted_proxy_count)
+
 # 配置日志
 logger = setup_logger(
     name='app',
@@ -64,7 +74,7 @@ app.logger = logger
 # OAuth state 会话需要稳定密钥；未配置时生成临时密钥（多 worker 部署需在 config.json 配置）
 app.secret_key = config.get("FLASK_SECRET_KEY") or os.urandom(24)
 if not config.get("FLASK_SECRET_KEY"):
-    app.logger.warning("FLASK_SECRET_KEY 未配置，OAuth state 会话在多 worker 部署下可能失效，请在 config.json 中设置稳定密钥。")
+    app.logger.warning("FLASK_SECRET_KEY 未配置，OAuth state、匿名会话和按 IP 额度在重启或多 worker 部署下可能失效，请在 config.json 中设置稳定密钥。")
 
 USER_DB_PATH = config["USER_DB_PATH"]
 user_store.init_db(USER_DB_PATH)
@@ -126,6 +136,7 @@ ai_summary_store.init_db(config["AI_SUMMARY_DB_PATH"])
 # --- 认证与授权 ---------------------------------------------------------
 
 SESSION_USER_KEY = 'user_id'
+SESSION_ANONYMOUS_KEY = 'anonymous_id'
 
 
 def current_user():
@@ -139,6 +150,47 @@ def current_user():
         session.pop(SESSION_USER_KEY, None)
         return None
     return user
+
+
+def current_anonymous_id(create=True):
+    """返回匿名会话标识；它只用于资源隔离，不用于每日额度。"""
+    anonymous_id = session.get(SESSION_ANONYMOUS_KEY)
+    if anonymous_id or not create:
+        return anonymous_id
+    anonymous_id = user_store.new_id()
+    session[SESSION_ANONYMOUS_KEY] = anonymous_id
+    session.permanent = True
+    return anonymous_id
+
+
+def current_owner(create_anonymous=True):
+    """返回 ``(user|anonymous, id)`` 形式的当前资源主体。"""
+    user = current_user()
+    if user:
+        return 'user', user['id']
+    anonymous_id = current_anonymous_id(create=create_anonymous)
+    return ('anonymous', anonymous_id) if anonymous_id else (None, None)
+
+
+def anonymous_ip_hash():
+    """对可信客户端 IP 做 HMAC，数据库不保存原始 IP。"""
+    address = request.remote_addr or 'unknown'
+    secret = app.secret_key
+    if isinstance(secret, str):
+        secret = secret.encode('utf-8')
+    return hmac.new(secret, address.encode('utf-8'), hashlib.sha256).hexdigest()
+
+
+def anonymous_day_key():
+    timezone = pytz.timezone(config.get('TIMEZONE', 'UTC'))
+    return datetime.now(timezone).strftime('%Y-%m-%d')
+
+
+def anonymous_task_limit():
+    value = config.get('ANONYMOUS_DAILY_TASK_LIMIT', 3)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return 3
+    return value
 
 
 PENDING_TASK_KEY = 'pending_task'
@@ -176,6 +228,11 @@ def consume_pending_task(user):
 def login_user(user):
     # session.clear() 会一并清掉待建任务，所以先取出来再放回去
     pending = session.get(PENDING_TASK_KEY)
+    anonymous_id = current_anonymous_id(create=False)
+    if anonymous_id:
+        user_store.transfer_anonymous_ownership(
+            USER_DB_PATH, anonymous_id, user['id']
+        )
     session.clear()
     session[SESSION_USER_KEY] = user['id']
     if pending is not None:
@@ -1756,6 +1813,10 @@ def render_index_page(
         tab=tab,
         requested_file=request.args.get('file', ''),
         show_waline=config.get("SHOW_WALINE_ON_INDEX", False),
+        anonymous_task_limit=anonymous_task_limit(),
+        anonymous_files_expire_hours=config.get(
+            'ANONYMOUS_FILES_EXPIRE_HOURS', 24
+        ),
     )
     return (html, status) if status != 200 else html
 
@@ -1763,19 +1824,17 @@ def render_index_page(
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
-        types = request.form.getlist('type')
+        types = list(dict.fromkeys(
+            task_type for task_type in request.form.getlist('type')
+            if task_type in {'video', 'audio'}
+        ))
         # 从分享文本中提取URL
         url = extract_url(request.form.get('url'))
 
-        if url and types and current_user() is None:
-            # 未登录：先记住这次提交，登录或注册成功后自动补建
-            remember_pending_task(url, types)
-            return redirect(url_for('login', next=url_for('index')))
-
-        if not url:
+        if not url or not types:
             return render_index_page(
                 types=types,
-                error='请输入有效的视频或播放列表链接',
+                error='请输入有效链接并至少选择一种下载格式',
                 status=400,
             )
 
@@ -1789,12 +1848,40 @@ def index():
                 status=400,
             )
 
-        # 走到这里必定已登录：上面对匿名提交已重定向到登录页
         submitter = current_user()
-        task_ids = create_tasks(urls, types)
-        user_store.record_tasks(
-            USER_DB_PATH, task_ids, submitter['id'], url=url
-        )
+        if submitter is None:
+            task_count = len(urls) * len(types)
+            ip_hash = anonymous_ip_hash()
+            day_key = anonymous_day_key()
+            allowed, _used = user_store.reserve_anonymous_downloads(
+                USER_DB_PATH,
+                ip_hash,
+                day_key,
+                task_count,
+                anonymous_task_limit(),
+            )
+            if not allowed:
+                remember_pending_task(url, types)
+                return redirect(url_for('login', next=url_for('index')))
+            try:
+                task_ids = create_tasks(urls, types)
+            except Exception:
+                user_store.release_anonymous_downloads(
+                    USER_DB_PATH, ip_hash, day_key, task_count
+                )
+                raise
+            user_store.record_anonymous_tasks(
+                USER_DB_PATH,
+                task_ids,
+                current_anonymous_id(),
+                ip_hash,
+                url=url,
+            )
+        else:
+            task_ids = create_tasks(urls, types)
+            user_store.record_tasks(
+                USER_DB_PATH, task_ids, submitter['id'], url=url
+            )
 
         # 构建重定向URL，包含所有参数
         redirect_url = url_for(
@@ -2004,6 +2091,11 @@ def adopt_legacy_data(user_id):
                 continue
             if not TASK_ID_PATTERN.fullmatch(task_id):
                 continue
+            if (
+                user_store.task_owner(USER_DB_PATH, task_id)
+                or user_store.anonymous_task_owner(USER_DB_PATH, task_id)
+            ):
+                continue
             url = ''
             try:
                 with open(os.path.join(URLS_DIR, entry), 'r', encoding='utf-8') as f:
@@ -2024,7 +2116,13 @@ def adopt_legacy_data(user_id):
     adopted_files = 0
     try:
         for filename in os.listdir(FILES_DIR):
-            if os.path.isfile(os.path.join(FILES_DIR, filename)):
+            if (
+                os.path.isfile(os.path.join(FILES_DIR, filename))
+                and user_store.media_owner(USER_DB_PATH, filename) is None
+                and user_store.anonymous_media_owner(
+                    USER_DB_PATH, filename
+                ) is None
+            ):
                 user_store.record_media(USER_DB_PATH, filename, user_id)
                 adopted_files += 1
     except OSError as exc:
@@ -2049,13 +2147,23 @@ def sync_media_ownership():
     与任务归属对应起来补进 media_owners，未知来源的文件（历史遗留、
     播放列表监控产物）归到首个管理员，避免出现任何人都看不到的孤儿文件。
     """
-    known = user_store.media_owner_map(USER_DB_PATH)
+    known = {
+        filename: ('user', owner)
+        for filename, owner in user_store.media_owner_map(USER_DB_PATH).items()
+    }
+    known.update({
+        filename: ('anonymous', owner)
+        for filename, owner in user_store.anonymous_media_owner_map(
+            USER_DB_PATH
+        ).items()
+    })
     fallback = user_store.first_admin_id(USER_DB_PATH)
 
     for result_path in glob.glob(os.path.join(URLS_DIR, '*.result.json')):
         task_id = os.path.basename(result_path)[: -len('.result.json')]
-        owner = user_store.task_owner(USER_DB_PATH, task_id)
-        if not owner:
+        user_owner = user_store.task_owner(USER_DB_PATH, task_id)
+        anonymous_owner = user_store.anonymous_task_owner(USER_DB_PATH, task_id)
+        if not user_owner and not anonymous_owner:
             continue
         try:
             with open(result_path, 'r', encoding='utf-8') as f:
@@ -2064,8 +2172,24 @@ def sync_media_ownership():
             continue
         for filename in result.get('files', []):
             if isinstance(filename, str) and filename not in known:
-                user_store.record_media(USER_DB_PATH, filename, owner, task_id)
-                known[filename] = owner
+                if user_owner:
+                    user_store.record_media(
+                        USER_DB_PATH, filename, user_owner, task_id
+                    )
+                    known[filename] = ('user', user_owner)
+                else:
+                    user_store.record_anonymous_media(
+                        USER_DB_PATH,
+                        filename,
+                        anonymous_owner,
+                        task_id,
+                        created_at=(
+                            os.path.getmtime(os.path.join(FILES_DIR, filename))
+                            if os.path.isfile(os.path.join(FILES_DIR, filename))
+                            else None
+                        ),
+                    )
+                    known[filename] = ('anonymous', anonymous_owner)
 
     if not fallback:
         return known
@@ -2078,17 +2202,22 @@ def sync_media_ownership():
             os.path.join(FILES_DIR, filename)
         ):
             user_store.record_media(USER_DB_PATH, filename, fallback)
-            known[filename] = fallback
+            known[filename] = ('user', fallback)
     return known
 
 
-def owned_tasks(task_ids, user_id):
-    """过滤出属于该用户的任务，防止用任务 ID 越权读取他人进度与日志。"""
-    return [
-        task_id
-        for task_id in task_ids
-        if user_store.task_owner(USER_DB_PATH, task_id) == user_id
-    ]
+def owned_tasks(task_ids, owner):
+    """过滤出属于当前主体的任务，防止用任务 ID 越权读取。"""
+    owner_type, owner_id = owner
+    if owner_type == 'user':
+        owns = lambda task_id: (
+            user_store.task_owner(USER_DB_PATH, task_id) == owner_id
+        )
+    else:
+        owns = lambda task_id: (
+            user_store.anonymous_task_owner(USER_DB_PATH, task_id) == owner_id
+        )
+    return [task_id for task_id in task_ids if owns(task_id)]
 
 
 def google_oauth_configured():
@@ -2336,21 +2465,21 @@ def media_display_title(probed_title, fallback_name):
     return strip_numeric_filename_prefix(fallback_name)
 
 
-def build_media_library_items(user_id=None):
+def build_media_library_items(owner=None):
     """列出媒体库需要的视频与音频条目，按修改时间倒序。
 
-    传入 user_id 时只返回该用户拥有的文件；归属表由 sync_media_ownership()
+    传入 owner 时只返回该用户或匿名会话拥有的文件；归属表由 sync_media_ownership()
     依据任务结果维护。
     """
     exclude_keywords = get_player_exclude_keywords()
-    owners = sync_media_ownership() if user_id else {}
+    owners = sync_media_ownership() if owner else {}
 
     def listed(predicate):
         names = [
             filename for filename in os.listdir(FILES_DIR)
             if predicate(filename)
             and not any(keyword in filename for keyword in exclude_keywords)
-            and (user_id is None or owners.get(filename) == user_id)
+            and (owner is None or owners.get(filename) == owner)
         ]
         names.sort(
             key=lambda name: os.path.getmtime(os.path.join(FILES_DIR, name)),
@@ -2422,12 +2551,21 @@ def build_media_library_items(user_id=None):
     return videos, audios
 
 
+def cleanup_expired_anonymous_media():
+    """删除超过匿名保留期的本地媒体及其归属记录。"""
+    cleanup_config = dict(config)
+    cleanup_config['USER_DB_PATH'] = USER_DB_PATH
+    cleanup_config['FILES_DIR'] = FILES_DIR
+    cleanup_config['URLS_DIR'] = URLS_DIR
+    anonymous_cleanup.cleanup_expired_media(cleanup_config, app.logger)
+
+
 @app.route('/api/media_list', methods=['GET'])
-@login_required
 def api_media_list():
     """媒体库列表接口，供首页的媒体库模式异步加载。"""
     try:
-        videos, audios = build_media_library_items(request.user['id'])
+        cleanup_expired_anonymous_media()
+        videos, audios = build_media_library_items(current_owner())
     except OSError as exc:
         app.logger.error("读取媒体库目录失败: %s", exc)
         return jsonify({"success": False, "msg": "读取媒体目录失败"}), 500
@@ -2448,15 +2586,19 @@ def audio_player():
     """兼容已有音频链接，在媒体库中打开音频标签。"""
     return render_index_page(view='library', tab='audio')
 def require_media_access(filename):
-    """媒体私有：只有文件归属者本人可以播放或下载。"""
-    user = current_user()
-    if user is None:
-        abort(401)
-    owner = user_store.media_owner(USER_DB_PATH, filename)
-    if owner is None:
+    """媒体私有：只有登录用户本人或原匿名会话可以访问。"""
+    cleanup_expired_anonymous_media()
+    request_owner = current_owner()
+    user_owner = user_store.media_owner(USER_DB_PATH, filename)
+    anonymous_owner = user_store.anonymous_media_owner(USER_DB_PATH, filename)
+    if user_owner is None and anonymous_owner is None:
         # 归属未登记的文件先补齐，再判断，避免刚下载完就 404。
-        owner = sync_media_ownership().get(filename)
-    if owner != user['id']:
+        resource_owner = sync_media_ownership().get(filename)
+    elif user_owner:
+        resource_owner = ('user', user_owner)
+    else:
+        resource_owner = ('anonymous', anonymous_owner)
+    if resource_owner != request_owner:
         abort(404)
 
 
@@ -2480,7 +2622,6 @@ def download_file(filename):
 
 
 @app.route('/subtitles/<path:filename>/<int:stream_index>.vtt')
-@login_required
 def serve_subtitle(filename, stream_index):
     """将 MP4 内嵌字幕流转换为浏览器可读取的 WebVTT。"""
     decoded_filename = unquote(filename)
@@ -2520,21 +2661,24 @@ def serve_subtitle(filename, stream_index):
 
 
 @app.route('/subtitles/sidecar/<path:subtitle_filename>.vtt')
-@login_required
 def serve_sidecar_subtitle(subtitle_filename):
     """将有效的同名外挂字幕转换为浏览器可读取的 WebVTT。"""
     decoded_filename = unquote(subtitle_filename)
     if decoded_filename != os.path.basename(decoded_filename):
         abort(404)
-    valid = any(
-        track['subtitle_filename'] == decoded_filename
+    owning_video = next((
+        video_filename
         for video_filename in os.listdir(FILES_DIR)
         if video_filename.lower().endswith('.mp4')
-        for track in get_sidecar_subtitles(video_filename)
-    )
+        if any(
+            track['subtitle_filename'] == decoded_filename
+            for track in get_sidecar_subtitles(video_filename)
+        )
+    ), None)
     filepath = safe_join(FILES_DIR, decoded_filename)
-    if not valid or not filepath or not os.path.isfile(filepath):
+    if not owning_video or not filepath or not os.path.isfile(filepath):
         abort(404)
+    require_media_access(owning_video)
     try:
         subtitle = convert_sidecar_subtitle_to_webvtt(filepath)
     except RuntimeError as exc:
@@ -2575,6 +2719,8 @@ def api_ai_summary():
         isinstance(stream_index, bool) or not isinstance(stream_index, int)
     ):
         return ai_summary_api_response({"success": False, "message": "字幕流编号无效"}, 400)
+
+    require_media_access(filename)
 
     filepath = safe_join(FILES_DIR, filename)
     if (
@@ -2749,35 +2895,67 @@ def api_add_task():
     if not isinstance(types, list):
         # 支持表单传递的字符串类型
         types = [types]
+    types = list(dict.fromkeys(
+        task_type for task_type in types
+        if task_type in {'video', 'audio'}
+    ))
+    if not types:
+        return jsonify({"success": False, "msg": "Invalid download types"}), 400
 
     user = current_user()
-    if user is None:
-        # 首页对匿名开放，真正入队时才要求登录；这次提交先暂存。
-        remember_pending_task(url, types)
-        return jsonify({
-            "success": False,
-            "msg": "请先登录后再添加任务",
-            "login_required": True,
-            "login_url": url_for('login'),
-        }), 401
-
     # 播放列表展开为逐集 URL，再逐个创建任务
     urls, error = expand_task_urls(url)
     if error:
         return jsonify({"success": False, "msg": error}), 400
 
-    # 使用新的辅助函数创建任务
-    tasks = create_tasks(urls, types)
-    user_store.record_tasks(USER_DB_PATH, tasks, user['id'], url=url)
+    if user is None:
+        task_count = len(urls) * len(types)
+        ip_hash = anonymous_ip_hash()
+        day_key = anonymous_day_key()
+        limit = anonymous_task_limit()
+        allowed, used = user_store.reserve_anonymous_downloads(
+            USER_DB_PATH, ip_hash, day_key, task_count, limit
+        )
+        if not allowed:
+            remember_pending_task(url, types)
+            return jsonify({
+                "success": False,
+                "msg": f"匿名用户每天最多下载 {limit} 条，请登录后继续",
+                "login_required": True,
+                "login_url": url_for('login'),
+                "anonymous_limit": limit,
+                "anonymous_used": used,
+            }), 401
+        try:
+            tasks = create_tasks(urls, types)
+        except Exception:
+            user_store.release_anonymous_downloads(
+                USER_DB_PATH, ip_hash, day_key, task_count
+            )
+            raise
+        user_store.record_anonymous_tasks(
+            USER_DB_PATH,
+            tasks,
+            current_anonymous_id(),
+            ip_hash,
+            url=url,
+        )
+        remaining = max(0, limit - used)
+    else:
+        tasks = create_tasks(urls, types)
+        user_store.record_tasks(USER_DB_PATH, tasks, user['id'], url=url)
+        remaining = None
 
     if len(urls) > 1:
         msg = f"播放列表已解析为 {len(urls)} 个视频，共创建 {len(tasks)} 个任务"
     else:
         msg = "Task added successfully" if len(tasks) == 1 else "Tasks added successfully"
-    return jsonify({"success": True, "msg": msg, "tasks": tasks})
+    payload = {"success": True, "msg": msg, "tasks": tasks}
+    if remaining is not None:
+        payload['anonymous_remaining'] = remaining
+    return jsonify(payload)
 
 @app.route('/api/task_info', methods=['POST'])
-@login_required
 def api_task_info():
     data = request.get_json() if request.is_json else request.form
     tasks = data.get('tasks')
@@ -2787,7 +2965,7 @@ def api_task_info():
         tasks = [tasks]
     # 逐个返回，保持「请求几个就回几个」的契约：前端据此结束轮询。
     # 非本人任务与不存在的任务返回同样的 missing，不泄露是否存在。
-    owned = set(owned_tasks(tasks, request.user['id']))
+    owned = set(owned_tasks(tasks, current_owner()))
     result = [
         get_task_info(task)
         if task in owned
@@ -2852,7 +3030,6 @@ def redact_task_log_text(text):
 
 
 @app.route('/api/task_log', methods=['POST'])
-@login_required
 def api_task_log():
     """返回指定任务相关的日志，供首页侧栏使用。"""
     data = request.get_json() if request.is_json else request.form
@@ -2862,7 +3039,7 @@ def api_task_log():
     if not isinstance(tasks, list):
         tasks = [tasks]
     tasks = [task for task in tasks if isinstance(task, str) and TASK_ID_PATTERN.fullmatch(task)]
-    tasks = owned_tasks(tasks, request.user['id'])
+    tasks = owned_tasks(tasks, current_owner())
     if not tasks or len(tasks) > 20:
         return jsonify({"success": False, "msg": "Invalid task list"}), 400
 
@@ -2973,7 +3150,6 @@ def favicon():
                              'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
 @app.route('/api/video_info', methods=['POST'])
-@login_required
 def api_video_info():
     data = request.get_json() if request.is_json else request.form
     url = data.get('url')
@@ -3060,7 +3236,6 @@ def api_video_info():
 
 
 @app.route('/api/video_info_basic', methods=['POST'])
-@login_required
 def api_video_info_basic():
     """只提取首页预览所需的标题、作者、时长和缩略图。"""
     data = request.get_json() if request.is_json else request.form

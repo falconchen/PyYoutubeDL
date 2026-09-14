@@ -31,6 +31,7 @@
 - `youtube_auth.py`：YouTube OAuth 授权与 Data API 封装（令牌加载/刷新、service 构建）。
 - `task_queue.py`：下载任务写入（Web 与 worker 共用），负责 `<v|a><时间戳><随机>.txt` 任务文件。
 - `user_store.py`：多用户 SQLite 存储（账号、Google 身份绑定、按用户的 OAuth 令牌、任务与媒体归属）。下载器不感知用户，归属只在数据库里维护。
+- 匿名下载按脱敏客户端 IP 每个自然日限额，资源访问则按签名会话中的随机匿名 ID 隔离；两者不能混用。匿名产物由 `anonymous_cleanup.py` 按独立小时数清理。
 - `config_util.py`：读取 `config.json`，并提供默认配置。
 - `start.py` / `stop.py` / `runner.sh`：启动、停止和运行相关服务。
 - `yt-dlp.conf` / `yta-dlp.conf`：视频和音频下载配置。
@@ -83,6 +84,7 @@ flask get-cookie
 - 带注释的配置不能使用 `python -m json.tool` 或 `jq` 验证；应运行 `tests/test_config_util.py`。项目只约定 JSONC 风格注释和尾逗号，不推广其他 JSON5 扩展语法。
 - 首个注册账号成为管理员并接管历史任务、文件与旧的全局 Google 令牌；其余注册进入待审批，管理员在 `/admin` 放行。改动认证相关代码时，注意 `current_user()` 会在账号被停用后立即让旧 cookie 失效。
 - 任务与媒体按用户隔离。新增任何读取 `FILES_DIR` 或任务的路由时，必须走 `require_media_access()` 或 `owned_tasks()`，否则会造成越权。跨用户访问统一返回 404 而不是 403，避免泄露资源是否存在。
+- 匿名会话也属于独立资源主体。修改归属同步、首个管理员历史接管或登录流程时，必须防止接管其他匿名会话的数据；登录只转移当前匿名会话的数据。
 - 单页 `templates/index.html`（下载器 + 媒体库）已接入 Waline 评论，服务地址是 `https://waline.v2ai.eu.cc`；旧的 `templates/player.html` 已随播放页重做删除。
 - 评论区默认不显示，由 `config.json` 中的 `SHOW_WALINE_ON_INDEX` 和 `SHOW_WALINE_ON_PLAYER` 分别控制。
 - Waline 客户端 `path` 使用 `window.location.hostname + window.location.pathname`，按域名和路径隔离评论，避免多个站点的 `/` 共享评论。

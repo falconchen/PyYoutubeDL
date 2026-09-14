@@ -366,8 +366,8 @@ class TestTaskInfoAPI(unittest.TestCase):
         css = self.read_asset('static', 'dropload.css')
 
         self.assertIn('{{ tasks|length }} 个任务', template)
-        # 未登录时该处改为「支持的站点」，配合示例条目
         self.assertIn('支持的站点', template)
+        self.assertIn('dl-task-demo', template)
         self.assertIn('.dl-task-list {', css)
         # 小屏单栏、任务列表限高；桌面右侧固定宽度栏。
         self.assertIn('max-height: 420px;', css)

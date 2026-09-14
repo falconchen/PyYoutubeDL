@@ -8,8 +8,9 @@
   同时也是「普通账号绑定 Google」的落点，一个用户至多一条 google 身份。
 - `google_tokens`：按用户存放 OAuth 令牌与已授权 scope，替代原先的全局
   单份令牌文件。播放列表监控与后续的 Drive 上传都从这里取凭据。
-- `task_owners` / `media_owners`：任务与下载产物的归属。任务文件仍留在
-  URLS_DIR，本表只记录 task_id -> user_id，下载器无需改动。
+- `task_owners` / `media_owners`：登录用户的任务与下载产物归属。
+- `anonymous_task_owners` / `anonymous_media_owners`：匿名会话的资源归属；
+  `anonymous_daily_usage` 按脱敏后的 IP 和日期记录每日下载额度。
 
 约定与 ai_summary_store.py 保持一致：WAL、外键、busy_timeout，
 以及用 PRAGMA user_version 做迁移。
@@ -22,7 +23,7 @@ import time
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 ROLE_ADMIN = 'admin'
 ROLE_USER = 'user'
@@ -123,6 +124,71 @@ def init_db(db_path):
                 );
 
                 CREATE INDEX idx_media_owner_user ON media_owners(user_id);
+
+                CREATE TABLE anonymous_task_owners (
+                    task_id TEXT PRIMARY KEY,
+                    anonymous_id TEXT NOT NULL,
+                    ip_hash TEXT NOT NULL,
+                    url TEXT NOT NULL DEFAULT '',
+                    media_type TEXT NOT NULL DEFAULT '',
+                    created_at INTEGER NOT NULL
+                );
+
+                CREATE INDEX idx_anonymous_task_owner
+                    ON anonymous_task_owners(anonymous_id, created_at DESC);
+
+                CREATE TABLE anonymous_media_owners (
+                    filename TEXT PRIMARY KEY,
+                    anonymous_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL DEFAULT '',
+                    created_at INTEGER NOT NULL
+                );
+
+                CREATE INDEX idx_anonymous_media_owner
+                    ON anonymous_media_owners(anonymous_id, created_at DESC);
+
+                CREATE TABLE anonymous_daily_usage (
+                    ip_hash TEXT NOT NULL,
+                    day_key TEXT NOT NULL,
+                    task_count INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (ip_hash, day_key)
+                );
+                '''
+            )
+            db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
+        elif version == 1:
+            db.executescript(
+                '''
+                CREATE TABLE anonymous_task_owners (
+                    task_id TEXT PRIMARY KEY,
+                    anonymous_id TEXT NOT NULL,
+                    ip_hash TEXT NOT NULL,
+                    url TEXT NOT NULL DEFAULT '',
+                    media_type TEXT NOT NULL DEFAULT '',
+                    created_at INTEGER NOT NULL
+                );
+
+                CREATE INDEX idx_anonymous_task_owner
+                    ON anonymous_task_owners(anonymous_id, created_at DESC);
+
+                CREATE TABLE anonymous_media_owners (
+                    filename TEXT PRIMARY KEY,
+                    anonymous_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL DEFAULT '',
+                    created_at INTEGER NOT NULL
+                );
+
+                CREATE INDEX idx_anonymous_media_owner
+                    ON anonymous_media_owners(anonymous_id, created_at DESC);
+
+                CREATE TABLE anonymous_daily_usage (
+                    ip_hash TEXT NOT NULL,
+                    day_key TEXT NOT NULL,
+                    task_count INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    PRIMARY KEY (ip_hash, day_key)
+                );
                 '''
             )
             db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
@@ -445,6 +511,175 @@ def media_owner_map(db_path):
 def delete_media(db_path, filename):
     with connect(db_path) as db:
         db.execute('DELETE FROM media_owners WHERE filename = ?', (filename,))
+
+
+# --- 匿名任务、媒体与额度 ----------------------------------------------
+
+
+def reserve_anonymous_downloads(db_path, ip_hash, day_key, amount, limit):
+    """原子占用匿名 IP 当日额度，返回 ``(是否允许, 已用数量)``。"""
+    if amount <= 0 or limit <= 0:
+        return False, 0
+    timestamp = now_ts()
+    with connect(db_path) as db:
+        db.execute('BEGIN IMMEDIATE')
+        db.execute(
+            'DELETE FROM anonymous_daily_usage WHERE day_key < ?',
+            (day_key,),
+        )
+        row = db.execute(
+            '''SELECT task_count FROM anonymous_daily_usage
+               WHERE ip_hash = ? AND day_key = ?''',
+            (ip_hash, day_key),
+        ).fetchone()
+        used = row['task_count'] if row else 0
+        if used + amount > limit:
+            return False, used
+        db.execute(
+            '''INSERT INTO anonymous_daily_usage
+               (ip_hash, day_key, task_count, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(ip_hash, day_key) DO UPDATE SET
+                   task_count = excluded.task_count,
+                   updated_at = excluded.updated_at''',
+            (ip_hash, day_key, used + amount, timestamp),
+        )
+    return True, used + amount
+
+
+def release_anonymous_downloads(db_path, ip_hash, day_key, amount):
+    """任务文件创建失败时归还已经占用的匿名额度。"""
+    if amount <= 0:
+        return
+    with connect(db_path) as db:
+        db.execute(
+            '''UPDATE anonymous_daily_usage
+               SET task_count = MAX(0, task_count - ?), updated_at = ?
+               WHERE ip_hash = ? AND day_key = ?''',
+            (amount, now_ts(), ip_hash, day_key),
+        )
+
+
+def anonymous_usage(db_path, ip_hash, day_key):
+    with connect(db_path) as db:
+        row = db.execute(
+            '''SELECT task_count FROM anonymous_daily_usage
+               WHERE ip_hash = ? AND day_key = ?''',
+            (ip_hash, day_key),
+        ).fetchone()
+    return row['task_count'] if row else 0
+
+
+def record_anonymous_tasks(
+    db_path, task_ids, anonymous_id, ip_hash, url='', media_type=''
+):
+    timestamp = now_ts()
+    with connect(db_path) as db:
+        db.executemany(
+            '''INSERT INTO anonymous_task_owners
+               (task_id, anonymous_id, ip_hash, url, media_type, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(task_id) DO NOTHING''',
+            [
+                (task_id, anonymous_id, ip_hash, url, media_type, timestamp)
+                for task_id in task_ids
+            ],
+        )
+
+
+def anonymous_task_owner(db_path, task_id):
+    with connect(db_path) as db:
+        row = db.execute(
+            '''SELECT anonymous_id FROM anonymous_task_owners
+               WHERE task_id = ?''',
+            (task_id,),
+        ).fetchone()
+    return row['anonymous_id'] if row else None
+
+
+def record_anonymous_media(
+    db_path, filename, anonymous_id, task_id='', created_at=None
+):
+    with connect(db_path) as db:
+        db.execute(
+            '''INSERT INTO anonymous_media_owners
+               (filename, anonymous_id, task_id, created_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(filename) DO NOTHING''',
+            (
+                filename,
+                anonymous_id,
+                task_id,
+                int(created_at) if created_at is not None else now_ts(),
+            ),
+        )
+
+
+def anonymous_media_owner(db_path, filename):
+    with connect(db_path) as db:
+        row = db.execute(
+            '''SELECT anonymous_id FROM anonymous_media_owners
+               WHERE filename = ?''',
+            (filename,),
+        ).fetchone()
+    return row['anonymous_id'] if row else None
+
+
+def anonymous_media_owner_map(db_path):
+    with connect(db_path) as db:
+        rows = db.execute(
+            'SELECT filename, anonymous_id FROM anonymous_media_owners'
+        ).fetchall()
+    return {row['filename']: row['anonymous_id'] for row in rows}
+
+
+def expired_anonymous_media(db_path, cutoff_timestamp):
+    with connect(db_path) as db:
+        rows = db.execute(
+            '''SELECT filename FROM anonymous_media_owners
+               WHERE created_at < ?''',
+            (cutoff_timestamp,),
+        ).fetchall()
+    return [row['filename'] for row in rows]
+
+
+def delete_anonymous_media(db_path, filename):
+    with connect(db_path) as db:
+        db.execute(
+            'DELETE FROM anonymous_media_owners WHERE filename = ?',
+            (filename,),
+        )
+
+
+def transfer_anonymous_ownership(db_path, anonymous_id, user_id):
+    """登录后把当前匿名会话已有的任务和媒体转到正式账号。"""
+    timestamp = now_ts()
+    with connect(db_path) as db:
+        db.execute('BEGIN IMMEDIATE')
+        db.execute(
+            '''INSERT INTO task_owners
+               (task_id, user_id, url, media_type, created_at)
+               SELECT task_id, ?, url, media_type, created_at
+               FROM anonymous_task_owners WHERE anonymous_id = ?
+               ON CONFLICT(task_id) DO NOTHING''',
+            (user_id, anonymous_id),
+        )
+        db.execute(
+            '''INSERT INTO media_owners
+               (filename, user_id, task_id, created_at)
+               SELECT filename, ?, task_id, ?
+               FROM anonymous_media_owners WHERE anonymous_id = ?
+               ON CONFLICT(filename) DO NOTHING''',
+            (user_id, timestamp, anonymous_id),
+        )
+        db.execute(
+            'DELETE FROM anonymous_task_owners WHERE anonymous_id = ?',
+            (anonymous_id,),
+        )
+        db.execute(
+            'DELETE FROM anonymous_media_owners WHERE anonymous_id = ?',
+            (anonymous_id,),
+        )
 
 
 class UserTokenStore:

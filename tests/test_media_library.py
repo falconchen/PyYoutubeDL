@@ -139,11 +139,14 @@ def test_serving_another_users_file_is_not_found():
     assert downloaded.status_code == 404
 
 
-def test_anonymous_can_open_pages_but_not_read_media():
-    """首页与媒体库页面对匿名开放，数据接口仍需登录。"""
+def test_anonymous_can_open_pages_and_an_empty_private_library():
+    """匿名页面和媒体接口开放，但只返回当前匿名会话的资源。"""
     app_module.app.testing = True
     client = app_module.app.test_client()
 
     assert client.get('/').status_code == 200
     assert client.get('/player').status_code == 200
-    assert client.get('/api/media_list').status_code == 401
+    payload = client.get('/api/media_list').get_json()
+    assert payload['success'] is True
+    assert payload['video'] == []
+    assert payload['audio'] == []

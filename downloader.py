@@ -25,6 +25,7 @@ from config_util import (
     load_config,
 )
 from log_util import setup_logger
+import anonymous_cleanup
 
 # 加载配置
 config = load_config()
@@ -823,12 +824,23 @@ def main():
     程序主入口，监控 URLS_DIR 目录。
     """
     observer = start_monitor(config["URLS_DIR"])
+    cleanup_stop = threading.Event()
+    cleanup_thread = threading.Thread(
+        target=anonymous_cleanup.cleanup_loop,
+        args=(config, logger, cleanup_stop),
+        name='anonymous-media-cleanup',
+        daemon=True,
+    )
+    cleanup_thread.start()
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         observer.stop()
+    finally:
+        cleanup_stop.set()
     observer.join()
+    cleanup_thread.join(timeout=1)
 
 if __name__ == '__main__':
     main()
