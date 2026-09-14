@@ -776,7 +776,11 @@
                 mediaKind: item.type === 'audio' ? 'audio' : 'video',
                 // 音频会进入 zwplayer 音乐模式，它自带的 Media Session 指向
                 // 内部播放列表；关掉后由 attachMediaSession 统一接管锁屏控制。
-                music: { mediaSession: false },
+                music: {
+                    mediaSession: false,
+                    title: item.title || '',
+                    artist: item.artist || ''
+                },
                 onready: function () {
                     attachMediaElement(this.videoEl);
                 }
@@ -816,6 +820,15 @@
             try {
                 zwplayer.play(item.url);
                 if (mediaEl) mediaEl.poster = item.poster || '';
+                // play(url) 只换音源，音乐模式的封面、模糊背景、标题和作者
+                // 要另外通知 zwplayer，否则一直停留在第一首。
+                if (item.type === 'audio' && typeof zwplayer.setMusicTrack === 'function') {
+                    zwplayer.setMusicTrack({
+                        title: item.title || '',
+                        artist: item.artist || '',
+                        poster: item.poster || ''
+                    });
+                }
             } catch (error) {
                 console.error('切换媒体失败:', error);
             }

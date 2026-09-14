@@ -43,7 +43,13 @@ class TestMediaPlayback(unittest.TestCase):
         )
 
     def test_zwplayer_music_mode_does_not_own_media_session(self):
-        self.assertIn('music: { mediaSession: false },', self.script)
+        self.assertIn('mediaSession: false,', self.script)
+
+    def test_switching_audio_updates_music_mode_cover_and_title(self):
+        # play(url) 只换音源，音乐模式的封面、背景、标题需要 setMusicTrack 同步
+        self.assertIn("typeof zwplayer.setMusicTrack === 'function'", self.script)
+        self.assertIn('zwplayer.setMusicTrack({', self.script)
+        self.assertIn("poster: item.poster || ''", self.script)
 
     def test_speed_button_is_enabled_and_rate_is_remembered(self):
         self.assertIn('speedButton: true,', self.script)
