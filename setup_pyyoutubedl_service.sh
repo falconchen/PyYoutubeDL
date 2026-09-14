@@ -1,6 +1,6 @@
 #!/bin/bash
-# PyYoutubeDL systemd 服务安装脚本
-# 运行此脚本前请先 cd 到 PyYoutubeDL 项目目录
+# DropLoad systemd 服务安装脚本
+# 运行此脚本前请先 cd 到 DropLoad 项目目录
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 SERVICE_NAME="pyyoutubedl"
@@ -10,7 +10,7 @@ echo "项目目录: ${SCRIPT_DIR}"
 
 # 检查必要文件是否存在
 if [ ! -f "${SCRIPT_DIR}/runner.sh" ]; then
-    echo "错误: 未找到 runner.sh，请确保在 PyYoutubeDL 目录下运行此脚本"
+    echo "错误: 未找到 runner.sh，请确保在 DropLoad 目录下运行此脚本"
     exit 1
 fi
 
@@ -22,7 +22,7 @@ fi
 # 生成 systemd 服务文件
 cat > "${SERVICE_FILE}" <<EOF
 [Unit]
-Description=PyYoutubeDL Service
+Description=DropLoad Service
 After=network-online.target
 Wants=network-online.target
 

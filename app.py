@@ -2072,7 +2072,7 @@ def _oauth_basic_auth_check():
     return Response(
         '需要认证后才能访问授权入口，请在弹窗中输入用户名与密码。',
         status=401,
-        headers={'WWW-Authenticate': 'Basic realm="PyYoutubeDL OAuth"'},
+        headers={'WWW-Authenticate': 'Basic realm="DropLoad OAuth"'},
     )
 
 

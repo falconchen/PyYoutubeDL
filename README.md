@@ -1,4 +1,4 @@
-# PyYoutubeDL
+# DropLoad
 
 基于 yt-dlp 的 YouTube 视频/音频下载服务，提供 Web 管理界面、自动下载、WebDAV 远程上传等功能。
 
@@ -236,7 +236,7 @@ chmod 700 deploy/deploy.sh deploy/remote-deploy.sh
 如果发布后的健康检查失败，远端脚本会自动恢复发布前的 commit 并重启服务。也可以在目标 VPS 上手工回滚：
 
 ```bash
-cd /path/to/PyYoutubeDL
+cd /path/to/DropLoad
 git log --oneline -5
 git reset --hard <已确认的旧 commit>
 ./supervisor-runner.sh restart
@@ -730,7 +730,7 @@ docker compose up -d --force-recreate
 ## 文件结构
 
 ```
-PyYoutubeDL/
+DropLoad/
 ├── app.py                # Flask Web 应用
 ├── downloader.py         # 下载器（watchdog + yt-dlp）
 ├── webdav_uploader.py    # WebDAV 上传器

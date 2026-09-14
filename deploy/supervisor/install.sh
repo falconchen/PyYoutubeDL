@@ -1,5 +1,5 @@
 #!/bin/bash
-# 把 PyYoutubeDL 从 systemd 切换到 Supervisor。幂等，可重复执行。
+# 把 DropLoad 从 systemd 切换到 Supervisor。幂等，可重复执行。
 #
 #   ./deploy/supervisor/install.sh --dry-run          只打印将要执行的命令
 #   ./deploy/supervisor/install.sh --render-only PATH 只渲染 conf 到指定路径

@@ -29,5 +29,5 @@
     <path d="M50-112v210a83 83 0 1 1-44-73v-199l182-40v111L50-63" fill="#fff"/>
   </g>
   <text x="800" y="790" fill="#fff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="54" font-weight="700" text-anchor="middle" letter-spacing="4">AUDIO PLAYER</text>
-  <text x="800" y="842" fill="#cbd5e1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="25" text-anchor="middle" letter-spacing="2">PyYoutubeDL</text>
+  <text x="800" y="842" fill="#cbd5e1" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="25" text-anchor="middle" letter-spacing="2">DropLoad</text>
 </svg>

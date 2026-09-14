@@ -9,10 +9,10 @@ import stop
 
 class TestCommandTargetsProject(unittest.TestCase):
     def setUp(self):
-        self.base_dir = os.path.realpath('/srv/PyYoutubeDL')
+        self.base_dir = os.path.realpath('/srv/DropLoad')
 
     def test_matches_absolute_project_script(self):
-        cmdline = ['python', '/srv/PyYoutubeDL/downloader.py']
+        cmdline = ['python', '/srv/DropLoad/downloader.py']
         self.assertTrue(stop.command_targets_project(cmdline, '/', self.base_dir))
 
     def test_matches_relative_project_script(self):
@@ -22,7 +22,7 @@ class TestCommandTargetsProject(unittest.TestCase):
         )
 
     def test_matches_playlist_monitor_script(self):
-        cmdline = ['python', '/srv/PyYoutubeDL/playlist_monitor.py']
+        cmdline = ['python', '/srv/DropLoad/playlist_monitor.py']
         self.assertTrue(stop.command_targets_project(cmdline, '/', self.base_dir))
 
     def test_rejects_same_script_name_in_another_project(self):
@@ -40,7 +40,7 @@ class TestCommandTargetsProject(unittest.TestCase):
             'python',
             '-c',
             'print("test")',
-            '/srv/PyYoutubeDL/downloader.py',
+            '/srv/DropLoad/downloader.py',
         ]
         self.assertFalse(
             stop.command_targets_project(cmdline, self.base_dir, self.base_dir)
@@ -141,7 +141,7 @@ class TestTerminateProcesses(unittest.TestCase):
     @patch('stop.psutil.wait_procs')
     def test_force_kills_process_that_ignores_terminate(self, wait_procs):
         proc = Mock(pid=123)
-        proc.cmdline.return_value = ['python', '/srv/PyYoutubeDL/downloader.py']
+        proc.cmdline.return_value = ['python', '/srv/DropLoad/downloader.py']
         wait_procs.side_effect = [([], [proc]), ([proc], [])]
 
         errors = stop.terminate_processes([proc], timeout=0)
@@ -152,7 +152,7 @@ class TestTerminateProcesses(unittest.TestCase):
 
     def test_reports_access_denied(self):
         proc = Mock(pid=456)
-        proc.cmdline.return_value = ['python', '/srv/PyYoutubeDL/app.py']
+        proc.cmdline.return_value = ['python', '/srv/DropLoad/app.py']
         proc.terminate.side_effect = psutil.AccessDenied(pid=proc.pid)
 
         errors = stop.terminate_processes([proc], timeout=0)

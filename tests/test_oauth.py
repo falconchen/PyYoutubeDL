@@ -290,7 +290,7 @@ class TestOAuthStartBasicAuth(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(
             response.headers['WWW-Authenticate'],
-            'Basic realm="PyYoutubeDL OAuth"',
+            'Basic realm="DropLoad OAuth"',
         )
         build_flow.assert_not_called()
 
