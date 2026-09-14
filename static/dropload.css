@@ -864,6 +864,15 @@
     color: #d18a00;
 }
 
+.dl-task[data-state="paused"] .dl-task-icon {
+    background: #eef2f7;
+    color: #65748a;
+}
+
+.dl-task[data-state="paused"] .dl-task-progress-fill {
+    background: #9aa8ba;
+}
+
 .dl-task[data-state="failed"] .dl-task-icon,
 .dl-task[data-state="missing"] .dl-task-icon {
     background: #fdecec;
@@ -1208,6 +1217,118 @@
     border-bottom: 1px solid #edf1f5;
     font-size: 12px;
     color: #8794a7;
+}
+
+/* 任务操作：暂停、继续、重启、删除 */
+
+.dl-drawer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 20px;
+    border-bottom: 1px solid #edf1f5;
+}
+
+.dl-drawer-actions[hidden],
+.dl-drawer-confirm[hidden],
+.dl-drawer-confirm-files[hidden],
+.dl-drawer-action-message[hidden],
+.dl-task-btn[hidden] {
+    display: none;
+}
+
+.dl-task-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border: 1px solid #dce4ef;
+    border-radius: 8px;
+    background: #fff;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    color: #445269;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.dl-task-btn .dl-icon {
+    width: 14px;
+    height: 14px;
+}
+
+.dl-task-btn:hover:not(:disabled) {
+    border-color: #1769e0;
+    color: #1769e0;
+}
+
+.dl-task-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.dl-task-btn-danger {
+    margin-left: auto;
+    color: #d0453f;
+}
+
+.dl-task-btn-danger:hover:not(:disabled) {
+    border-color: #d0453f;
+    color: #d0453f;
+}
+
+.dl-task-btn-danger-solid {
+    border-color: #d0453f;
+    background: #d0453f;
+    color: #fff;
+}
+
+.dl-task-btn-danger-solid:hover:not(:disabled) {
+    border-color: #b53a35;
+    background: #b53a35;
+    color: #fff;
+}
+
+.dl-drawer-confirm {
+    padding: 14px 20px;
+    border-bottom: 1px solid #edf1f5;
+    background: #fdf6f5;
+}
+
+.dl-drawer-confirm-text {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: #445269;
+}
+
+.dl-drawer-confirm-files {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: #172033;
+    cursor: pointer;
+}
+
+.dl-drawer-confirm-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.dl-drawer-action-message {
+    margin: 0;
+    padding: 10px 20px;
+    border-bottom: 1px solid #edf1f5;
+    font-size: 12px;
+    color: #65748a;
+}
+
+.dl-drawer-action-message.is-error {
+    background: #fdf0ef;
+    color: #b4322c;
 }
 
 .dl-drawer-status {

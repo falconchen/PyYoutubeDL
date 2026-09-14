@@ -26,6 +26,7 @@
         downloading: '处理中...',
         completed: '已完成',
         failed: '下载失败',
+        paused: '已暂停',
         missing: '未找到'
     };
     var STAGE_LABELS = {
@@ -43,9 +44,22 @@
         postprocessing: '处理文件',
         completed: '下载完成',
         failed: '下载失败',
+        paused: '已暂停',
         missing: '未找到'
     };
     var ACTIVE_STATES = ['queued', 'downloading'];
+    // 与 app.py 的 TASK_ACTION_STATES 对应：每种状态下可用的操作
+    var TASK_ACTIONS_BY_STATE = {
+        queued: ['pause', 'delete'],
+        downloading: ['pause', 'restart', 'delete'],
+        paused: ['resume', 'restart', 'delete'],
+        failed: ['restart', 'delete'],
+        completed: ['delete']
+    };
+    var PENDING_ACTION_LABELS = {
+        pause: '正在暂停…',
+        restart: '正在重启…'
+    };
 
     var form = document.querySelector('.dl-form');
     var urlInput = document.querySelector('.dl-input');
@@ -75,6 +89,12 @@
     var drawerUrlText = document.querySelector('.dl-drawer-url-text');
     var drawerCopy = document.querySelector('.dl-drawer-copy');
     var drawerSummary = document.querySelector('.dl-drawer-summary');
+    var drawerActions = document.querySelector('.dl-drawer-actions');
+    var drawerConfirm = document.querySelector('.dl-drawer-confirm');
+    var drawerConfirmText = document.querySelector('.dl-drawer-confirm-text');
+    var drawerConfirmFiles = document.querySelector('.dl-drawer-confirm-files');
+    var drawerConfirmCheckbox = document.querySelector('.dl-drawer-confirm-checkbox');
+    var drawerActionMessage = document.querySelector('.dl-drawer-action-message');
     var modeLinks = Array.prototype.slice.call(document.querySelectorAll('.dl-mode'));
     var panels = {
         download: document.querySelector('[data-panel="download"]'),
@@ -101,6 +121,9 @@
     /** 视频元数据缓存，按源 URL 索引，避免重复调用较慢的解析接口。 */
     var metadata = Object.create(null);
     var openTaskId = null;
+    /** 已交给下载器、尚未生效的暂停/重启请求，按任务 ID 索引。 */
+    var pendingActions = Object.create(null);
+    var actionBusy = false;
     /** 媒体库：按类型缓存的列表、当前标签与正在播放项。 */
     var mediaLibrary = null;
     var libraryTab = 'video';
@@ -176,6 +199,7 @@
     function stateIcon(state) {
         if (state === 'completed') return '#i-check';
         if (state === 'downloading') return '#i-clock';
+        if (state === 'paused') return '#i-pause';
         if (state === 'failed' || state === 'missing') return '#i-alert';
         return '#i-download';
     }
@@ -207,6 +231,15 @@
         if (!info) return STATE_LABELS.queued;
         var state = info.state || 'missing';
         var progress = info.progress || {};
+        if (state === 'downloading' && PENDING_ACTION_LABELS[pendingActions[taskId]]) {
+            return PENDING_ACTION_LABELS[pendingActions[taskId]];
+        }
+        if (state === 'paused') {
+            var pausedAt = Number(progress.percent) || 0;
+            return pausedAt > 0
+                ? STATE_LABELS.paused + ' ' + pausedAt.toFixed(pausedAt % 1 === 0 ? 0 : 1) + '%'
+                : STATE_LABELS.paused;
+        }
         if (state === 'downloading') {
             var percent = Number(progress.percent) || 0;
             var stage = STAGE_LABELS[progress.stage] || STATE_LABELS.downloading;
@@ -368,6 +401,7 @@
                     return;
                 }
                 taskInfo[info.task] = info;
+                if (info.state !== 'downloading') delete pendingActions[info.task];
                 var stored = tasks.find(function (task) {
                     return task.id === info.task;
                 });
@@ -539,7 +573,112 @@
             : '';
         drawerSummary.textContent = summary;
         drawerSummary.hidden = !summary;
+        renderDrawerActions(info);
     }
+
+    function renderDrawerActions(info) {
+        var state = info && info.state;
+        var allowed = TASK_ACTIONS_BY_STATE[state] || [];
+        var pending = Boolean(pendingActions[openTaskId]);
+        Array.prototype.forEach.call(drawerActions.querySelectorAll('[data-action]'), function (button) {
+            button.hidden = allowed.indexOf(button.dataset.action) === -1;
+            // 请求已交给下载器时，除删除外暂不允许重复操作
+            button.disabled = actionBusy || (pending && button.dataset.action !== 'delete');
+        });
+        drawerActions.hidden = !allowed.length || !drawerConfirm.hidden;
+    }
+
+    function showActionMessage(text, isError) {
+        drawerActionMessage.textContent = text || '';
+        drawerActionMessage.hidden = !text;
+        drawerActionMessage.classList.toggle('is-error', Boolean(isError));
+    }
+
+    function hideDeleteConfirm() {
+        drawerConfirm.hidden = true;
+        drawerConfirmCheckbox.checked = false;
+        renderDrawerActions(taskInfo[openTaskId]);
+    }
+
+    function showDeleteConfirm() {
+        var info = taskInfo[openTaskId];
+        var completed = info && info.state === 'completed';
+        drawerConfirmText.textContent = completed
+            ? '删除后任务将从列表中移除。'
+            : '删除后任务将停止，未完成的临时文件会一并清除。';
+        // 只有已完成的任务才有「已下载的文件」可选，默认保留
+        drawerConfirmFiles.hidden = !completed;
+        drawerConfirmCheckbox.checked = false;
+        drawerConfirm.hidden = false;
+        drawerActions.hidden = true;
+        showActionMessage('');
+    }
+
+    async function runTaskAction(taskId, action, deleteFiles) {
+        actionBusy = true;
+        renderDrawerActions(taskInfo[taskId]);
+        showActionMessage('');
+        try {
+            var response = await fetch('/api/task_action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task: taskId, action: action, delete_files: Boolean(deleteFiles) })
+            });
+            var data = {};
+            try {
+                data = await response.json();
+            } catch (error) {
+                data = {};
+            }
+            if (!response.ok || !data.success) {
+                if (openTaskId === taskId) showActionMessage(data.msg || '操作失败，请稍后重试', true);
+                pollTasks();
+                return;
+            }
+            if (action === 'delete') {
+                // 正在下载的任务由下载器异步清理，但归属已解除，列表里立即移除
+                removeTask(taskId);
+                if (openTaskId === taskId) closeDrawer();
+                render();
+                return;
+            }
+            if (response.status === 202) {
+                pendingActions[taskId] = action;
+            } else if (taskInfo[taskId] && data.state) {
+                taskInfo[taskId].state = data.state;
+            }
+            render();
+            pollTasks();
+            if (openTaskId === taskId) pollLog();
+        } catch (error) {
+            if (openTaskId === taskId) showActionMessage('网络异常，操作未完成', true);
+        } finally {
+            actionBusy = false;
+            if (openTaskId === taskId) renderDrawerActions(taskInfo[taskId]);
+        }
+    }
+
+    drawerActions.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-action]');
+        if (!button || button.disabled || !openTaskId) return;
+        if (button.dataset.action === 'delete') {
+            showDeleteConfirm();
+            return;
+        }
+        runTaskAction(openTaskId, button.dataset.action, false);
+    });
+
+    drawerConfirm.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-confirm]');
+        if (!button || !openTaskId) return;
+        if (button.dataset.confirm === 'cancel') {
+            hideDeleteConfirm();
+            return;
+        }
+        var deleteFiles = !drawerConfirmFiles.hidden && drawerConfirmCheckbox.checked;
+        drawerConfirm.hidden = true;
+        runTaskAction(openTaskId, 'delete', deleteFiles);
+    });
 
     function renderLog(text) {
         var lines = String(text || '').split('\n').filter(function (line) {
@@ -594,6 +733,8 @@
         openTaskId = taskId;
         lastFocused = document.activeElement;
         overlay.hidden = false;
+        drawerConfirm.hidden = true;
+        showActionMessage('');
         resetMetadataView();
         renderDrawerMeta();
 
