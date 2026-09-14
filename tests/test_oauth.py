@@ -1,5 +1,3 @@
-import base64
-import hashlib
 import json
 import unittest
 from unittest.mock import MagicMock, patch
@@ -17,18 +15,6 @@ class TestOAuthRoutes(unittest.TestCase):
     def setUp(self):
         self.client = app.test_client()
         app.testing = True
-        # /oauth/start 的 Basic Auth 依赖 config.json 实际配置；测试里禁用，
-        # 使路由行为不随本机 config.json 的凭据变化。Basic Auth 行为由
-        # TestOAuthStartBasicAuth 单独覆盖。
-        patch.dict(
-            app_module.config,
-            {
-                'OAUTH_AUTH_USERNAME': '',
-                'OAUTH_AUTH_PASSWORD_SHA256': '',
-                'ENABLE_OAUTH_BASIC_AUTH': False,
-            },
-        ).start()
-        self.addCleanup(patch.stopall)
 
     @patch('youtube_auth.build_oauth_flow')
     def test_oauth_start_redirects_to_google(self, build_flow):
@@ -257,115 +243,55 @@ class TestOAuthRoutes(unittest.TestCase):
         flow.fetch_token.assert_not_called()
 
 
-class TestOAuthStartBasicAuth(unittest.TestCase):
-    """/oauth/start 的 Python 原生 Basic Auth 校验（配置启用时）。"""
+class TestOAuthStartAccessControl(unittest.TestCase):
+    """多用户后 /oauth/start 不再有应用内 Basic Auth，访问控制交给账号体系。"""
 
-    USERNAME = 'test-user'
-    PASSWORD = 'test-pass'
-    PASSWORD_SHA256 = hashlib.sha256(PASSWORD.encode('utf-8')).hexdigest()
+    GOOGLE_CONFIG = {
+        'GOOGLE_OAUTH_CLIENT_ID': 'cid',
+        'GOOGLE_OAUTH_CLIENT_SECRET': 'secret',
+        'GOOGLE_OAUTH_REDIRECT_URI': 'https://example.com/oauth/callback',
+    }
 
     def setUp(self):
         self.client = app.test_client()
         app.testing = True
-        patch.dict(
-            app_module.config,
-            {
-                'OAUTH_AUTH_USERNAME': self.USERNAME,
-                'OAUTH_AUTH_PASSWORD_SHA256': self.PASSWORD_SHA256,
-                'ENABLE_OAUTH_BASIC_AUTH': True,
-            },
-        ).start()
-        self.addCleanup(patch.stopall)
+        patcher = patch.dict(app_module.config, self.GOOGLE_CONFIG)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
-    def _auth_header(self, username, password):
-        token = base64.b64encode(
-            f'{username}:{password}'.encode('utf-8')
-        ).decode('ascii')
-        return {'Authorization': f'Basic {token}'}
+    @staticmethod
+    def _flow():
+        flow = MagicMock()
+        flow.code_verifier = 'test-verifier'
+        flow.authorization_url.return_value = (
+            'https://accounts.google.com/o/oauth2/auth?client_id=cid',
+            'fixed_state',
+        )
+        return flow
 
     @patch('youtube_auth.build_oauth_flow')
-    def test_oauth_start_requires_credentials(self, build_flow):
-        response = self.client.get('/oauth/start')
+    def test_legacy_basic_auth_settings_no_longer_challenge(self, build_flow):
+        build_flow.return_value = self._flow()
 
-        self.assertEqual(response.status_code, 401)
-        self.assertEqual(
-            response.headers['WWW-Authenticate'],
-            'Basic realm="DropLoad OAuth"',
-        )
+        # 旧 config.json 可能仍保留这几项，它们不应再触发认证弹窗
+        with patch.dict(app_module.config, {
+            'ENABLE_OAUTH_BASIC_AUTH': True,
+            'OAUTH_AUTH_USERNAME': 'someone',
+            'OAUTH_AUTH_PASSWORD_SHA256': 'a' * 64,
+        }):
+            response = self.client.get('/oauth/start?intent=login')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn('WWW-Authenticate', response.headers)
+        self.assertIn('accounts.google.com', response.headers['Location'])
+
+    @patch('youtube_auth.build_oauth_flow')
+    def test_bind_requires_signed_in_user(self, build_flow):
+        response = self.client.get('/oauth/start?intent=bind')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/login', response.headers['Location'])
         build_flow.assert_not_called()
-
-    @patch('youtube_auth.build_oauth_flow')
-    def test_oauth_start_rejects_wrong_password(self, build_flow):
-        response = self.client.get(
-            '/oauth/start',
-            headers=self._auth_header(self.USERNAME, 'wrong-pass'),
-        )
-
-        self.assertEqual(response.status_code, 401)
-        build_flow.assert_not_called()
-
-    @patch('youtube_auth.build_oauth_flow')
-    def test_oauth_start_accepts_valid_credentials(self, build_flow):
-        flow = MagicMock()
-        flow.code_verifier = 'test-verifier'
-        flow.authorization_url.return_value = (
-            'https://accounts.google.com/o/oauth2/auth?client_id=x',
-            'fixed_state',
-        )
-        build_flow.return_value = flow
-
-        response = self.client.get(
-            '/oauth/start',
-            headers=self._auth_header(self.USERNAME, self.PASSWORD),
-        )
-
-        self.assertEqual(response.status_code, 302)
-        build_flow.assert_called_once()
-        with self.client.session_transaction() as sess:
-            self.assertEqual(sess['oauth_code_verifier'], 'test-verifier')
-
-    @patch('youtube_auth.build_oauth_flow')
-    def test_oauth_start_passes_through_when_unconfigured(self, build_flow):
-        """OAUTH_AUTH_* 未配置时不应要求认证（向后兼容）。"""
-        flow = MagicMock()
-        flow.code_verifier = 'test-verifier'
-        flow.authorization_url.return_value = (
-            'https://accounts.google.com/o/oauth2/auth?client_id=x',
-            'fixed_state',
-        )
-        build_flow.return_value = flow
-
-        with patch.dict(
-            app_module.config,
-            {
-                'OAUTH_AUTH_USERNAME': '',
-                'OAUTH_AUTH_PASSWORD_SHA256': '',
-                'ENABLE_OAUTH_BASIC_AUTH': True,
-            },
-        ):
-            response = self.client.get('/oauth/start')
-
-        self.assertEqual(response.status_code, 302)
-
-    @patch('youtube_auth.build_oauth_flow')
-    def test_oauth_start_disabled_when_flag_false(self, build_flow):
-        """开关关闭时（如反代层已有整站 Basic Auth），即使配了凭据也不要求认证。"""
-        flow = MagicMock()
-        flow.code_verifier = 'test-verifier'
-        flow.authorization_url.return_value = (
-            'https://accounts.google.com/o/oauth2/auth?client_id=x',
-            'fixed_state',
-        )
-        build_flow.return_value = flow
-
-        with patch.dict(
-            app_module.config,
-            {'ENABLE_OAUTH_BASIC_AUTH': False},
-        ):
-            response = self.client.get('/oauth/start')
-
-        self.assertEqual(response.status_code, 302)
-        build_flow.assert_called_once()
 
 
 if __name__ == '__main__':

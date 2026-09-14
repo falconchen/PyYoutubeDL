@@ -2041,41 +2041,6 @@ def privacy():
     return render_template('privacy.html')
 
 
-def _oauth_basic_auth_check():
-    """/oauth/start 的 Basic Auth 校验（Python 原生实现，不依赖服务器配置）。
-
-    仅在 ENABLE_OAUTH_BASIC_AUTH 为 true 且 OAUTH_AUTH_USERNAME 与
-    OAUTH_AUTH_PASSWORD_SHA256（密码的 sha256 十六进制哈希）均配置时启用。
-    默认关闭：若站点已在反向代理层（openresty/nginx 等）配置整站 Basic Auth，
-    保持关闭以避免双重弹窗。未启用时放行；校验失败返回 401 响应（浏览器弹出
-    认证框），通过返回 None。
-    """
-    if not config.get('ENABLE_OAUTH_BASIC_AUTH', False):
-        return None
-
-    username = config.get('OAUTH_AUTH_USERNAME', '')
-    password_sha256 = config.get('OAUTH_AUTH_PASSWORD_SHA256', '')
-    if not username or not password_sha256:
-        return None
-
-    auth = request.authorization
-    if (
-        auth is not None
-        and hmac.compare_digest(auth.username, username)
-        and hmac.compare_digest(
-            hashlib.sha256(auth.password.encode('utf-8')).hexdigest(),
-            password_sha256,
-        )
-    ):
-        return None
-
-    return Response(
-        '需要认证后才能访问授权入口，请在弹窗中输入用户名与密码。',
-        status=401,
-        headers={'WWW-Authenticate': 'Basic realm="DropLoad OAuth"'},
-    )
-
-
 def adopt_legacy_data(user_id):
     """把单用户时代的遗留数据归到首个管理员名下。
 
@@ -2251,10 +2216,6 @@ def oauth_start():
     intent=bind   申请 YouTube 与 Drive scope，需要先登录，用于把 Google
                   账号绑定到当前用户，供播放列表监控和后续的 Drive 上传使用。
     """
-    auth_error = _oauth_basic_auth_check()
-    if auth_error is not None:
-        return auth_error
-
     if not google_oauth_configured():
         return oauth_result(False, 'Google OAuth 未配置，请联系管理员。', 503)
 
