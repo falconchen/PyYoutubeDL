@@ -42,6 +42,7 @@ new ZWPlayer({ playerElm: mount, url, poster, fluid: true, autoplay, speedButton
 - **倍速**：标准模式下 zwplayer 默认不显示倍速按钮，需显式 `speedButton: true`，档位为 0.25x–2.0x（旧版的 3x 不提供）。选择写入 `localStorage['dropload:playback-rate']`；换源时 zwplayer 会把菜单复位成 1x、浏览器也会重置 `playbackRate`，所以在 `loadedmetadata` 重新应用，并在 `canplay`／`play` 时调用 `_syncSpeedBtnUI` 对齐菜单文字（该方法属 zwplayer 内部，升级时需复查）。
 - **进度**：`localStorage['dropload:playback-progress:<filename>']`，`timeupdate` 每 5 秒、`pause`、换源前、`pagehide`、页面隐藏时保存，`loadedmetadata` 时恢复；距结尾不足 3 秒视为播完并清除。换源途中（新条目元数据未载入）不写入，避免把上一条的位置记到新条目上。
 - **自动下一个**：`ended` 后按正在播放条目所属类型的列表顺序播下一条，末尾停止不循环；用户切到另一个标签不影响。
+- **链接自动播放**：通过 `file` 参数定位到条目（任务完成后的「播放」链接、分享的地址）时自动开播；不带参数或文件不存在时只选中第一条、不播放。浏览器通常会拦截没有点击的有声自动播放，此时 zwplayer 改为静音播放，所以配置为 `disableMutedConfirm: false`，保留「因浏览器限制，已静音播放，请点击打开声音」提示（手机上为「点击开启声音」）；设为 `true` 会静音播放且毫无提示。
 - **地址栏**：用户切换、自动下一个、锁屏切换时用 `replaceState` 改成 `/player?file=<filename>`，与任务完成后的直达链接同一格式；首次载入和深链定位不改地址。
 - **锁屏控制**：音频会触发 zwplayer 音乐模式，它自带的 Media Session 指向内部播放列表，因此用 `music: { mediaSession: false }` 关掉，由我们统一注册 `play`／`pause`／快退快进／`seekto`／上一条／下一条，并设置标题、作者、封面和进度；播放时尝试 `navigator.audioSession.type = 'playback'`。
 - **iOS 限制**：zwplayer 对音频也使用 `<video>` 元素，iOS 切后台或锁屏时系统可能暂停播放，需以真机测试为准。

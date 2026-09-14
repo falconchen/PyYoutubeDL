@@ -27,6 +27,14 @@ class TestMediaPlayback(unittest.TestCase):
         self.assertIn('playerType = item.type;', self.script)
         self.assertIn('if (!element || element === mediaEl) return;', self.script)
 
+    def test_file_link_autoplays_with_unmute_prompt_fallback(self):
+        # 只有通过 file 参数定位到条目时才自动播放
+        self.assertIn('var openedByLink = Boolean(target);', self.script)
+        self.assertIn('if (target) playMedia(target, { autoplay: openedByLink });', self.script)
+        # 被浏览器拦截时 zwplayer 改为静音播放，必须保留「点击打开声音」提示
+        self.assertIn('disableMutedConfirm: false,', self.script)
+        self.assertNotIn('disableMutedConfirm: true', self.script)
+
     def test_location_follows_the_current_item(self):
         self.assertIn('if (autoplay) updateLocationForMedia(item);', self.script)
         self.assertIn(

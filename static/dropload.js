@@ -768,7 +768,9 @@
                 poster: item.poster || '',
                 fluid: true,
                 autoplay: autoplay,
-                disableMutedConfirm: true,
+                // 打开带 file 参数的链接会自动播放；浏览器拦截有声自动播放时，
+                // zwplayer 会改为静音播放，保留提示才能让用户一点就开声音。
+                disableMutedConfirm: false,
                 // 标准模式下倍速按钮默认不显示，需显式打开。
                 speedButton: true,
                 mediaKind: item.type === 'audio' ? 'audio' : 'video',
@@ -1205,12 +1207,14 @@
     function selectInitialMedia(preferredFile) {
         // 任务完成后的直达链接优先，其次才是当前标签的第一条。
         var target = findMedia(preferredFile);
+        // 通过 file 参数点进来说明就是想看这一条，直接开播；否则只选中不播放。
+        var openedByLink = Boolean(target);
         if (!target) {
             var items = mediaLibrary[libraryTab] || [];
             target = items[0] || null;
         }
         renderPlaylist();
-        if (target) playMedia(target);
+        if (target) playMedia(target, { autoplay: openedByLink });
         else renderNowPlaying(null);
     }
 
