@@ -51,6 +51,14 @@ class TestMediaPlayback(unittest.TestCase):
         self.assertIn('zwplayer.setMusicTrack({', self.script)
         self.assertIn("poster: item.poster || ''", self.script)
 
+    def test_playlist_uses_cover_images_with_a_default_fallback(self):
+        self.assertIn('function createPlaylistCover(item)', self.script)
+        self.assertIn("image.className = 'dl-playlist-item-cover';", self.script)
+        self.assertIn("image.alt = '';", self.script)
+        self.assertIn("image.addEventListener('error'", self.script)
+        self.assertIn("'/static/images/media-cover-default.svg'", self.script)
+        self.assertNotIn("iconWrap.className = 'dl-playlist-item-icon';", self.script)
+
     def test_speed_button_is_enabled_and_rate_is_remembered(self):
         self.assertIn('speedButton: true,', self.script)
         self.assertIn("var PLAYBACK_RATE_KEY = 'dropload:playback-rate';", self.script)

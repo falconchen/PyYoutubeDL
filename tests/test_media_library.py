@@ -75,6 +75,10 @@ def test_media_list_splits_video_and_audio():
         assert item['url'].startswith('/files/')
         assert item['download_url'].startswith('/downloads/')
         assert item['title']
+        assert item['thumbnail_candidates']
+        assert item['thumbnail_candidates'][-1].endswith(
+            '/static/images/media-cover-default.svg'
+        )
 
 
 def test_media_list_applies_exclude_keywords():

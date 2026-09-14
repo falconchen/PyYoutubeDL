@@ -1127,6 +1127,29 @@
         nowDownload.hidden = false;
     }
 
+    function createPlaylistCover(item) {
+        var image = document.createElement('img');
+        var candidates = Array.isArray(item.thumbnail_candidates)
+            ? item.thumbnail_candidates.filter(Boolean)
+            : [];
+        var candidateIndex = 0;
+        image.className = 'dl-playlist-item-cover';
+        image.alt = '';
+        image.setAttribute('aria-hidden', 'true');
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        image.src = candidates[0] || '/static/images/media-cover-default.svg';
+        image.addEventListener('error', function () {
+            candidateIndex += 1;
+            if (candidateIndex < candidates.length) {
+                image.src = candidates[candidateIndex];
+            } else if (!image.src.endsWith('/static/images/media-cover-default.svg')) {
+                image.src = '/static/images/media-cover-default.svg';
+            }
+        });
+        return image;
+    }
+
     function renderPlaylist() {
         if (!mediaLibrary) return;
         var items = mediaLibrary[libraryTab] || [];
@@ -1151,9 +1174,7 @@
                 String(Boolean(currentMedia) && currentMedia.filename === item.filename)
             );
 
-            var iconWrap = document.createElement('span');
-            iconWrap.className = 'dl-playlist-item-icon';
-            iconWrap.appendChild(icon(item.type === 'audio' ? '#i-music' : '#i-video'));
+            var cover = createPlaylistCover(item);
 
             var body = document.createElement('div');
             body.className = 'dl-playlist-item-body';
@@ -1166,7 +1187,7 @@
             meta.textContent = mediaMetaLine(item);
             body.append(title, meta);
 
-            button.append(iconWrap, body);
+            button.append(cover, body);
             if (currentMedia && currentMedia.filename === item.filename) {
                 button.appendChild(icon('#i-play', 'dl-playlist-item-playing'));
             }

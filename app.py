@@ -2484,6 +2484,15 @@ def build_media_library_items(owner=None):
             'static',
             filename='images/audio-cover-default.svg',
         )
+    default_library_cover_url = url_for(
+        'static',
+        filename='images/media-cover-default.svg',
+    )
+
+    def library_cover_candidates(metadata):
+        candidates = list(metadata.get('cover_candidates') or [])
+        candidates.append(default_library_cover_url)
+        return list(dict.fromkeys(filter(None, candidates)))
 
     def base_item(filename, media_type):
         duration, height = get_media_dimensions(filename)
@@ -2506,18 +2515,21 @@ def build_media_library_items(owner=None):
     videos = []
     for filename in video_files:
         metadata = get_video_metadata(filename)
+        cover_candidates = library_cover_candidates(metadata)
         item = base_item(filename, 'video')
         item.update({
             'title': media_display_title(metadata.get('title'), filename),
             'artist': metadata.get('artist', ''),
             'source_url': metadata.get('source_url', ''),
             'poster': next(iter(metadata.get('cover_candidates') or []), ''),
+            'thumbnail_candidates': cover_candidates,
         })
         videos.append(item)
 
     audios = []
     for filename in audio_files:
         metadata = get_audio_metadata(filename, fallback_cover_url)
+        cover_candidates = library_cover_candidates(metadata)
         item = base_item(filename, 'audio')
         item.update({
             'title': media_display_title(
@@ -2527,6 +2539,7 @@ def build_media_library_items(owner=None):
             'artist': metadata.get('artist', ''),
             'source_url': metadata.get('source_url', ''),
             'poster': next(iter(metadata.get('cover_candidates') or []), ''),
+            'thumbnail_candidates': cover_candidates,
         })
         audios.append(item)
 

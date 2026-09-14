@@ -471,26 +471,14 @@
     background: #eef5ff;
 }
 
-.dl-playlist-item-icon {
-    display: flex;
+.dl-playlist-item-cover {
+    display: block;
     flex: none;
-    align-items: center;
-    justify-content: center;
     width: 40px;
     height: 40px;
     border-radius: 10px;
-    background: #e7efff;
-    color: #1769e0;
-}
-
-.dl-playlist-item[data-type="audio"] .dl-playlist-item-icon {
-    background: #f0ebff;
-    color: #7855c9;
-}
-
-.dl-playlist-item-icon .dl-icon {
-    width: 18px;
-    height: 18px;
+    background: #e7edf5;
+    object-fit: cover;
 }
 
 .dl-playlist-item-body {
