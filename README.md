@@ -516,6 +516,7 @@ video (2).mp4
 | `EXTENSION_LOG_TOKEN` | string | Chrome 扩展读取 `downloader.log` 的访问令牌；为空时禁用日志接口 |
 | `USER_DB_PATH` | string | 用户、身份绑定与 Google 令牌数据库，默认 `./data/users.sqlite3` |
 | `REGISTRATION_OPEN` | bool | 是否允许自助注册，默认 `true`；首个管理员账号不受限制 |
+| `REDIRECT_LOCALHOST_TO_LOOPBACK` | bool | 默认 `false`。本机开发时开启，把 `localhost:端口` 的请求重定向到 `127.0.0.1:端口`（GET/HEAD 用 301，其余用 308 保留请求方法），避免两个主机名 cookie 不共享导致 OAuth 回调丢失会话。线上保持关闭：反向代理若以 `localhost` 作为 Host 转发，开启后会把访问者跳到他们自己电脑的 127.0.0.1 |
 | `ANONYMOUS_DAILY_TASK_LIMIT` | int | 同一客户端 IP 每个自然日可创建的匿名任务数，默认 3 |
 | `ANONYMOUS_FILES_EXPIRE_HOURS` | number | 匿名媒体从登记完成起的本地保留小时数，默认 24 |
 | `TRUSTED_PROXY_COUNT` | int | 可信反向代理层数，默认 0；单层 Nginx 通常设为 1，错误配置可能导致所有访客共用代理 IP 或信任伪造来源 IP |

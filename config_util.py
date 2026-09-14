@@ -32,6 +32,7 @@ DEFAULT_CONFIG = {
     "AI_SUMMARY_DB_PATH": "./data/ai_summaries.sqlite3", # AI 总结持久化数据库
     "USER_DB_PATH": "./data/users.sqlite3",  # 用户、身份与 Google 令牌数据库
     "REGISTRATION_OPEN": True,       # 是否允许自助注册；关闭后仅管理员可创建账号
+    "REDIRECT_LOCALHOST_TO_LOOPBACK": False,  # 本机开发时把 localhost:端口 301 到 127.0.0.1:端口
     "ANONYMOUS_DAILY_TASK_LIMIT": 3, # 同一 IP 每个自然日可创建的匿名下载任务数
     "ANONYMOUS_FILES_EXPIRE_HOURS": 24, # 匿名媒体本地保留小时数
     "TRUSTED_PROXY_COUNT": 0,        # 可信反向代理层数；用于安全解析客户端 IP

@@ -9,7 +9,7 @@ import re
 import subprocess
 import sys
 from functools import lru_cache, wraps
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse, urlsplit, urlunsplit
 import hashlib
 import hmac
 from werkzeug.utils import safe_join
@@ -288,6 +288,27 @@ def safe_next_url(candidate):
     if parsed.scheme or parsed.netloc or not candidate.startswith('/'):
         return url_for('index')
     return candidate
+
+
+@app.before_request
+def redirect_localhost_to_loopback():
+    """本机开发时把 localhost:端口 统一跳到 127.0.0.1:端口。
+
+    浏览器把 localhost 与 127.0.0.1 当作两个站点，cookie 不共享；OAuth
+    回调配置为 127.0.0.1 时，在 localhost 上登录会丢失会话。只在
+    REDIRECT_LOCALHOST_TO_LOOPBACK 开启时生效：反向代理若以 localhost
+    作为 Host 转发，默认开启会把线上访问者跳到他们自己电脑的 127.0.0.1。
+    """
+    if not config.get('REDIRECT_LOCALHOST_TO_LOOPBACK', False):
+        return None
+    hostname, _, port = request.host.partition(':')
+    if hostname.lower() != 'localhost':
+        return None
+    netloc = '127.0.0.1' + (f':{port}' if port else '')
+    target = urlunsplit(urlsplit(request.url)._replace(netloc=netloc))
+    # 301 会让浏览器把 POST 改成 GET 并丢掉请求体，非 GET/HEAD 用 308 保留方法。
+    status = 301 if request.method in ('GET', 'HEAD') else 308
+    return redirect(target, code=status)
 
 
 @app.route('/healthz', methods=['GET'])

@@ -74,6 +74,10 @@
   // 是否允许自助注册。首个账号不受此开关限制（它会成为管理员），
   // 其余注册者一律进入待审批，需管理员在 /admin 放行
   "REGISTRATION_OPEN": true,
+  // 本机开发时把 localhost:端口 重定向到 127.0.0.1:端口，避免两个主机名的 cookie 不共享、
+  // OAuth 回调丢失会话。线上保持 false：反向代理若以 localhost 作为 Host 转发，
+  // 开启后会把访问者跳到他们自己电脑的 127.0.0.1。
+  "REDIRECT_LOCALHOST_TO_LOOPBACK": false,
   // 匿名访客按客户端 IP 每天最多创建 3 个任务；一条 URL 同时选择
   // 视频和音频会计为 2 个任务。匿名媒体从登记完成起保留 24 小时。
   "ANONYMOUS_DAILY_TASK_LIMIT": 3,
