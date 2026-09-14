@@ -409,6 +409,11 @@ curl -X POST http://localhost:5100/api/task_info \
   -H "Content-Type: application/json" \
   -d '{"tasks": ["v20250601120000abc"]}'
 
+# 暂停、继续、重启或删除任务（action: pause / resume / restart / delete）
+curl -X POST http://localhost:5100/api/task_action \
+  -H "Content-Type: application/json" \
+  -d '{"task": "v20250601120000abc", "action": "delete", "delete_files": true}'
+
 # 查询首页侧栏使用的当前任务日志
 curl -X POST http://localhost:5100/api/task_log \
   -H "Content-Type: application/json" \
@@ -437,9 +442,17 @@ curl http://localhost:5100/api/ai_summaries/jobs/<job_id> \
   -H "X-Yter-AI-Token: <AI_SUMMARY_ACCESS_TOKEN>"
 ```
 
-`/api/task_info` 会返回任务的 `state`（`queued`、`downloading`、`completed`、`failed` 或 `missing`）和 `progress`。下载中任务的 `progress` 包含可用的 `percent`、`downloaded`、`total`、`speed`、`eta` 等字段；新任务完成后包含 `final_size_bytes`、`elapsed_seconds`、`average_speed_bytes_per_second`。视频或音频任务完成并且主媒体产物仍在本地时，还会返回对应的 `player_url`。
+`/api/task_info` 会返回任务的 `state`（`queued`、`downloading`、`paused`、`completed`、`failed` 或 `missing`）和 `progress`。下载中任务的 `progress` 包含可用的 `percent`、`downloaded`、`total`、`speed`、`eta` 等字段；新任务完成后包含 `final_size_bytes`、`elapsed_seconds`、`average_speed_bytes_per_second`。视频或音频任务完成并且主媒体产物仍在本地时，还会返回对应的 `player_url`。
 
 下载页、匿名任务查询、匿名媒体库以及其文件访问不要求登录，但必须携带同一签名会话 cookie 才能继续访问自己的匿名资源。匿名额度耗尽时 `/api/add_task` 返回 401 和 `login_required: true`。账号管理、Google 授权及其他受保护接口仍要求登录。下列 curl 示例若要连续查询同一匿名任务，也需要保存并复用 cookie。
+
+`/api/task_action` 操作当前主体自己的任务，其他主体的任务一律返回 404，状态不允许该操作时返回 409：
+
+- `pause`：排队或下载中的任务改为 `paused`，临时目录保留；`resume` 重新排队并由 yt-dlp 从 `.part` 断点续传。
+- `restart`：除已完成外都可重启，丢弃临时文件后沿用原任务 ID 重新下载。
+- `delete`：未完成的任务连同临时文件、日志一并删除；已完成的任务默认只删记录，传 `delete_files: true` 才会删除本主体名下的媒体文件。首页删除已完成任务时会让用户勾选是否删除文件，默认不勾选。
+
+下载中的任务由下载器执行：接口返回 202 和 `pending`，Web 端写入 `<task_id>.control` 指令文件，下载器终止 yt-dlp 后再改写状态，前端轮询到新状态为止。下载器未运行期间留下的指令会在下次启动时先于中断恢复执行。
 
 `/api/media_list` 返回媒体库需要的视频与音频条目，各自按修改时间倒序，沿用 `PLAYER_FILENAME_EXCLUDE_KEYWORDS` 过滤。每个条目包含文件名、标题、作者、来源链接、封面、扩展名、时长、视频高度、文件大小以及播放和下载地址。时长和高度由 `ffprobe` 读取并按文件属性缓存，目录中文件较多时首次请求需要数秒。
 

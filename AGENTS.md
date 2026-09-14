@@ -43,7 +43,10 @@
 
 ```text
 .txt -> .downloading -> .ok / .fail
+.txt / .downloading -> .paused -> .txt（继续，沿用临时目录断点续传）
 ```
+
+暂停、继续、重启、删除由 `/api/task_action` 发起。非下载中的任务由 Web 端直接改名或清理；`.downloading` 任务只能由下载器处理：Web 端原子写入 `<task_id>.control`（内容为 `pause`/`restart`/`delete`），下载器用 psutil 终止 yt-dlp 进程树后再改写状态。yt-dlp 不另开进程组（Supervisor 依赖 `stopasgroup`），且必须由 `Popen` 自己等待，否则会拿到返回码 0 被误判为下载成功。
 
 `RESUME_INTERRUPTED_DOWNLOADS` 为 `true` 时，下载器启动后会恢复遗留的 `.downloading` 任务；默认关闭，避免历史任务在重启后被自动执行。
 
