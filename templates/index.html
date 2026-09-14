@@ -57,8 +57,17 @@
                 </a>
                 {% else %}
                 <details class="dl-account">
-                    <summary class="dl-header-link">
+                    {% set avatar_url = google_identity.avatar_url if google_identity else '' %}
+                    <summary class="dl-header-link{% if avatar_url %} dl-account-has-avatar{% endif %}">
+                        {% if avatar_url %}
+                        {# 头像加载失败时（过期、被拦截）退回人形图标 #}
+                        <img class="dl-account-avatar" src="{{ avatar_url }}" alt="" width="24" height="24"
+                             referrerpolicy="no-referrer"
+                             onerror="this.hidden = true; this.nextElementSibling.hidden = false;">
+                        <span class="dl-account-avatar-fallback" hidden><svg class="dl-icon" aria-hidden="true"><use href="#i-user"></use></svg></span>
+                        {% else %}
                         <svg class="dl-icon" aria-hidden="true"><use href="#i-user"></use></svg>
+                        {% endif %}
                         <span class="dl-header-link-text">{{ current_user.display_name }}</span>
                     </summary>
                     <div class="dl-account-menu">

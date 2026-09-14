@@ -1602,6 +1602,29 @@
     list-style: none;
 }
 
+/* Google 账号头像：圆形，替代人形图标 */
+.dl-account-has-avatar {
+    padding-left: 8px;
+}
+
+.dl-account-avatar {
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #eef2f7;
+    object-fit: cover;
+    box-shadow: 0 0 0 1px rgba(15, 40, 80, 0.08);
+}
+
+.dl-account-avatar-fallback {
+    display: inline-flex;
+}
+
+.dl-account-avatar-fallback[hidden] {
+    display: none;
+}
+
 .dl-account > summary::-webkit-details-marker {
     display: none;
 }

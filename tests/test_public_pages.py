@@ -95,6 +95,33 @@ class TestAuthEntryPoints(unittest.TestCase):
         self.assertIn('重新授权 Google', html)
         self.assertIn('解除绑定', html)
 
+    def test_header_shows_google_avatar_with_icon_fallback(self):
+        avatar = 'https://lh3.googleusercontent.com/a/example=s96-c'
+        with logged_in_client() as (client, user, db_path):
+            user_store.link_identity(
+                db_path,
+                user_store.PROVIDER_GOOGLE,
+                'google-sub-2',
+                user['id'],
+                email='bound@gmail.com',
+                avatar_url=avatar,
+            )
+            html = client.get('/').get_data(as_text=True)
+
+        summary = html[html.index('<summary'):html.index('</summary>')]
+        self.assertIn(f'src="{avatar}"', summary)
+        # Google 头像带来源页信息时可能被拒，且失效时要退回人形图标
+        self.assertIn('referrerpolicy="no-referrer"', summary)
+        self.assertIn('dl-account-avatar-fallback', summary)
+
+    def test_header_keeps_icon_without_google_avatar(self):
+        with logged_in_client() as (client, _user, _db):
+            html = client.get('/').get_data(as_text=True)
+
+        summary = html[html.index('<summary'):html.index('</summary>')]
+        self.assertNotIn('dl-account-avatar', summary)
+        self.assertIn('#i-user', summary)
+
 
 if __name__ == '__main__':
     unittest.main()
