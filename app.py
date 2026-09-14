@@ -90,12 +90,8 @@ URLS_DIR = config["URLS_DIR"]
 FILES_DIR = config["FILES_DIR"]
 # 兼容历史任务中曾使用过的数字随机后缀，同时限制为安全文件名字符。
 TASK_ID_PATTERN = re.compile(r'^[va][A-Za-z0-9_-]{1,127}$')
-TASK_STATE_EXTENSIONS = (
-    ('.ok', 'completed'),
-    ('.fail', 'failed'),
-    ('.downloading', 'downloading'),
-    ('.txt', 'queued'),
-)
+# 状态文件表与下载器共用，含暂停状态 .paused
+TASK_STATE_EXTENSIONS = task_queue.TASK_STATE_FILES
 DOWNLOADER_LOG_INITIAL_BYTES = 64 * 1024
 DOWNLOADER_LOG_MAX_BYTES = 128 * 1024
 PROGRESS_MARKER = 'PYDL_PROGRESS|'
@@ -768,6 +764,11 @@ def get_task_info(task):
         }
     elif state == 'failed':
         progress["stage"] = "failed"
+    elif state == 'paused':
+        # 保留暂停前解析到的进度，便于用户看到已经下到哪里
+        progress = dict(progress or {"percent": 0.0})
+        progress["phase"] = "paused"
+        progress["stage"] = "paused"
     elif not progress:
         progress = {
             "percent": 0.0,
@@ -2968,6 +2969,123 @@ def api_task_info():
         for task in tasks
     ]
     return jsonify({"success": True, "tasks": result})
+
+
+# 各动作允许的起始状态；与前端按钮显示规则保持一致
+TASK_ACTION_STATES = {
+    'pause': {'queued', 'downloading'},
+    'resume': {'paused'},
+    'restart': {'downloading', 'paused', 'failed'},
+    'delete': {'queued', 'downloading', 'paused', 'failed', 'completed'},
+}
+
+
+def delete_task_media(task_id, owner):
+    """删除已完成任务下载的文件；只删当前主体名下的，避免误删他人同名文件。"""
+    filenames = task_queue.task_result_files(URLS_DIR, task_id)
+    if not filenames:
+        filenames = recover_task_files_from_logs(task_id)
+    owner_type, owner_id = owner
+    removed = 0
+    for filename in filenames:
+        if not isinstance(filename, str) or filename != os.path.basename(filename):
+            continue
+        if owner_type == 'user':
+            owned = user_store.media_owner(USER_DB_PATH, filename) == owner_id
+        else:
+            owned = user_store.anonymous_media_owner(USER_DB_PATH, filename) == owner_id
+        if not owned:
+            continue
+        filepath = safe_join(FILES_DIR, filename)
+        if filepath and os.path.isfile(filepath):
+            os.remove(filepath)
+            removed += 1
+        user_store.delete_media(USER_DB_PATH, filename)
+        user_store.delete_anonymous_media(USER_DB_PATH, filename)
+    return removed
+
+
+def perform_task_action(task_id, action, owner, delete_files=False):
+    """执行任务动作，返回 ``(HTTP 状态码, 结果字典)``。
+
+    未在下载的任务直接改写状态文件；正在下载的交给下载器（写控制指令）。
+    状态文件可能在两次检查之间被下载器改名（例如刚从排队转为下载），
+    改名失败时重新判定状态再试。
+    """
+    for _ in range(3):
+        task_path, state = task_queue.find_task_file(URLS_DIR, task_id)
+        if task_path is None:
+            return 404, {"success": False, "msg": "任务不存在"}
+        if state not in TASK_ACTION_STATES[action]:
+            return 409, {"success": False, "msg": "当前状态不支持该操作", "state": state}
+
+        base = task_path[:-len(os.path.splitext(task_path)[1])]
+        try:
+            if state == 'downloading':
+                control = 'restart' if action == 'restart' else action
+                task_queue.write_task_control(URLS_DIR, task_id, control)
+                if action == 'delete':
+                    user_store.forget_task(USER_DB_PATH, task_id)
+                return 202, {"success": True, "state": state, "pending": action}
+
+            if action == 'pause':
+                os.rename(task_path, base + task_queue.PAUSED_EXTENSION)
+                return 200, {"success": True, "state": "paused"}
+
+            if action == 'resume':
+                # 同一任务 ID 重新入队，下载器会复用临时目录断点续传
+                os.rename(task_path, base + '.txt')
+                return 200, {"success": True, "state": "queued"}
+
+            if action == 'restart':
+                task_queue.discard_task_temp(config["TMP_DIR"], task_id)
+                try:
+                    os.remove(os.path.join(URLS_DIR, f"{task_id}.result.json"))
+                except FileNotFoundError:
+                    pass
+                os.rename(task_path, base + '.txt')
+                return 200, {"success": True, "state": "queued"}
+
+            # delete：先删状态文件，确保排队中的任务不会再被下载器拾取
+            os.remove(task_path)
+        except FileNotFoundError:
+            continue
+
+        removed = 0
+        if state == 'completed' and delete_files:
+            removed = delete_task_media(task_id, owner)
+        task_queue.discard_task_temp(config["TMP_DIR"], task_id)
+        task_queue.remove_task_records(URLS_DIR, config["LOG_DIR"], task_id)
+        user_store.forget_task(USER_DB_PATH, task_id)
+        return 200, {"success": True, "state": "deleted", "removed_files": removed}
+
+    return 409, {"success": False, "msg": "任务状态正在变化，请稍后重试"}
+
+
+@app.route('/api/task_action', methods=['POST'])
+def api_task_action():
+    """暂停、继续、重启或删除当前主体自己的任务。"""
+    data = request.get_json(silent=True) or {}
+    task_id = data.get('task')
+    action = data.get('action')
+    if not isinstance(task_id, str) or not TASK_ID_PATTERN.fullmatch(task_id):
+        return jsonify({"success": False, "msg": "Invalid task id"}), 400
+    if action not in TASK_ACTION_STATES:
+        return jsonify({"success": False, "msg": "Invalid action"}), 400
+
+    owner = current_owner(create_anonymous=False)
+    # 非本人任务与不存在的任务同样返回 404，不泄露任务是否存在
+    if owner[0] is None or not owned_tasks([task_id], owner):
+        return jsonify({"success": False, "msg": "任务不存在"}), 404
+
+    status, payload = perform_task_action(
+        task_id,
+        action,
+        owner,
+        delete_files=bool(data.get('delete_files')),
+    )
+    payload["task"] = task_id
+    return jsonify(payload), status
 
 
 def read_downloader_log_chunk(filepath, cursor=None, expected_file_id=None):
