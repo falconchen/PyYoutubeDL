@@ -111,6 +111,45 @@ def test_media_list_carries_source_link_and_description():
     assert audio['description'] == ''
 
 
+def test_media_list_offers_sidecar_subtitles_for_mp4_videos():
+    with logged_in_client() as (client, _user, _db), TemporaryDirectory() as files_dir:
+        for name in [
+            'clip.mp4', 'clip.en.srt', 'clip.zh-Hans.srt', 'plain.mp4'
+        ]:
+            Path(files_dir, name).write_text(
+                '1\n00:00:01,000 --> 00:00:02,000\n你好\n', encoding='utf-8'
+            )
+        with (
+            patch('app.FILES_DIR', files_dir),
+            patch('app._probe_embedded_subtitles', return_value=()),
+        ):
+            payload = client.get('/api/media_list').get_json()
+            videos = {item['filename']: item for item in payload['video']}
+            subtitle_status = client.get(videos['clip.mp4']['subtitles'][0]['url']).status_code
+
+    tracks = videos['clip.mp4']['subtitles']
+    # 简体中文排在英文前面，前端把第一条作为默认主字幕
+    assert [track['language'] for track in tracks] == ['zh-Hans', 'en']
+    assert [track['label'] for track in tracks] == ['简体中文', 'English']
+    assert tracks[0]['url'].startswith('/subtitles/sidecar/')
+    assert subtitle_status == 200
+    assert videos['plain.mp4']['subtitles'] == []
+
+
+def test_regional_chinese_subtitle_codes_sort_before_english():
+    with TemporaryDirectory() as files_dir:
+        for name in ['clip.mp4', 'clip.en.srt', 'clip.zh-CN.srt']:
+            Path(files_dir, name).touch()
+        with patch('app.FILES_DIR', files_dir):
+            tracks = app_module.get_sidecar_subtitles('clip.mp4')
+
+    assert [(track['language'], track['label']) for track in tracks] == [
+        ('zh-Hans', '简体中文'),
+        ('en', 'English'),
+    ]
+    assert tracks[0]['subtitle_filename'] == 'clip.zh-CN.srt'
+
+
 def test_media_list_applies_exclude_keywords():
     with logged_in_client() as (client, _user, _db), TemporaryDirectory() as files_dir:
         for name in ['keep.mp4', 'skip-me.mp4']:
@@ -338,3 +377,58 @@ def test_library_delete_ui_has_separate_controls_and_confirmation():
     assert 'opacity: 0;' in stylesheet
     assert '.dl-playlist-item-playing {' in stylesheet
     assert 'align-self: center;' in stylesheet
+
+
+SRT_LYRICS = '1\n00:00:01,000 --> 00:00:02,500\n第一句\nFirst line\n\n2\n00:00:03,000 --> 00:00:04,000\n第二句\n'
+
+
+def test_audio_lyrics_are_listed_and_served_as_lrc():
+    with logged_in_client() as (client, _user, _db), TemporaryDirectory() as files_dir:
+        Path(files_dir, 'song.mp3').write_bytes(b'x')
+        Path(files_dir, 'song.en.srt').write_text('1\n00:00:09,000 --> 00:00:10,000\nEnglish\n', encoding='utf-8')
+        Path(files_dir, 'song.zh-Hans.srt').write_text(SRT_LYRICS, encoding='utf-8')
+        Path(files_dir, 'silent.mp3').write_bytes(b'x')
+        with patch('app.FILES_DIR', files_dir):
+            audios = {
+                item['filename']: item
+                for item in client.get('/api/media_list').get_json()['audio']
+            }
+            response = client.get(audios['song.mp3']['lyrics_url'])
+
+    assert audios['silent.mp3']['lyrics_url'] == ''
+    assert response.status_code == 200
+    lyrics = response.get_data(as_text=True)
+    # 简体中文优先于英文；多行字幕拆成同一时间戳的几行，zwplayer 显示为主歌词加翻译
+    assert '[00:01.00]第一句' in lyrics
+    assert '[00:01.00]First line' in lyrics
+    assert '[00:03.00]第二句' in lyrics
+    assert 'English' not in lyrics
+
+
+def test_lrc_lyrics_are_served_unchanged():
+    with logged_in_client() as (client, _user, _db), TemporaryDirectory() as files_dir:
+        Path(files_dir, 'song.m4a').write_bytes(b'x')
+        Path(files_dir, 'song.lrc').write_text('[00:05.00]原样歌词\n', encoding='utf-8')
+        with patch('app.FILES_DIR', files_dir):
+            response = client.get('/lyrics/song.m4a.lrc')
+
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == '[00:05.00]原样歌词\n'
+
+
+def test_lyrics_follow_audio_access_rules():
+    with logged_in_client() as (client, _user, db_path), TemporaryDirectory() as files_dir:
+        Path(files_dir, 'theirs.mp3').write_bytes(b'x')
+        Path(files_dir, 'theirs.srt').write_text(SRT_LYRICS, encoding='utf-8')
+        Path(files_dir, 'clip.mp4').write_bytes(b'x')
+        Path(files_dir, 'clip.srt').write_text(SRT_LYRICS, encoding='utf-8')
+        stranger = other_user(db_path)
+        user_store.record_media(db_path, 'theirs.mp3', stranger['id'])
+        with patch('app.FILES_DIR', files_dir):
+            others = client.get('/lyrics/theirs.mp3.lrc')
+            video = client.get('/lyrics/clip.mp4.lrc')
+            missing = client.get('/lyrics/nothing.mp3.lrc')
+
+    assert others.status_code == 404
+    assert video.status_code == 404
+    assert missing.status_code == 404

@@ -20,6 +20,16 @@
     // 与 zwplayer 倍速菜单的档位保持一致，其余值不记忆。
     var PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
     var SEEK_OFFSET_SECONDS = 10;
+    var LRC_TIMESTAMP = /\[\d{1,2}:\d{1,2}/;
+    // zwplayer 字幕设置面板里「字幕大小：较小」对应的值（默认「适中」为 0.2）
+    var SUBTITLE_FONT_SIZE_SMALL = '0.14';
+    // 字幕基准字号（「适中」档）按播放器尺寸等比：取宽度 4.2%、高度 7.5% 中较小者，
+    // 页面内约 760×428 时为 32px，与 zwplayer 原算法一致；实际字号最大 36px，免得全屏时过大。
+    var SUBTITLE_BASE_WIDTH_RATIO = 0.042;
+    var SUBTITLE_BASE_HEIGHT_RATIO = 0.075;
+    var SUBTITLE_BASE_MIN_PX = 14;
+    var SUBTITLE_MAX_PX = 36;
+    var SUBTITLE_MEDIUM_FONT_SIZE = 0.2;
 
     var STATE_LABELS = {
         queued: '等待处理',
@@ -151,6 +161,8 @@
     /** 当前元素已载入元数据的条目，换源途中为 null，避免把旧进度记到新条目上。 */
     var loadedFilename = null;
     var lastProgressSaveAt = 0;
+    /** 每次换源递增；晚到的上一条字幕或歌词据此丢弃。 */
+    var textTrackSerial = 0;
     var libraryLoading = false;
     var mediaDeleteTarget = null;
     var mediaDeleteBusy = false;
@@ -932,6 +944,7 @@
     }
 
     function destroyPlayer() {
+        textTrackSerial += 1;
         saveProgress(true);
         clearMediaSession();
         mediaEl = null;
@@ -988,6 +1001,115 @@
         }
         playerType = item.type;
         attachMediaElement(zwplayer.videoEl);
+        applySubtitleDefaults();
+        installSubtitleScaling();
+        loadTextTracks(item);
+    }
+
+    function installSubtitleScaling() {
+        // zwplayer 的 updateSubtitlePosition 只负责算字幕字号：基准为播放器宽度的 5%，
+        // 但夹在 14–32px 之间，宽于 640px 后全屏与页面内一样大。它挂在实例上，
+        // 字幕层尺寸变化（含进出全屏）时经 this 调用，替换实例属性即可接管（内部方法，升级时需复查）。
+        if (!zwplayer || typeof zwplayer.updateSubtitlePosition !== 'function') return;
+        var player = zwplayer;
+        player.updateSubtitlePosition = function () {
+            var layer = player.subtitleShow;
+            if (!layer || !player.subtitles) return;
+            var settings = player._subtitleSettings || {};
+            // 「等比缩放」关闭时保持 zwplayer 的行为：不改字号
+            if (settings.primary && settings.primary.scale === false) return;
+            var width = layer.offsetWidth;
+            var height = layer.offsetHeight;
+            if (!width || !height) return;
+            var base = Math.max(
+                SUBTITLE_BASE_MIN_PX,
+                Math.min(width * SUBTITLE_BASE_WIDTH_RATIO, height * SUBTITLE_BASE_HEIGHT_RATIO)
+            );
+            [['1', 'primary'], ['2', 'secondary']].forEach(function (pair) {
+                var element = player['subtitle' + pair[0]];
+                if (!player.subtitles[pair[0]] || !element) return;
+                var track = settings[pair[1]];
+                var level = track && track.fontSize ? parseFloat(track.fontSize) : SUBTITLE_MEDIUM_FONT_SIZE;
+                var size = Math.min(SUBTITLE_MAX_PX, base * level / SUBTITLE_MEDIUM_FONT_SIZE);
+                element.style.fontSize = size.toFixed(2) + 'px';
+            });
+        };
+    }
+
+    function applySubtitleDefaults() {
+        // zwplayer 没有字幕样式的构造参数，只能改实例上的 _subtitleSettings（内部字段，
+        // 升级时需复查）。设置面板打开时才按它生成，字号在每次渲染时读取，所以建好实例就改。
+        var settings = zwplayer && zwplayer._subtitleSettings;
+        if (!settings || !settings.primary) return;
+        settings.primary.fontSize = SUBTITLE_FONT_SIZE_SMALL;
+        // 背景不透明度拉到最低：字幕直接叠在画面上，不带黑底
+        settings.primary.bgOpacity = 0;
+        if (settings.secondary) settings.secondary.bgOpacity = 0;
+        if (typeof zwplayer._applyAllSubtitleSettings === 'function') {
+            zwplayer._applyAllSubtitleSettings();
+        }
+    }
+
+    /* 字幕与歌词 */
+
+    function fetchText(url) {
+        return fetch(url, { credentials: 'same-origin' }).then(function (response) {
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            return response.text();
+        });
+    }
+
+    function isCurrentTextTrack(serial, item) {
+        return serial === textTrackSerial && currentMedia === item && Boolean(zwplayer);
+    }
+
+    function loadTextTracks(item) {
+        // 不把地址直接交给 zwplayer 加载：它的异步请求不核对当前片源，快速切换时
+        // 上一条的字幕或歌词会挂到新条目上。先取回文本，确认仍是同一条再交给它。
+        var serial = ++textTrackSerial;
+        if (item.type === 'audio') loadLyrics(item, serial);
+        else loadSubtitles(item, serial);
+    }
+
+    function loadLyrics(item, serial) {
+        // play(url) 换源不会清掉音乐模式的歌词，先清空，免得上一首的歌词继续滚动
+        if (typeof zwplayer.setLyrics === 'function') zwplayer.setLyrics('');
+        if (!item.lyrics_url) return;
+        fetchText(item.lyrics_url).then(function (text) {
+            if (!isCurrentTextTrack(serial, item)) return;
+            // zwplayer 只在内容带 [mm:ss 时间戳时按 LRC 文本解析，否则会把它当作地址去请求
+            if (typeof zwplayer.setLyrics !== 'function' || !LRC_TIMESTAMP.test(text)) return;
+            zwplayer.setLyrics(text);
+        }).catch(function (error) {
+            console.warn('加载歌词失败:', error);
+        });
+    }
+
+    function loadSubtitles(item, serial) {
+        var tracks = Array.isArray(item.subtitles) ? item.subtitles : [];
+        if (!tracks.length) return;
+        Promise.all(tracks.map(function (track) {
+            return fetchText(track.url).catch(function (error) {
+                console.warn('加载字幕失败:', track.label, error);
+                return '';
+            });
+        })).then(function (texts) {
+            if (!isCurrentTextTrack(serial, item)) return;
+            if (typeof zwplayer.addSubtitle !== 'function') return;
+            var primaryAssigned = false;
+            tracks.forEach(function (track, index) {
+                if (!texts[index]) return;
+                // 第一条可用轨道（后端按简体、繁体、中文、英文排序）默认显示，
+                // 其余只进 CC 菜单，由用户切换或开启双语。
+                var pos = primaryAssigned ? '' : '1';
+                primaryAssigned = true;
+                try {
+                    zwplayer.addSubtitle(texts[index], pos, track.label);
+                } catch (error) {
+                    console.warn('添加字幕失败:', track.label, error);
+                }
+            });
+        });
     }
 
     function updateLocationForMedia(item) {
@@ -995,6 +1117,13 @@
         var params = new URLSearchParams();
         params.set('file', item.filename);
         window.history.replaceState({}, '', '/player?' + params.toString());
+    }
+
+    function clearMediaLocation() {
+        var params = new URLSearchParams();
+        if (libraryTab === 'audio') params.set('tab', 'audio');
+        var query = params.toString();
+        window.history.replaceState({}, '', '/player' + (query ? '?' + query : ''));
     }
 
     function playMedia(item, options) {
@@ -1015,7 +1144,9 @@
             // 视频与音频之间不能复用：zwplayer 的 play(url) 不会在标准模式和
             // 音乐模式之间切换，跨类型必然来自用户点击，重建时仍有手势授权。
             try {
+                // play(url) 会先 stop()，连同上一条的字幕一起清掉
                 zwplayer.play(item.url);
+                loadTextTracks(item);
                 if (mediaEl) mediaEl.poster = item.poster || '';
                 // play(url) 只换音源，音乐模式的封面、模糊背景、标题和作者
                 // 要另外通知 zwplayer，否则一直停留在第一首。

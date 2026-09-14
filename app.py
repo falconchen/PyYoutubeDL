@@ -904,9 +904,15 @@ def normalize_subtitle_language(language):
 
 def _canonical_subtitle_language(language):
     normalized = normalize_subtitle_language(language).replace('_', '-')
+    # YouTube 有时按地区给出中文字幕（zh-CN、zh-TW），归并到简繁体才能正确命名和排序
     return {
         'zh-hans': 'zh-Hans',
+        'zh-cn': 'zh-Hans',
+        'zh-sg': 'zh-Hans',
         'zh-hant': 'zh-Hant',
+        'zh-tw': 'zh-Hant',
+        'zh-hk': 'zh-Hant',
+        'zh-mo': 'zh-Hant',
     }.get(normalized, normalized)
 
 
@@ -2523,6 +2529,28 @@ def build_media_library_items(owner=None):
             'download_url': url_for('download_file', filename=filename),
         }
 
+    def subtitle_tracks(filename):
+        # 与旧播放页一致：外挂字幕优先，没有时用内嵌字幕，统一转成 WebVTT 提供
+        tracks = []
+        for track in get_video_subtitle_tracks(filename):
+            if track['source_kind'] == 'sidecar':
+                url = url_for(
+                    'serve_sidecar_subtitle',
+                    subtitle_filename=track['subtitle_filename'],
+                )
+            else:
+                url = url_for(
+                    'serve_subtitle',
+                    filename=filename,
+                    stream_index=track['stream_index'],
+                )
+            tracks.append({
+                'url': url,
+                'label': track['label'],
+                'language': track['language'],
+            })
+        return tracks
+
     videos = []
     for filename in video_files:
         metadata = get_video_metadata(filename)
@@ -2535,6 +2563,7 @@ def build_media_library_items(owner=None):
             'description': metadata.get('description', ''),
             'poster': next(iter(metadata.get('cover_candidates') or []), ''),
             'thumbnail_candidates': cover_candidates,
+            'subtitles': subtitle_tracks(filename),
         })
         videos.append(item)
 
@@ -2553,6 +2582,11 @@ def build_media_library_items(owner=None):
             'description': metadata.get('description', ''),
             'poster': next(iter(metadata.get('cover_candidates') or []), ''),
             'thumbnail_candidates': cover_candidates,
+            'lyrics_url': (
+                url_for('serve_audio_lyrics', filename=filename)
+                if find_audio_lyrics(filename)
+                else ''
+            ),
         })
         audios.append(item)
 
@@ -2731,6 +2765,39 @@ def serve_sidecar_subtitle(subtitle_filename):
             content_type="text/plain; charset=utf-8",
         )
     return Response(subtitle, content_type="text/vtt; charset=utf-8")
+
+
+@app.route('/lyrics/<path:filename>.lrc')
+def serve_audio_lyrics(filename):
+    """把音频的同名旁挂歌词统一转成 LRC，供媒体库的 zwplayer 音乐模式滚动显示。"""
+    decoded_filename = unquote(filename)
+    if os.path.splitext(decoded_filename)[1].lower().lstrip('.') not in AUDIO_EXTENSIONS:
+        abort(404)
+    # 按音频鉴权：旁挂歌词不一定单独登记了归属
+    require_media_access(decoded_filename)
+    lyrics = find_audio_lyrics(decoded_filename)
+    filepath = safe_join(FILES_DIR, lyrics['filename']) if lyrics else None
+    if not filepath or not os.path.isfile(filepath):
+        abort(404)
+    if lyrics['format'] == 'lrc':
+        return send_from_directory(
+            FILES_DIR, lyrics['filename'], mimetype='text/plain; charset=utf-8'
+        )
+    try:
+        # ffmpeg 的 lrc 输出里，多行字幕会拆成同一时间戳的几行，zwplayer 显示为主歌词加翻译
+        result = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", filepath, "-f", "lrc", "pipe:1"],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        app.logger.error("找不到 ffmpeg，无法转换歌词")
+        return Response("ffmpeg is required", status=503, content_type="text/plain; charset=utf-8")
+    except (subprocess.SubprocessError, OSError) as exc:
+        app.logger.error("转换歌词失败: %s (%s)", filepath, exc)
+        return Response("lyrics conversion failed", status=500, content_type="text/plain; charset=utf-8")
+    return Response(result.stdout, content_type="text/plain; charset=utf-8")
 
 
 @app.route('/api/ai_summary', methods=['POST'])
