@@ -474,6 +474,15 @@ def task_owner(db_path, task_id):
     return row['user_id'] if row else None
 
 
+def forget_task(db_path, task_id):
+    """删除任务时清除归属（登录用户与匿名会话两张表都清）。"""
+    with connect(db_path) as db:
+        db.execute('DELETE FROM task_owners WHERE task_id = ?', (task_id,))
+        db.execute(
+            'DELETE FROM anonymous_task_owners WHERE task_id = ?', (task_id,)
+        )
+
+
 def user_task_ids(db_path, user_id, limit=200):
     with connect(db_path) as db:
         rows = db.execute(

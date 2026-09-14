@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from datetime import datetime
+import psutil
 from bark_util import bark_notify
 from config_util import (
     MOVE_STAGING_PREFIX,
@@ -26,6 +27,7 @@ from config_util import (
 )
 from log_util import setup_logger
 import anonymous_cleanup
+import task_queue
 
 # 加载配置
 config = load_config()
@@ -450,10 +452,20 @@ download_gate = DownloadRateGate(
 )
 
 
+# 暂停/删除时先礼后兵：TERM 后等待这么久仍未退出再 KILL。
+STOP_GRACE_SECONDS = 10
+
+
 class DownloadHandler(FileSystemEventHandler):
     def __init__(self, executor):
         super().__init__()
         self.executor = executor
+        # 以下状态只描述本进程正在负责的任务，用锁与 watchdog 线程共享。
+        self._task_lock = threading.Lock()
+        self._active_tasks = set()
+        self._processes = {}
+        self._stop_requests = {}
+        self._moved_files = {}
 
     def on_created(self, event):
         """
@@ -462,7 +474,12 @@ class DownloadHandler(FileSystemEventHandler):
         Args:
             event: 文件系统事件对象。
         """
-        if not event.is_directory and event.src_path.endswith('.txt') and os.path.exists(event.src_path):
+        if event.is_directory:
+            return
+        if event.src_path.endswith(task_queue.CONTROL_EXTENSION):
+            self.handle_control_file(event.src_path)
+            return
+        if event.src_path.endswith('.txt') and os.path.exists(event.src_path):
             logger.info(f"检测到新文件: {event.src_path}")
             self.executor.submit(self.process_file, event.src_path)
 
@@ -473,9 +490,147 @@ class DownloadHandler(FileSystemEventHandler):
         Args:
             event: 文件系统事件对象。
         """
-        if not event.is_directory and event.dest_path.endswith('.txt') and os.path.exists(event.dest_path):
+        if event.is_directory:
+            return
+        if event.dest_path.endswith(task_queue.CONTROL_EXTENSION):
+            # Web 端先写临时文件再原子替换，因此指令以「移动」事件到达
+            self.handle_control_file(event.dest_path)
+            return
+        if event.dest_path.endswith('.txt') and os.path.exists(event.dest_path):
             logger.info(f"检测到文件重命名为txt: {event.src_path} -> {event.dest_path}")
             self.executor.submit(self.process_file, event.dest_path)
+
+    def handle_control_file(self, control_path):
+        """处理 Web 端写入的暂停/重启/删除指令。
+
+        本进程正在负责的任务：登记请求并终止 yt-dlp，由 process_file 在
+        下载结束后收尾。不在本进程手上的 .downloading（下载器曾异常退出
+        留下的）：直接改写文件状态，否则指令永远不会被执行。
+        """
+        task_id = os.path.basename(control_path)[:-len(task_queue.CONTROL_EXTENSION)]
+        action = task_queue.consume_task_control(control_path)
+        if action is None:
+            return
+        with self._task_lock:
+            active = task_id in self._active_tasks
+            if active:
+                self._stop_requests[task_id] = action
+                process = self._processes.get(task_id)
+        if active:
+            logger.info(f"收到任务指令 {action}: {task_id}")
+            if process is not None:
+                self._terminate_process_tree(process)
+            return
+        self._apply_stop_action(task_id, action)
+
+    def apply_pending_controls(self, folder):
+        """启动时处理下载器未运行期间留下的控制指令。"""
+        try:
+            entries = sorted(os.listdir(folder))
+        except OSError:
+            return 0
+        pending = [
+            name for name in entries
+            if name.endswith(task_queue.CONTROL_EXTENSION)
+        ]
+        for name in pending:
+            self.handle_control_file(os.path.join(folder, name))
+        return len(pending)
+
+    def _terminate_process_tree(self, process):
+        """在后台终止 yt-dlp 及其子进程（ffmpeg 等）。
+
+        不单独开进程组：Supervisor 以 stopasgroup/killasgroup 停止下载器，
+        yt-dlp 必须留在原进程组里才会被一并带走。
+        """
+        def terminate():
+            try:
+                children = psutil.Process(process.pid).children(recursive=True)
+            except psutil.Error:
+                children = []
+            for child in children:
+                try:
+                    child.terminate()
+                except psutil.Error:
+                    pass
+            try:
+                process.terminate()
+            except OSError:
+                pass
+            # yt-dlp 是本进程的直接子进程，只能经由 Popen 等待：若让 psutil
+            # 回收它，Popen.wait() 会拿到 ECHILD 并把返回码当成 0
+            deadline = time.monotonic() + STOP_GRACE_SECONDS
+            try:
+                process.wait(timeout=STOP_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+            _, alive = psutil.wait_procs(
+                children, timeout=max(0, deadline - time.monotonic())
+            )
+            for child in alive:
+                try:
+                    child.kill()
+                except psutil.Error:
+                    pass
+
+        threading.Thread(target=terminate, name='ytdlp-terminate', daemon=True).start()
+
+    def _stop_requested(self, task_id):
+        with self._task_lock:
+            return self._stop_requests.get(task_id)
+
+    def _apply_stop_action(self, task_id, action):
+        """按指令改写已停止任务的文件状态。"""
+        folder = config["URLS_DIR"]
+        task_path, state = task_queue.find_task_file(folder, task_id)
+        moved = self._moved_files.pop(task_id, [])
+
+        if action == task_queue.ACTION_DELETE:
+            # 用户删除的是未完成任务：本次运行已产出的文件、结果清单登记的文件一并清理，
+            # 避免留下无主文件被归属同步划给管理员。
+            result_files = [
+                os.path.join(config["FILES_DIR"], name)
+                for name in task_queue.task_result_files(folder, task_id)
+            ]
+            for filepath in dict.fromkeys(moved + result_files):
+                try:
+                    os.remove(filepath)
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    logger.error(f"删除任务产物失败: {filepath}, {exc}")
+            task_queue.discard_task_temp(config["TMP_DIR"], task_id)
+            task_queue.remove_task_records(folder, config["LOG_DIR"], task_id)
+            logger.info(f"任务已删除: {task_id}")
+            return
+
+        if state != 'downloading':
+            # 指令到达前任务已结束（完成、失败或已被处理），暂停/重启不再适用
+            logger.info(f"任务 {task_id} 当前状态为 {state}，忽略指令 {action}")
+            return
+
+        base = task_path[:-len('.downloading')]
+        if action == task_queue.ACTION_PAUSE:
+            # 保留临时目录，继续时由 yt-dlp 从 .part 断点续传
+            os.rename(task_path, base + task_queue.PAUSED_EXTENSION)
+            logger.info(f"任务已暂停: {task_id}")
+        elif action == task_queue.ACTION_RESTART:
+            for filepath in moved:
+                try:
+                    os.remove(filepath)
+                except FileNotFoundError:
+                    pass
+            task_queue.discard_task_temp(config["TMP_DIR"], task_id)
+            try:
+                os.remove(os.path.join(folder, f"{task_id}.result.json"))
+            except FileNotFoundError:
+                pass
+            # 改名为 .txt 触发 on_moved，重新进入下载队列
+            os.rename(task_path, base + '.txt')
+            logger.info(f"任务已重启: {task_id}")
 
     def resume_interrupted_downloads(self, folder):
         """按配置恢复下载器启动前遗留的 .downloading 任务。"""
@@ -533,16 +688,34 @@ class DownloadHandler(FileSystemEventHandler):
                     return
             # 根据首字母判断模式
             mode = 'audio' if base_name[0] == 'a' else 'video'
-            result = self.download(
-                url,
-                base_name,
-                mode,
-                started_at=started_at,
-            )
-            new_extension = '.ok' if result else '.fail'
-            new_filepath = downloading_path.rsplit('.', 1)[0] + new_extension
-            os.rename(downloading_path, new_filepath)
-            logger.info(f"任务完成，文件重命名为: {new_filepath}")
+            with self._task_lock:
+                self._active_tasks.add(base_name)
+            try:
+                result = self.download(
+                    url,
+                    base_name,
+                    mode,
+                    started_at=started_at,
+                )
+                with self._task_lock:
+                    action = self._stop_requests.pop(base_name, None)
+                # 暂停/重启指令到达时下载恰好已经成功，就按完成处理；删除始终执行。
+                if action and (not result or action == task_queue.ACTION_DELETE):
+                    self._apply_stop_action(base_name, action)
+                    return
+                new_extension = '.ok' if result else '.fail'
+                new_filepath = downloading_path.rsplit('.', 1)[0] + new_extension
+                os.rename(downloading_path, new_filepath)
+                logger.info(f"任务完成，文件重命名为: {new_filepath}")
+            finally:
+                with self._task_lock:
+                    self._active_tasks.discard(base_name)
+                    self._processes.pop(base_name, None)
+                    late_action = self._stop_requests.pop(base_name, None)
+                if late_action:
+                    # 指令恰好在收尾改名期间到达：按任务的最新状态补做
+                    self._apply_stop_action(base_name, late_action)
+                self._moved_files.pop(base_name, None)
             # bark_notify(config['BARK_DEVICE_TOKEN'],
             #             title="下载完成" if result else "下载失败",
             #             content=f"{url} 下载{'完成' if result else '失败'}，文件: {os.path.basename(new_filepath)}")
@@ -625,6 +798,10 @@ class DownloadHandler(FileSystemEventHandler):
 
         # 全局下载节流：控制播放列表/批量任务的启动节奏
         download_gate.acquire()
+        # 字幕预检与节流等待可能很久，期间收到的暂停/删除指令在开工前生效
+        if self._stop_requested(base_name):
+            logger.info(f"任务在开始下载前收到停止指令: {base_name}")
+            return False
         moved_filepaths = []
         moved_file_sizes = {}
         ytdlp_error = None
@@ -638,6 +815,12 @@ class DownloadHandler(FileSystemEventHandler):
                     universal_newlines=True,
                     bufsize=1  # 对应 Popen 的行缓冲
                 )
+                with self._task_lock:
+                    self._processes[base_name] = process
+                    stop_pending = base_name in self._stop_requests
+                if stop_pending:
+                    # 指令在登记进程之前到达，handle_control_file 没能终止它
+                    self._terminate_process_tree(process)
                 
                 # 实时循环读取
                 for line in process.stdout:
@@ -661,8 +844,18 @@ class DownloadHandler(FileSystemEventHandler):
                             item_filepaths, item_file_sizes = moved
                             moved_filepaths.extend(item_filepaths)
                             moved_file_sizes.update(item_file_sizes)
+                            # 删除或重启时要清理本次运行已移入 FILES_DIR 的产物
+                            with self._task_lock:
+                                self._moved_files.setdefault(base_name, []).extend(
+                                    item_filepaths
+                                )
                 
                 process.wait()
+                if self._stop_requested(base_name):
+                    # 我们主动终止的：不删临时目录（暂停要续传），也不发失败通知。
+                    # 不看返回码，被信号终止的 yt-dlp 也可能报告 0
+                    logger.info(f"yt-dlp 已按指令停止: {base_name}")
+                    return False
                 if process.returncode != 0:
                     raise subprocess.CalledProcessError(process.returncode, cmd)
             
@@ -816,6 +1009,8 @@ def start_monitor(folder):
     observer.schedule(event_handler, folder, recursive=False)
     observer.start()
     logger.info(f"开始监控目录: {folder}")
+    # 先执行停机期间积压的指令，再恢复中断任务，避免已暂停的任务被重新拉起
+    event_handler.apply_pending_controls(folder)
     event_handler.resume_interrupted_downloads(folder)
     return observer
 
