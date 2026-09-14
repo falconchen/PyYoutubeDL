@@ -339,7 +339,13 @@
             </div>
             <p class="dl-drawer-action-message" role="status" hidden></p>
             <p class="dl-drawer-summary" hidden></p>
-            <div class="dl-drawer-log" role="log" aria-live="polite"></div>
+            <div class="dl-drawer-log" role="log" aria-live="off" tabindex="0"></div>
+            <div class="dl-drawer-log-status">
+                <span>任务日志</span>
+                <button class="dl-drawer-autoscroll is-active" type="button" aria-pressed="true">
+                    自动滚动：开
+                </button>
+            </div>
         </section>
     </div>
 

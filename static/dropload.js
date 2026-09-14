@@ -80,6 +80,7 @@
     var drawerFormat = document.querySelector('.dl-drawer-format');
     var drawerStatus = document.querySelector('.dl-drawer-status');
     var drawerLog = document.querySelector('.dl-drawer-log');
+    var drawerAutoscroll = document.querySelector('.dl-drawer-autoscroll');
     var drawerClose = document.querySelector('.dl-drawer-close');
     var drawerThumbWrap = document.querySelector('.dl-drawer-thumb');
     var drawerThumb = document.querySelector('.dl-drawer-thumb img');
@@ -121,6 +122,8 @@
     var taskInfo = Object.create(null);
     var taskTimer = null;
     var logTimer = null;
+    var renderedLogText = null;
+    var taskLogAutoScroll = true;
     /** 视频元数据缓存，按源 URL 索引，避免重复调用较慢的解析接口。 */
     var metadata = Object.create(null);
     var openTaskId = null;
@@ -577,6 +580,10 @@
         drawerSummary.textContent = summary;
         drawerSummary.hidden = !summary;
         renderDrawerActions(info);
+        // 状态、摘要或操作按钮改变高度时，跟随模式仍应贴住日志末尾。
+        if (taskLogAutoScroll || isTaskLogNearBottom()) {
+            drawerLog.scrollTop = drawerLog.scrollHeight;
+        }
     }
 
     function renderDrawerActions(info) {
@@ -684,15 +691,19 @@
     });
 
     function renderLog(text) {
-        var lines = String(text || '').split('\n').filter(function (line) {
+        var normalizedText = String(text || '');
+        if (normalizedText === renderedLogText) return;
+
+        var stickToBottom = taskLogAutoScroll || isTaskLogNearBottom();
+        var previousScrollTop = drawerLog.scrollTop;
+        var lines = normalizedText.split('\n').filter(function (line) {
             return line.trim() !== '';
         });
+        renderedLogText = normalizedText;
         if (!lines.length) {
             drawerLog.replaceChildren(document.createTextNode('等待下载日志…'));
             return;
         }
-        var nearBottom = drawerLog.scrollHeight - drawerLog.scrollTop
-            - drawerLog.clientHeight < 48;
         drawerLog.replaceChildren.apply(drawerLog, lines.map(function (line, index) {
             var row = document.createElement('p');
             var number = document.createElement('span');
@@ -701,8 +712,34 @@
             row.append(number, document.createTextNode(line));
             return row;
         }));
-        if (nearBottom) drawerLog.scrollTop = drawerLog.scrollHeight;
+        drawerLog.scrollTop = stickToBottom
+            ? drawerLog.scrollHeight
+            : previousScrollTop;
     }
+
+    function isTaskLogNearBottom() {
+        return drawerLog.scrollHeight - drawerLog.scrollTop
+            - drawerLog.clientHeight < 48;
+    }
+
+    function updateTaskLogAutoscroll() {
+        drawerAutoscroll.classList.toggle('is-active', taskLogAutoScroll);
+        drawerAutoscroll.setAttribute('aria-pressed', String(taskLogAutoScroll));
+        drawerAutoscroll.textContent = '自动滚动：' + (taskLogAutoScroll ? '开' : '关');
+    }
+
+    drawerAutoscroll.addEventListener('click', function () {
+        taskLogAutoScroll = !taskLogAutoScroll;
+        updateTaskLogAutoscroll();
+        if (taskLogAutoScroll) drawerLog.scrollTop = drawerLog.scrollHeight;
+    });
+
+    drawerLog.addEventListener('scroll', function () {
+        if (taskLogAutoScroll && !isTaskLogNearBottom()) {
+            taskLogAutoScroll = false;
+            updateTaskLogAutoscroll();
+        }
+    }, { passive: true });
 
     function scheduleLogPoll() {
         if (logTimer !== null) window.clearTimeout(logTimer);
@@ -746,6 +783,9 @@
         if (info && info.thumbnail) setThumbnail(info.thumbnail);
         updateMetadata(currentTaskUrl());
 
+        renderedLogText = null;
+        taskLogAutoScroll = true;
+        updateTaskLogAutoscroll();
         drawerLog.replaceChildren(document.createTextNode('正在读取日志…'));
         drawerClose.focus();
         pollLog();

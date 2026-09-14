@@ -332,6 +332,17 @@ class TestTaskInfoAPI(unittest.TestCase):
         self.assertIn('max-width: 460px;', css)
         self.assertIn('background: #101827;', css)
 
+    def test_task_log_autoscroll_matches_extension_controls(self):
+        template = self.read_asset('templates', 'index.html')
+        script = self.read_asset('static', 'dropload.js')
+
+        self.assertIn('class="dl-drawer-autoscroll is-active"', template)
+        self.assertIn('aria-pressed="true"', template)
+        self.assertIn('自动滚动：开', template)
+        self.assertIn('taskLogAutoScroll = !taskLogAutoScroll;', script)
+        self.assertIn("if (taskLogAutoScroll && !isTaskLogNearBottom())", script)
+        self.assertIn('drawerLog.scrollTop = drawerLog.scrollHeight;', script)
+
     def test_drawer_orders_preview_url_status_then_log(self):
         template = self.read_asset('templates', 'index.html')
         css = self.read_asset('static', 'dropload.css')

@@ -1055,6 +1055,7 @@
     bottom: 0;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
     width: 100%;
     max-width: 460px;
     border-left: 1px solid #dfe7f1;
@@ -1393,7 +1394,9 @@
 
 .dl-drawer-log {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
     margin: 0;
     padding: 20px;
     background: #101827;
@@ -1414,6 +1417,43 @@
     margin-right: 12px;
     color: #53647b;
     user-select: none;
+}
+
+.dl-drawer-log-status {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px 8px 20px;
+    border-top: 1px solid #263246;
+    background: #101827;
+    font-size: 11px;
+    color: #718096;
+}
+
+.dl-drawer-autoscroll {
+    min-height: 32px;
+    padding: 5px 9px;
+    border: 1px solid #344258;
+    border-radius: 7px;
+    background: transparent;
+    font: inherit;
+    color: #9aa8ba;
+    cursor: pointer;
+}
+
+.dl-drawer-autoscroll:hover,
+.dl-drawer-autoscroll.is-active {
+    border-color: #4d8ee8;
+    background: rgba(23, 105, 224, 0.16);
+    color: #83b7ff;
+}
+
+.dl-drawer-autoscroll:focus-visible,
+.dl-drawer-log:focus-visible {
+    outline: 2px solid #83b7ff;
+    outline-offset: -2px;
 }
 
 /* 页脚 */
