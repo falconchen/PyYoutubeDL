@@ -1,4 +1,4 @@
-"""Render native audio mode and preserve byte-range delivery for seeking."""
+"""Keep video mode fixed and preserve byte-range delivery for seeking."""
 from html.parser import HTMLParser
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -19,7 +19,7 @@ class MediaElements(HTMLParser):
             self.by_id[attrs['id']] = (tag, attrs)
 
 
-def test_video_listen_mode_uses_audio_and_preserves_deep_link():
+def test_listen_query_does_not_change_video_player_mode():
     with TemporaryDirectory() as files_dir:
         for name in ['first.mp4', 'second.mp4']:
             Path(files_dir, name).touch()
@@ -29,14 +29,18 @@ def test_video_listen_mode_uses_audio_and_preserves_deep_link():
             patch('app.get_video_metadata', return_value={'title': '测试视频'}),
         ):
             client = app_module.app.test_client()
-            for query, expected_tag in [('', 'video'), ('&listen=1', 'audio')]:
+            for query in ['', '&listen=1']:
                 response = client.get('/player?tab=video&file=first.mp4' + query)
                 assert response.status_code == 200
                 html = response.get_data(as_text=True)
                 elements = MediaElements(html).by_id
-                assert elements['video-player'][0] == expected_tag
+                assert elements['video-player'][0] == 'video'
                 assert elements['audio-player'][0] == 'audio'
-                assert elements['background-listen-toggle'][1]['aria-pressed'] == str(expected_tag == 'audio').lower()
+                assert 'background-listen-toggle' not in elements
+                assert '锁屏听视频前，先切换到“后台听音频”。' not in html
+                assert '>后台听音频<' not in html
+                assert 'audioPosterMode: false' in html
+                assert 'fullscreenToggle: true, pictureInPictureToggle: true' in html
                 assert 'var currentFilename = "first.mp4";' in html
                 assert 'background-playback.js' in html
 

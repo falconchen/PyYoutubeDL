@@ -47,7 +47,8 @@
                         <i class="fas fa-info-circle"></i> 音频播完后将自动播放下一首
                     </div>
                 </div>
-                <section class="ai-summary-panel" aria-labelledby="audio-ai-summary-title">
+                {% set initial_audio_summary_tracks = audio_items[0].summary_tracks if audio_items else [] %}
+                <section class="ai-summary-panel" aria-labelledby="audio-ai-summary-title" {% if not initial_audio_summary_tracks %}hidden{% endif %}>
                     <div class="ai-summary-header">
                         <h3 id="audio-ai-summary-title"><i class="fas fa-wand-magic-sparkles"></i> AI 总结</h3>
                         <div class="ai-summary-actions">

@@ -519,9 +519,11 @@
         }
 
         function updateAiSummaryPanel(filename) {
+            var panel = document.querySelector('#audio-panel .ai-summary-panel');
             var button = document.getElementById('audio-generate-ai-summary');
             var status = document.getElementById('audio-ai-summary-status');
             var track = getAudioSummaryTrack(filename);
+            panel.hidden = !track;
             var cached = track ? aiSummaryResults[audioSummaryCacheKey(filename, track)] : null;
             if (cached) renderAiSummary(cached); else resetAiSummaryContent();
             if (!aiSummaryConfigured) {

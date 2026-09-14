@@ -14,7 +14,6 @@
     <link rel="stylesheet" href="{{ 'refresh.css' | versioned }}">
 </head>
 
-{% set listen_mode = request.args.get("listen") == "1" %}
 <body class="player-page redesigned-page">
     <div class="container player-main-container">
         <div class="header player-header">
@@ -38,19 +37,18 @@
                     {% set initial_video_metadata = video_metadata.get(video_files[0], {}) if video_files else {} %}
                     {% set initial_video_covers = initial_video_metadata.get('cover_candidates', []) %}
                     {% set initial_video_cover = initial_video_covers[1] if initial_video_covers|length > 1 else (initial_video_covers[0] if initial_video_covers else '') %}
-                    <{% if listen_mode %}audio{% else %}video{% endif %} id="video-player" class="video-js vjs-big-play-centered vjs-16-9" controls preload="metadata" playsinline webkit-playsinline
+                    {% set initial_video_subtitle_tracks = subtitle_tracks.get(video_files[0], []) if video_files else [] %}
+                    <video id="video-player" class="video-js vjs-big-play-centered vjs-16-9" controls preload="metadata" playsinline webkit-playsinline
                         {% if initial_video_cover %}poster="{{ initial_video_cover }}"{% endif %}>
                         {% if video_files %}
                         <source src="{{ url_for('serve_file', filename=video_files[0]) }}" type="video/mp4">
-                        {% for track in subtitle_tracks.get(video_files[0], []) %}
+                        {% for track in initial_video_subtitle_tracks %}
                         <track id="{{ track.id }}" kind="subtitles" src="{{ track.url }}" srclang="{{ track.language }}" label="{{ track.label }}">
                         {% endfor %}
                         {% endif %}
-                    </{% if listen_mode %}audio{% else %}video{% endif %}>
+                    </video>
                 </div>
                 <div class="video-info-panel">
-                    <button type="button" id="background-listen-toggle" class="btn-secondary" aria-pressed="{{ 'true' if listen_mode else 'false' }}" {% if not video_files %}disabled{% endif %}>{{ '返回视频画面' if listen_mode else '后台听音频' }}</button>
-                    <p class="player-controls-hint">{{ '听音频模式：请点击播放后再锁屏。' if listen_mode else '锁屏听视频前，先切换到“后台听音频”。' }}</p>
                     <h2 id="current-video-title">正在播放: {{ initial_video_metadata.get('title', '暂无视频') }}</h2>
                     {% set initial_video_source_url = initial_video_metadata.get('source_url', '') %}
                     <p id="current-video-source" class="media-source" {% if not initial_video_source_url %}hidden{% endif %}>
@@ -75,7 +73,7 @@
                         <i class="fas fa-info-circle"></i> 视频播完后将自动播放下一条
                     </div>
                 </div>
-                <section class="ai-summary-panel" aria-labelledby="ai-summary-title">
+                <section class="ai-summary-panel" aria-labelledby="ai-summary-title" {% if not initial_video_subtitle_tracks %}hidden{% endif %}>
                     <div class="ai-summary-header">
                         <h3 id="ai-summary-title"><i class="fas fa-wand-magic-sparkles"></i> AI 总结</h3>
                         <div class="ai-summary-actions">
@@ -183,8 +181,8 @@
 
         var player = videojs('video-player', {
             playsinline: true,
-            audioPosterMode: {{ listen_mode | tojson }},
-            controlBar: { fullscreenToggle: {{ (not listen_mode) | tojson }}, pictureInPictureToggle: {{ (not listen_mode) | tojson }} },
+            audioPosterMode: false,
+            controlBar: { fullscreenToggle: true, pictureInPictureToggle: true },
             playbackRates: [0.5, 0.75, 1, 1.5, 2, 3]
         });
         var video_files = {{ video_files | tojson }};
@@ -205,17 +203,6 @@
 
         BackgroundPlayback.attach(player, function () {
             return videoMetadata[currentFilename] || { title: currentFilename };
-        });
-        document.getElementById('background-listen-toggle').addEventListener('click', function () {
-            saveCurrentVideoProgress();
-            player.pause();
-            var url = new URL(window.location.href);
-            url.pathname = {{ url_for('player') | tojson }};
-            url.searchParams.set('tab', 'video');
-            url.searchParams.set('file', currentFilename);
-            if (url.searchParams.get('listen') === '1') url.searchParams.delete('listen');
-            else url.searchParams.set('listen', '1');
-            window.location.assign(url.href);
         });
 
         player.ready(function () {
@@ -603,10 +590,12 @@
         }
 
         function updateAiSummaryPanel(filename) {
+            var panel = document.querySelector('#video-panel .ai-summary-panel');
             var button = document.getElementById('generate-ai-summary');
             var status = document.getElementById('ai-summary-status');
             var content = document.getElementById('ai-summary-content');
             var track = getAiSummaryTrack(filename);
+            panel.hidden = !track;
             var cachedSummary = track
                 ? aiSummaryResults[aiSummaryCacheKey(filename, track)]
                 : null;
