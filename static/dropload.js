@@ -135,6 +135,8 @@
 
     if (!form || !listElement) return;
 
+    confineLyricsScrolling();
+
     /** 任务本地缓存：{id, url}，最新的在前。 */
     var tasks = [];
     /** 最近一次 /api/task_info 返回的任务详情，按任务 ID 索引。 */
@@ -1004,6 +1006,29 @@
         applySubtitleDefaults();
         installSubtitleScaling();
         loadTextTracks(item);
+    }
+
+    function confineLyricsScrolling() {
+        // zwplayer 每换一句歌词就对当前行调用 scrollIntoView({block: 'center'})，
+        // 它会连带滚动所有可滚动的祖先，用户往下翻页时会被拽回播放器。
+        // 歌词行随切歌、切换面板重建，逐个元素改不全，所以在原型上只接管歌词容器里的元素，
+        // 让它们只滚动歌词容器本身；其他元素仍走浏览器原生行为。
+        var nativeScrollIntoView = window.Element && Element.prototype.scrollIntoView;
+        if (typeof nativeScrollIntoView !== 'function') return;
+        Element.prototype.scrollIntoView = function (options) {
+            var container = typeof this.closest === 'function'
+                ? this.closest('.zwp-music-lyrics')
+                : null;
+            if (!container) return nativeScrollIntoView.apply(this, arguments);
+            var lineRect = this.getBoundingClientRect();
+            var containerRect = container.getBoundingClientRect();
+            var offset = lineRect.top - containerRect.top
+                - (container.clientHeight - lineRect.height) / 2;
+            container.scrollBy({
+                top: offset,
+                behavior: options && options.behavior === 'smooth' ? 'smooth' : 'auto'
+            });
+        };
     }
 
     function installSubtitleScaling() {

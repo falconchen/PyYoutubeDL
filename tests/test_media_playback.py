@@ -92,6 +92,14 @@ class TestMediaPlayback(unittest.TestCase):
                 self.assertIn(f"setSessionAction('{action}'", self.script)
         self.assertIn("navigator.audioSession.type = 'playback';", self.script)
 
+    def test_lyrics_auto_scroll_stays_inside_the_lyrics_panel(self):
+        # zwplayer 对当前歌词行调用 scrollIntoView，会把整页拽回播放器；
+        # 歌词容器里的元素只滚动容器本身，其他元素保留原生行为
+        self.assertIn('confineLyricsScrolling();', self.script)
+        self.assertIn("this.closest('.zwp-music-lyrics')", self.script)
+        self.assertIn('return nativeScrollIntoView.apply(this, arguments);', self.script)
+        self.assertIn('container.scrollBy({', self.script)
+
 
 if __name__ == '__main__':
     unittest.main()
