@@ -23,6 +23,7 @@
     var LRC_TIMESTAMP = /\[\d{1,2}:\d{1,2}/;
     // zwplayer 字幕设置面板里「字幕大小：较小」对应的值（默认「适中」为 0.2）
     var SUBTITLE_FONT_SIZE_SMALL = '0.14';
+    var SUBTITLE_BG_OPACITY = 0.5;
     // 字幕基准字号（「适中」档）按播放器尺寸等比：取宽度 4.2%、高度 7.5% 中较小者，
     // 页面内约 760×428 时为 32px，与 zwplayer 原算法一致；实际字号最大 36px，免得全屏时过大。
     var SUBTITLE_BASE_WIDTH_RATIO = 0.042;
@@ -1079,9 +1080,9 @@
         var settings = zwplayer && zwplayer._subtitleSettings;
         if (!settings || !settings.primary) return;
         settings.primary.fontSize = SUBTITLE_FONT_SIZE_SMALL;
-        // 背景不透明度拉到最低：字幕直接叠在画面上，不带黑底
-        settings.primary.bgOpacity = 0;
-        if (settings.secondary) settings.secondary.bgOpacity = 0;
+        // 半透明黑底（zwplayer 默认 60%）：浅色画面上也看得清，又不过多遮挡画面
+        settings.primary.bgOpacity = SUBTITLE_BG_OPACITY;
+        if (settings.secondary) settings.secondary.bgOpacity = SUBTITLE_BG_OPACITY;
         if (typeof zwplayer._applyAllSubtitleSettings === 'function') {
             zwplayer._applyAllSubtitleSettings();
         }
