@@ -71,17 +71,18 @@
             <div class="dl-token-new" role="status">
                 <p><strong>{{ new_token.name }}</strong> 已创建。请立即复制，离开本页后无法再次查看。</p>
                 <div class="dl-token-copy">
-                    <input class="dl-auth-input" id="new-token" type="text" readonly value="{{ new_token.token }}">
+                    <input class="dl-auth-input" id="new-token" type="text" readonly value="{{ new_token.token }}"
+                           aria-label="新生成的访问令牌" autocomplete="off" spellcheck="false">
                     <button class="dl-admin-button" type="button" data-copy-target="new-token">复制</button>
                 </div>
             </div>
             {% endif %}
 
             <form class="dl-token-form" method="post" action="{{ url_for('profile_create_token') }}">
-                <label class="dl-auth-label" for="token-name">名称
+                <label class="dl-auth-label" for="token-name"><span>名称</span>
                     <input class="dl-auth-input" id="token-name" name="name" type="text" maxlength="100" placeholder="Chrome 扩展">
                 </label>
-                <label class="dl-auth-label" for="token-expires">有效期
+                <label class="dl-auth-label" for="token-expires"><span>有效期</span>
                     <select class="dl-auth-input" id="token-expires" name="expires_in">
                         <option value="30">30 天</option>
                         <option value="90" selected>90 天</option>
@@ -94,7 +95,7 @@
 
             {% if tokens %}
             <div class="dl-admin-scroll">
-                <table class="dl-admin-table">
+                <table class="dl-admin-table dl-token-table">
                     <thead>
                         <tr>
                             <th>名称</th>
@@ -108,15 +109,15 @@
                     <tbody>
                     {% for token in tokens %}
                         <tr>
-                            <td>{{ token.name }}</td>
-                            <td><code>{{ token.prefix }}…</code></td>
-                            <td>{{ token.created_label }}</td>
-                            <td>
+                            <td class="dl-token-name">{{ token.name }}</td>
+                            <td data-label="令牌"><code class="dl-token-prefix">{{ token.prefix }}…</code></td>
+                            <td data-label="创建时间">{{ token.created_label }}</td>
+                            <td data-label="过期时间">
                                 {% if token.expired %}
                                 <span class="dl-admin-status" data-status="disabled">已过期</span>
                                 {% else %}{{ token.expires_label }}{% endif %}
                             </td>
-                            <td>{{ token.last_used_label }}</td>
+                            <td data-label="最后使用">{{ token.last_used_label }}</td>
                             <td class="dl-admin-actions">
                                 <form method="post" action="{{ url_for('profile_revoke_token', token_id=token.id) }}"
                                       onsubmit="return confirm('撤销后使用该令牌的扩展和脚本将立即失效，确定撤销？')">
@@ -158,7 +159,14 @@ curl {{ server_url }}/api/downloader_log \
             button.addEventListener('click', function () {
                 var input = document.getElementById(button.dataset.copyTarget);
                 input.select();
-                var done = function () { button.textContent = '已复制'; };
+                var done = function () {
+                    button.textContent = '已复制';
+                    button.dataset.copied = '';
+                    setTimeout(function () {
+                        button.textContent = '复制';
+                        delete button.dataset.copied;
+                    }, 2000);
+                };
                 if (navigator.clipboard) {
                     navigator.clipboard.writeText(input.value).then(done, function () {
                         document.execCommand('copy');

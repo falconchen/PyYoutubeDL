@@ -2673,6 +2673,8 @@
     }
 }
 
+/* 个人设置页 */
+
 .dl-profile {
     display: grid;
     gap: 16px;
@@ -2687,7 +2689,8 @@
 .dl-profile-info {
     display: grid;
     grid-template-columns: max-content minmax(0, 1fr);
-    gap: 10px 20px;
+    align-items: center;
+    gap: 12px 24px;
     margin: 0;
     font-size: 14px;
 }
@@ -2708,12 +2711,36 @@
     gap: 8px;
 }
 
+.dl-profile-google form {
+    margin: 0;
+}
+
 .dl-profile-google .dl-admin-button {
+    display: inline-flex;
+    align-items: center;
     text-decoration: none;
 }
 
+/* 个人设置页的表单控件统一高度，保证输入框、下拉框与按钮底边对齐 */
+.dl-profile .dl-auth-input,
+.dl-profile .dl-auth-submit,
+.dl-token-copy .dl-admin-button {
+    height: 44px;
+    margin: 0;
+}
+
+.dl-profile select.dl-auth-input {
+    padding-right: 36px;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238794a7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-position: right 12px center;
+    background-repeat: no-repeat;
+    background-size: 16px;
+    cursor: pointer;
+}
+
 .dl-token-new {
-    margin-bottom: 16px;
+    margin-bottom: 20px;
     padding: 14px;
     border: 1px solid #bfe8cf;
     border-radius: 12px;
@@ -2727,6 +2754,7 @@
 
 .dl-token-copy {
     display: flex;
+    align-items: stretch;
     gap: 8px;
 }
 
@@ -2734,29 +2762,56 @@
     flex: 1;
     min-width: 0;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
+}
+
+.dl-token-copy .dl-admin-button {
+    flex: none;
+    min-width: 72px;
+    padding: 0 16px;
+}
+
+.dl-token-copy .dl-admin-button[data-copied] {
+    border-color: #24a05a;
+    color: #24a05a;
 }
 
 .dl-token-form {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    align-items: end;
     gap: 12px;
-    margin-bottom: 16px;
+    margin-bottom: 20px;
 }
 
 .dl-token-form .dl-auth-label {
     display: grid;
     gap: 6px;
-    flex: 1 1 180px;
+    margin: 0;
 }
 
 .dl-token-form .dl-auth-submit {
     width: auto;
-    padding-inline: 20px;
+    padding: 0 22px;
+    white-space: nowrap;
+}
+
+.dl-token-name {
+    font-weight: 600;
+}
+
+.dl-token-prefix {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
+    color: #65748a;
+}
+
+.dl-token-table form {
+    margin: 0;
 }
 
 .dl-token-usage {
-    margin-top: 16px;
+    margin-top: 20px;
     font-size: 14px;
 }
 
@@ -2772,4 +2827,128 @@
     background: #f4f7fb;
     font-size: 12px;
     line-height: 1.6;
+}
+
+.dl-token-usage p code {
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 639px) {
+    .dl-profile {
+        gap: 12px;
+    }
+
+    .dl-profile .dl-admin {
+        padding: 16px;
+    }
+
+    .dl-profile .dl-admin-header {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .dl-profile-info {
+        grid-template-columns: 1fr;
+        gap: 2px;
+    }
+
+    .dl-profile-info dt {
+        font-size: 12px;
+    }
+
+    .dl-profile-info dd + dt {
+        margin-top: 10px;
+    }
+
+    /* 16px 字号避免 iOS Safari 聚焦输入框时自动放大页面 */
+    .dl-profile .dl-auth-input {
+        font-size: 16px;
+    }
+
+    .dl-token-form {
+        grid-template-columns: 1fr;
+    }
+
+    .dl-token-form .dl-auth-submit {
+        width: 100%;
+    }
+
+    .dl-token-copy {
+        flex-direction: column;
+    }
+
+    .dl-token-copy .dl-auth-input {
+        flex: none;
+        font-size: 14px;
+    }
+
+    /* 小屏把令牌表格改成卡片，避免横向滚动 */
+    .dl-token-table thead {
+        display: none;
+    }
+
+    .dl-token-table,
+    .dl-token-table tbody,
+    .dl-token-table tr,
+    .dl-token-table td {
+        display: block;
+    }
+
+    .dl-token-table tr {
+        padding: 12px 0;
+        border-bottom: 1px solid #edf1f5;
+    }
+
+    .dl-token-table tr:first-child {
+        padding-top: 0;
+    }
+
+    .dl-token-table td {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 4px 0;
+        border: 0;
+        white-space: normal;
+        text-align: right;
+    }
+
+    .dl-token-table td::before {
+        content: attr(data-label);
+        flex: none;
+        font-size: 13px;
+        color: #9aa8ba;
+        text-align: left;
+    }
+
+    .dl-token-table td.dl-token-name::before {
+        content: none;
+    }
+
+    .dl-token-table td.dl-token-name {
+        justify-content: flex-start;
+        padding-bottom: 6px;
+        text-align: left;
+    }
+
+    .dl-token-table td.dl-admin-actions {
+        justify-content: stretch;
+        padding-top: 8px;
+    }
+
+    .dl-token-table td.dl-admin-actions::before {
+        content: none;
+    }
+
+    .dl-token-table td.dl-admin-actions form,
+    .dl-token-table td.dl-admin-actions .dl-admin-button {
+        width: 100%;
+    }
+
+    /* 触屏没有 hover，撤销按钮直接用危险色提示 */
+    .dl-token-table td.dl-admin-actions .dl-admin-button {
+        height: 40px;
+        border-color: #f5c2c0;
+        color: #d0453f;
+    }
 }
