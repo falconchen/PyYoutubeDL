@@ -24,3 +24,6 @@ deploy/targets.conf
 
 # 设计稿里的 zwplayer 与 static/zwplayer/ 完全相同，运行时只用后者，不重复入库
 DropLoadWithMediaLibrary/public/zwplayer/
+
+# 各 worktree 本地浏览器测试的启动配置，由 worktree-browser-test skill 生成
+.claude/launch.json
