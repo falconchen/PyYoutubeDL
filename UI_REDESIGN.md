@@ -64,7 +64,7 @@ new ZWPlayer({ playerElm: mount, url, poster, fluid: true, autoplay, speedButton
 
 `/subtitles/...` 字幕转换路由、`/api/ai_summaries*` 扩展接口和 `ai_summary_worker.py` 保持不变（Chrome 扩展仍在用）。
 
-删除的文件：`templates/player.html`、`templates/audio_player.html`、`templates/_audio_controller.html`、`static/player.css`、`static/refresh.css`、`static/media-library.js`、`static/background-playback.js`。`static/style.css` 保留，`templates/content_base.html`（关于／条款／隐私）和 chrome 扩展仍在用。
+删除的文件：`templates/player.html`、`templates/audio_player.html`、`templates/_audio_controller.html`、`static/player.css`、`static/refresh.css`、`static/media-library.js`、`static/background-playback.js`。`static/style.css` 也已删除，关于／条款／隐私页改用 `dropload.css`。
 
 ### 验证
 
@@ -82,7 +82,7 @@ node --check static/dropload.js
 ### 结构
 
 - `templates/index.html`：整页结构，图标以内联 SVG sprite（`<symbol>` + `<use>`）提供，替代原来的 Font Awesome CDN。
-- `static/dropload.css`：纯 CSS 实现设计稿的间距、配色与断点（640px / 1024px），下载器与媒体库共用，不影响 `style.css` 和关于／条款／隐私页。
+- `static/dropload.css`：纯 CSS 实现设计稿的间距、配色与断点（640px / 1024px），下载器与媒体库共用，关于／条款／隐私页也共用。
 - `static/dropload.js`：模式切换、任务入队、进度轮询、任务详情抽屉和媒体库。
 
 左栏为链接输入与格式勾选，右栏为任务列表；桌面端 `minmax(0, 1fr) 390px` 双栏，小屏单栏且任务列表限高 420px。

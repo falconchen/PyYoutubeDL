@@ -85,69 +85,6 @@ def load_token(config):
         return None
 
 
-def save_token(config, token):
-    """保存令牌字典，文件权限 0600。"""
-    token_file = config.get("GOOGLE_OAUTH_TOKEN_FILE", "")
-    if not token_file:
-        return
-    token_dir = os.path.dirname(token_file)
-    if token_dir:
-        os.makedirs(token_dir, exist_ok=True)
-    with open(token_file, "w", encoding="utf-8") as f:
-        json.dump(token, f, indent=2)
-    try:
-        os.chmod(token_file, 0o600)
-    except OSError:
-        pass
-
-
-class FileTokenStore:
-    """原先的全局单份令牌文件，保留用于迁移与无用户上下文的场景。"""
-
-    def __init__(self, config):
-        self.config = config
-
-    def load(self):
-        return load_token(self.config)
-
-    def save(self, token):
-        save_token(self.config, token)
-
-    def failed(self):
-        return fail_lock_exists(self.config)
-
-    def mark_failed(self, reason=""):
-        set_fail_lock(self.config)
-
-    def clear_failure(self):
-        clear_fail_lock(self.config)
-
-
-def fail_lock_exists(config):
-    lock_file = config.get("GOOGLE_OAUTH_FAIL_LOCK_FILE", "")
-    return bool(lock_file and os.path.exists(lock_file))
-
-
-def set_fail_lock(config):
-    lock_file = config.get("GOOGLE_OAUTH_FAIL_LOCK_FILE", "")
-    if not lock_file:
-        return
-    lock_dir = os.path.dirname(lock_file)
-    if lock_dir:
-        os.makedirs(lock_dir, exist_ok=True)
-    with open(lock_file, "w", encoding="utf-8") as f:
-        f.write("1")
-
-
-def clear_fail_lock(config):
-    lock_file = config.get("GOOGLE_OAUTH_FAIL_LOCK_FILE", "")
-    if lock_file and os.path.exists(lock_file):
-        try:
-            os.unlink(lock_file)
-        except OSError:
-            pass
-
-
 def _proxied_request(config):
     """构造带可选代理的 google-auth 刷新请求会话。"""
     proxy = (config.get("YOUTUBE_API_PROXY") or "").strip()
@@ -165,21 +102,20 @@ def _credentials_to_token(credentials):
     return json.loads(credentials.to_json())
 
 
-def get_credentials(config, store=None, notify=None):
+def get_credentials(config, store, notify=None):
     """加载并确保有效的 Credentials。
 
     Args:
         config: 运行配置字典。
-        store: 令牌存储；默认用全局文件，多用户场景传入按用户的存储。
+        store: 令牌存储，需实现 load/save/mark_failed，例如 user_store.UserTokenStore。
         notify: 可选回调 notify(title, content)，用于失败时的 Bark 通知。
 
     Returns:
         Credentials 或 None（尚无令牌，需先授权）。
 
     Raises:
-        RuntimeError: 令牌刷新失败（已写 fail-lock）。
+        RuntimeError: 令牌刷新失败（已通过 store.mark_failed 记录原因）。
     """
-    store = store or FileTokenStore(config)
     token = store.load()
     if not token:
         return None

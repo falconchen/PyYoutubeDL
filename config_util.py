@@ -62,7 +62,6 @@ DEFAULT_CONFIG = {
     "GOOGLE_OAUTH_CLIENT_SECRET": "",# Google OAuth 客户端密钥
     "GOOGLE_OAUTH_REDIRECT_URI": "https://yter.cellmean.com/oauth/callback",  # OAuth 回调地址
     "GOOGLE_OAUTH_TOKEN_FILE": "./data/youtube_token.json",  # OAuth 令牌文件
-    "GOOGLE_OAUTH_FAIL_LOCK_FILE": "./data/youtube_oauth_fail.lock",  # 刷新失败锁
     "GOOGLE_OAUTH_USER_FILE": "./data/youtube_user.json",   # 授权用户信息（头像/名称）
     "YOUTUBE_API_PROXY": "",         # YouTube API 可选代理（如 socks5h://host:port）
     "PLAYLIST_POLL_INTERVAL_SECONDS": 300,  # 播放列表轮询间隔（秒）
@@ -77,7 +76,7 @@ PATH_CONFIG_KEYS = [
     "URLS_DIR",  "TMP_DIR",
     "FILES_DIR", "LOG_DIR", "AI_SUMMARY_DB_PATH",
     "USER_DB_PATH",
-    "GOOGLE_OAUTH_TOKEN_FILE", "GOOGLE_OAUTH_FAIL_LOCK_FILE",
+    "GOOGLE_OAUTH_TOKEN_FILE",
     "GOOGLE_OAUTH_USER_FILE",
 ]
 

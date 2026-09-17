@@ -553,7 +553,6 @@ video (2).mp4
 | `GOOGLE_OAUTH_CLIENT_SECRET` | string | Google OAuth 客户端密钥 |
 | `GOOGLE_OAUTH_REDIRECT_URI` | string | OAuth 回调地址，默认 `https://yter.cellmean.com/oauth/callback` |
 | `GOOGLE_OAUTH_TOKEN_FILE` | string | OAuth 令牌文件，默认 `./data/youtube_token.json` |
-| `GOOGLE_OAUTH_FAIL_LOCK_FILE` | string | 刷新失败锁文件，默认 `./data/youtube_oauth_fail.lock` |
 | `GOOGLE_OAUTH_USER_FILE` | string | 授权用户资料文件（头像/名称），默认 `./data/youtube_user.json`，`0600` 权限 |
 | `YOUTUBE_API_PROXY` | string | YouTube API 可选代理，如 `socks5h://host:port`；留空走直连/环境变量 |
 | `PLAYLIST_POLL_INTERVAL_SECONDS` | int | 播放列表轮询间隔（秒），默认 300 |
@@ -640,7 +639,7 @@ YouTube 部分视频需要登录才能下载。支持通过 yt-dlp 浏览器 coo
 
 ### 失败处理与配额
 
-- 令牌过期会自动用 `refresh_token` 刷新；刷新失败会写入 `GOOGLE_OAUTH_FAIL_LOCK_FILE` 并发送 Bark 通知，重新授权后自动清除并恢复。
+- 令牌过期会自动用 `refresh_token` 刷新；刷新失败会把原因记在该用户的令牌记录上并发送 Bark 通知，监控跳过该用户，重新绑定 Google 后自动清除并恢复。
 - 删除播放列表条目失败时，该条不会下发下载，避免重复下载，并继续处理后续条目。
 - YouTube Data API 有日配额（`playlistItems.list` 消耗 1、`playlistItems.delete` 消耗 50 单位/次），默认 300 秒轮询一次、每次每列表最多 10 条。消费式删除是配额大头，量大时应调大 `PLAYLIST_POLL_INTERVAL_SECONDS` 或提升配额。
 - 服务器无法直连 Google 时，可设置 `YOUTUBE_API_PROXY`（例如 `socks5h://192.168.11.7:1080`）供令牌刷新与 API 调用走代理；OAuth 网页回调的令牌换取走环境变量 `HTTPS_PROXY`。

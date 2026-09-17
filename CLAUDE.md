@@ -23,7 +23,7 @@ python stop.py
 export FLASK_APP=app.py && export FLASK_DEBUG=1 && flask run --host=0.0.0.0 --port=5100
 
 # Run tests
-python -m pytest tests/test_timezone.py tests/test_video_info.py -v
+python -m pytest tests/ -q
 
 # Flask CLI: fetch YouTube cookies from the configured YTC API
 flask get-cookie

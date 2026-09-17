@@ -69,7 +69,7 @@ python stop.py
 export FLASK_APP=app.py && export FLASK_DEBUG=1 && flask run --host=0.0.0.0 --port=5100
 
 # 运行测试
-python -m pytest tests/test_timezone.py tests/test_video_info.py -v
+python -m pytest tests/ -q
 
 # 获取 YouTube cookies
 flask get-cookie

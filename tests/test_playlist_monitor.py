@@ -175,8 +175,6 @@ class TestRunOnceGuards(unittest.TestCase):
             'GOOGLE_OAUTH_CLIENT_ID': 'cid',
             'GOOGLE_OAUTH_CLIENT_SECRET': 'secret',
             'GOOGLE_OAUTH_REDIRECT_URI': 'https://yter.cellmean.com/oauth/callback',
-            'GOOGLE_OAUTH_TOKEN_FILE': os.path.join(root, 'token.json'),
-            'GOOGLE_OAUTH_FAIL_LOCK_FILE': os.path.join(root, 'fail.lock'),
             'MONITOR_PLAYLISTS': {'PL123': ['video']},
             'PLAYLIST_POLL_INTERVAL_SECONDS': 300,
             'PLAYLIST_MAX_ITEMS_PER_RUN': 10,
@@ -235,40 +233,6 @@ class TestRunOnceGuards(unittest.TestCase):
         ) as get_credentials:
             self.monitor._run_once()
             get_credentials.assert_not_called()
-
-
-class TestYoutubeAuthRefreshFailure(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.config = {
-            'GOOGLE_OAUTH_TOKEN_FILE': os.path.join(self.tmp.name, 'token.json'),
-            'GOOGLE_OAUTH_FAIL_LOCK_FILE': os.path.join(self.tmp.name, 'fail.lock'),
-            'GOOGLE_OAUTH_REDIRECT_URI': 'https://yter.cellmean.com/oauth/callback',
-            'YOUTUBE_API_PROXY': '',
-        }
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def test_refresh_failure_writes_fail_lock(self):
-        fake = MagicMock()
-        fake.valid = False
-        fake.refresh_token = 'refresh-token'
-        fake.refresh.side_effect = RuntimeError('boom')
-
-        with patch.object(
-            youtube_auth, 'load_token',
-            return_value={'token': 'x', 'refresh_token': 'refresh-token'},
-        ), patch.object(
-            youtube_auth.Credentials, 'from_authorized_user_info',
-            return_value=fake,
-        ):
-            with self.assertRaises(RuntimeError):
-                youtube_auth.get_credentials(self.config)
-
-        self.assertTrue(
-            os.path.exists(self.config['GOOGLE_OAUTH_FAIL_LOCK_FILE'])
-        )
 
 
 if __name__ == '__main__':

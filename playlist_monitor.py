@@ -102,7 +102,7 @@ class PlaylistMonitor:
         """按状态输出日志：状态跃迁时提示一次，稳定状态下周期性心跳。
 
         summary: _run_once 返回的 dict，包含 "state"（disabled / no_token /
-        fail_lock / monitoring / error）及可选的已下发任务数。
+        monitoring / error）及可选的已下发任务数。
         """
         state = summary.get("state", "unknown")
         dispatched = summary.get("dispatched", 0)
@@ -119,11 +119,6 @@ class PlaylistMonitor:
                     "等待 OAuth 授权，请访问 %s 完成授权后自动恢复。",
                     youtube_auth.get_oauth_start_url(self.config),
                 )
-            elif state == "fail_lock":
-                self.logger.warning(
-                    "OAuth 刷新失败锁定，需重新授权: %s",
-                    youtube_auth.get_oauth_start_url(self.config),
-                )
             elif state == "monitoring":
                 self.logger.info("OAuth 授权就绪，开始监控播放列表。")
             elif state == "error":
@@ -138,8 +133,6 @@ class PlaylistMonitor:
             if state == "no_token":
                 self.logger.info("仍在等待 OAuth 授权（每 %s 秒重试）。",
                                  self.config.get("PLAYLIST_POLL_INTERVAL_SECONDS", 300))
-            elif state == "fail_lock":
-                self.logger.info("OAuth 刷新失败锁仍存在，等待重新授权。")
             elif state == "monitoring":
                 playlist_count = len(self.config.get("MONITOR_PLAYLISTS") or {})
                 self.logger.info(

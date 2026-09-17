@@ -809,8 +809,8 @@ def transfer_anonymous_ownership(db_path, anonymous_id, user_id):
 class UserTokenStore:
     """youtube_auth 的令牌存储实现，按用户读写 google_tokens 表。
 
-    与 youtube_auth.FileTokenStore 接口一致，供 Web 授权流程和后台
-    worker 共用；失败原因写回记录，替代原来的全局 fail-lock 文件。
+    供 youtube_auth.get_credentials 使用，Web 授权流程和后台 worker 共用；
+    失败原因写回记录，替代原来的全局 fail-lock 文件。
     """
 
     def __init__(self, db_path, user_id):
