@@ -286,6 +286,141 @@
     padding-top: 0 !important;
 }
 
+/* 音乐模式布局：封面和标题固定在左侧，歌词占右侧。
+   zwplayer.css 由脚本插在本文件之后，同特异性会被它覆盖，所以统一加 .dl-stage-frame 前缀；
+   它的断点按视口宽度算，这里按播放器自身尺寸（容器查询）排版，并显式写全两种状态，
+   避免视口在 480/767px 附近时混进它的纵向堆叠规则。 */
+.dl-stage-frame .zwp-music-full {
+    container-type: size;
+    align-items: stretch;
+    justify-content: flex-start;
+    padding: 16px 0 12px;
+}
+
+.dl-stage-frame .zwp-music-full-body {
+    flex: 1 1 0;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 40px;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 960px;
+    min-height: 0;
+    margin: 0 auto;
+    padding: 0 32px;
+}
+
+.dl-stage-frame .zwp-music-vinyl-wrap {
+    flex: 0 0 auto;
+    width: clamp(180px, 30cqw, 280px);
+    min-width: 0;
+    max-height: 100%;
+}
+
+/* 封面随播放器高度缩放，给下方标题、作者和工具栏留出空间 */
+.dl-stage-frame .zwp-music-full .zwp-music-cover,
+.dl-stage-frame .zwp-music-full .zwp-music-cover-vinyl {
+    width: clamp(64px, calc(100cqh - 240px), 180px);
+    height: clamp(64px, calc(100cqh - 240px), 180px);
+}
+
+.dl-stage-frame .zwp-music-full .zwp-music-info {
+    width: 100%;
+    margin-top: 14px;
+    text-align: center;
+}
+
+/* 长标题换行，最多三行，超出省略 */
+.dl-stage-frame .zwp-music-full .zwp-music-title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
+    font-size: 17px;
+    line-height: 1.35;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.dl-stage-frame .zwp-music-lyrics {
+    flex: 1 1 0;
+    min-width: 0;
+    height: auto;
+    max-height: 100%;
+    padding: 12px 0;
+}
+
+.dl-stage-frame .zwp-music-full .zwp-music-visualizer[data-shape=classic] {
+    flex: 0 0 48px;
+    height: 48px;
+    margin-top: 8px;
+    overflow: hidden;
+}
+
+/* zwplayer 按初始尺寸给画布写了内联宽高，改了容器高度后让画布跟着缩放 */
+.dl-stage-frame .zwp-music-full .zwp-music-visualizer-canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+@container (max-width: 559px) {
+    .dl-stage-frame .zwp-music-full-body {
+        gap: 14px;
+        padding: 16px 14px 4px;
+    }
+
+    .dl-stage-frame .zwp-music-vinyl-wrap {
+        width: clamp(96px, 32cqw, 132px);
+    }
+
+    .dl-stage-frame .zwp-music-full .zwp-music-cover,
+    .dl-stage-frame .zwp-music-full .zwp-music-cover-vinyl {
+        width: clamp(40px, calc(100cqh - 84px), 76px);
+        height: clamp(40px, calc(100cqh - 84px), 76px);
+    }
+
+    .dl-stage-frame .zwp-music-full .zwp-music-info {
+        margin-top: 8px;
+    }
+
+    .dl-stage-frame .zwp-music-full .zwp-music-title {
+        -webkit-line-clamp: 2;
+        font-size: 12px;
+        line-height: 1.3;
+    }
+
+    .dl-stage-frame .zwp-music-full .zwp-music-artist {
+        margin-top: 2px;
+        font-size: 11px;
+    }
+
+    .dl-stage-frame .zwp-music-toolbar {
+        display: none;
+    }
+
+    /* 小播放器高度不够，频谱会压住标题，和工具栏一起隐藏 */
+    .dl-stage-frame .zwp-music-full .zwp-music-visualizer[data-shape=classic] {
+        display: none;
+    }
+
+    .dl-stage-frame .zwp-music-lyrics {
+        align-self: stretch;
+        max-height: none;
+        padding: 4px 0;
+        scrollbar-width: none;
+    }
+
+    .dl-stage-frame .zwp-lyric-line {
+        padding: 5px 0;
+        font-size: 13px;
+    }
+
+    .dl-stage-frame .zwp-lyric-line.zwp-lyric-active {
+        font-size: 15px;
+    }
+}
+
 .dl-now-playing {
     display: flex;
     align-items: flex-start;
