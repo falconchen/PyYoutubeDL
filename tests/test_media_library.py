@@ -538,3 +538,15 @@ def test_anonymous_visitor_cannot_summarize_another_owners_media():
 
     assert response.status_code == 404
     assert job is None
+
+
+def test_subtitle_panel_settings_are_remembered():
+    """zwplayer 没有设置变更事件：接管 _applyAllSubtitleSettings 记忆，并校验读回的值。"""
+    script = Path(app_module.app.static_folder, 'dropload.js').read_text(
+        encoding='utf-8',
+    )
+    assert "var SUBTITLE_SETTINGS_KEY = 'dropload:subtitle-settings';" in script
+    assert 'instance._applyAllSubtitleSettings = function () {' in script
+    assert 'saveSubtitleSettings(this._subtitleSettings);' in script
+    assert "getAttribute('data-action') !== 'restoreDefaults'" in script
+    assert '/^#[0-9a-f]{6}$/i' in script

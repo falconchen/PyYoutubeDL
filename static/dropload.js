@@ -24,6 +24,8 @@
     // zwplayer 字幕设置面板里「字幕大小：较小」对应的值（默认「适中」为 0.2）
     var SUBTITLE_FONT_SIZE_SMALL = '0.14';
     var SUBTITLE_BG_OPACITY = 0.5;
+    // 用户在 zwplayer 字幕设置面板里的选择，跨条目、跨页面记忆
+    var SUBTITLE_SETTINGS_KEY = 'dropload:subtitle-settings';
     // 字幕基准字号（「适中」档）按播放器尺寸等比：取宽度 4.2%、高度 7.5% 中较小者，
     // 页面内约 760×428 时为 32px，与 zwplayer 原算法一致；实际字号最大 36px，免得全屏时过大。
     var SUBTITLE_BASE_WIDTH_RATIO = 0.042;
@@ -1074,18 +1076,121 @@
         };
     }
 
-    function applySubtitleDefaults() {
-        // zwplayer 没有字幕样式的构造参数，只能改实例上的 _subtitleSettings（内部字段，
-        // 升级时需复查）。设置面板打开时才按它生成，字号在每次渲染时读取，所以建好实例就改。
-        var settings = zwplayer && zwplayer._subtitleSettings;
-        if (!settings || !settings.primary) return;
-        settings.primary.fontSize = SUBTITLE_FONT_SIZE_SMALL;
-        // 半透明黑底（zwplayer 默认 60%）：浅色画面上也看得清，又不过多遮挡画面
-        settings.primary.bgOpacity = SUBTITLE_BG_OPACITY;
-        if (settings.secondary) settings.secondary.bgOpacity = SUBTITLE_BG_OPACITY;
-        if (typeof zwplayer._applyAllSubtitleSettings === 'function') {
-            zwplayer._applyAllSubtitleSettings();
+    // 本站的字幕默认值；「恢复默认设置」也回到这里，而不是 zwplayer 自带的适中、60%。
+    function defaultSubtitleTrackSettings(fontSize) {
+        return {
+            fontSize: fontSize,
+            fontColor: '#FFFFFF',
+            outline: 'none',
+            position: 'bottom',
+            bgOpacity: SUBTITLE_BG_OPACITY,
+            scale: true,
+            fade: false
+        };
+    }
+
+    var SUBTITLE_SETTING_VALIDATORS = {
+        fontSize: function (value) {
+            return ['0.08', '0.14', '0.2', '0.28', '0.36'].indexOf(value) !== -1;
+        },
+        // 颜色会被 zwplayer 拼进面板 HTML，只接受十六进制色值
+        fontColor: function (value) {
+            return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+        },
+        outline: function (value) {
+            return ['none', 'heavy', 'shadow', 'shadow45'].indexOf(value) !== -1;
+        },
+        position: function (value) {
+            return ['top-left', 'top', 'top-right', 'bottom-left', 'bottom', 'bottom-right']
+                .indexOf(value) !== -1;
+        },
+        bgOpacity: function (value) {
+            return typeof value === 'number' && value >= 0 && value <= 1;
+        },
+        scale: function (value) {
+            return typeof value === 'boolean';
+        },
+        fade: function (value) {
+            return typeof value === 'boolean';
         }
+    };
+
+    function copySubtitleTrackSettings(target, source) {
+        Object.keys(SUBTITLE_SETTING_VALIDATORS).forEach(function (field) {
+            if (source && SUBTITLE_SETTING_VALIDATORS[field](source[field])) {
+                target[field] = source[field];
+            }
+        });
+    }
+
+    function resetSubtitleSettings(settings) {
+        // 原地修改：zwplayer 面板的处理函数还持有这两个对象
+        settings.primary = settings.primary || {};
+        settings.secondary = settings.secondary || {};
+        copySubtitleTrackSettings(settings.primary, defaultSubtitleTrackSettings(SUBTITLE_FONT_SIZE_SMALL));
+        copySubtitleTrackSettings(settings.secondary, defaultSubtitleTrackSettings(SUBTITLE_FONT_SIZE_SMALL));
+    }
+
+    function readSavedSubtitleSettings() {
+        try {
+            var saved = JSON.parse(readStorage(SUBTITLE_SETTINGS_KEY) || 'null');
+            return saved && typeof saved === 'object' ? saved : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function saveSubtitleSettings(settings) {
+        var saved = {};
+        ['primary', 'secondary'].forEach(function (track) {
+            saved[track] = {};
+            copySubtitleTrackSettings(saved[track], settings[track]);
+        });
+        writeStorage(SUBTITLE_SETTINGS_KEY, JSON.stringify(saved));
+    }
+
+    // 「恢复默认设置」按钮的点击先于 zwplayer 面板自己的监听到达这里，
+    // 随后同步触发的那次 _applyAllSubtitleSettings 改为恢复本站默认值并清掉记忆。
+    var restoringSubtitleDefaults = false;
+    document.addEventListener('click', function (event) {
+        var target = event.target;
+        if (!target || typeof target.getAttribute !== 'function') return;
+        if (target.getAttribute('data-action') !== 'restoreDefaults') return;
+        if (!target.closest('.zwp-subtitleSettingsPanel')) return;
+        restoringSubtitleDefaults = true;
+        window.setTimeout(function () {
+            restoringSubtitleDefaults = false;
+        }, 0);
+    }, true);
+
+    function applySubtitleDefaults() {
+        // zwplayer 没有字幕样式的构造参数，也没有设置变更事件，只能改实例上的
+        // _subtitleSettings，并接管 _applyAllSubtitleSettings（均为内部字段，升级时需复查）。
+        // 面板里的每项修改和「恢复默认设置」最终都会调用后者，在这里统一记忆。
+        var instance = zwplayer;
+        var settings = instance && instance._subtitleSettings;
+        if (!settings || !settings.primary) return;
+        resetSubtitleSettings(settings);
+        var saved = readSavedSubtitleSettings();
+        if (saved) {
+            copySubtitleTrackSettings(settings.primary, saved.primary);
+            copySubtitleTrackSettings(settings.secondary, saved.secondary);
+        }
+
+        var applyAll = instance._applyAllSubtitleSettings;
+        if (typeof applyAll !== 'function') return;
+        instance._applyAllSubtitleSettings = function () {
+            if (restoringSubtitleDefaults) {
+                restoringSubtitleDefaults = false;
+                resetSubtitleSettings(this._subtitleSettings);
+                writeStorage(SUBTITLE_SETTINGS_KEY, null);
+                return applyAll.apply(this, arguments);
+            }
+            var result = applyAll.apply(this, arguments);
+            saveSubtitleSettings(this._subtitleSettings);
+            return result;
+        };
+        applyAll.call(instance);
     }
 
     /* 字幕与歌词 */
