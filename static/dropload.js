@@ -1472,8 +1472,8 @@
         var description = (item && item.description) || '';
         nowDescriptionText.textContent = description;
         nowDescription.hidden = !description;
-        // 默认展开；用户收起后，换一条媒体时重新展开
-        nowDescription.open = true;
+        // 默认折叠；切换媒体时也恢复折叠，避免沿用上一条的展开状态。
+        nowDescription.open = false;
     }
 
     function renderNowPlaying(item) {

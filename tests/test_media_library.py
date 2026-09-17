@@ -182,6 +182,17 @@ def test_library_panel_has_accessible_tabs():
     assert 'data-tab="audio"' in html
 
 
+def test_media_description_is_collapsed_by_default():
+    with logged_in_client() as (client, _user, _db):
+        html = client.get('/player').get_data(as_text=True)
+
+    assert '<details class="dl-now-description" hidden>' in html
+    script = Path(app_module.app.static_folder, 'dropload.js').read_text(
+        encoding='utf-8',
+    )
+    assert 'nowDescription.open = false;' in script
+
+
 def test_media_list_only_returns_own_files():
     """媒体私有：他人下载的文件不应出现在自己的媒体库里。"""
     with logged_in_client() as (client, user, db_path), TemporaryDirectory() as files_dir:
