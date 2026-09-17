@@ -59,6 +59,7 @@ new ZWPlayer({ playerElm: mount, url, poster, fluid: true, autoplay, speedButton
 - 返回 202 时读取 `/api/ai_summary/jobs/<job_id>/stream` 的 NDJSON，把 `partial_markdown` 实时渲染出来；断线最多重连 3 次。
 - 结果按文件名缓存在页面内存里，切换条目再切回直接显示；生成中切走不会中断，切回后继续显示进度。
 - Markdown 用 jsDelivr 上的 `marked` 渲染、`DOMPurify` 清洗（去掉 `img`／`svg`／`math`／`style` 和内联样式，链接新窗口打开）；两个库没载入时按纯文本显示。支持复制原始 Markdown 和展开／收起。
+- 权限与媒体访问一致：登录用户和匿名访客都能对自己拥有的文件生成总结（`require_media_access`），对别人的文件返回 404。
 - 与旧播放页的区别：不再随播放器当前显示的字幕轨道切换总结语言。
 
 `/subtitles/...` 字幕转换路由、`/api/ai_summaries*` 扩展接口和 `ai_summary_worker.py` 保持不变（Chrome 扩展仍在用）。
