@@ -1841,6 +1841,7 @@ def render_index_page(
         tab=tab,
         requested_file=request.args.get('file', ''),
         show_waline=config.get("SHOW_WALINE_ON_INDEX", False),
+        ai_summary_configured=ai_summary_is_configured(),
         anonymous_task_limit=anonymous_task_limit(),
         anonymous_files_expire_hours=config.get(
             'ANONYMOUS_FILES_EXPIRE_HOURS', 24
@@ -2565,6 +2566,7 @@ def build_media_library_items(owner=None):
             'thumbnail_candidates': cover_candidates,
             'subtitles': subtitle_tracks(filename),
         })
+        item['ai_summary'] = bool(item['subtitles'])
         videos.append(item)
 
     audios = []
@@ -2588,6 +2590,8 @@ def build_media_library_items(owner=None):
                 else ''
             ),
         })
+        # 与 /api/ai_summary 相同的来源：旁挂歌词或字幕优先，其次是内嵌字幕
+        item['ai_summary'] = bool(get_local_summary_tracks(filename))
         audios.append(item)
 
     return videos, audios

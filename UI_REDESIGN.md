@@ -33,7 +33,7 @@ new ZWPlayer({ playerElm: mount, url, poster, fluid: true, autoplay, speedButton
 
 ### 随旧播放页移除的功能
 
-按需求采用设计稿的简化播放器，以下原有能力已从界面移除：字幕语言偏好记忆、播放器内的 AI 总结、音频频谱与封面模糊背景、播放页的 Waline 评论。倍速、播放进度记忆、自动播放下一个和锁屏控制已在 zwplayer 上补回，见下节。
+按需求采用设计稿的简化播放器，以下原有能力已从界面移除：字幕语言偏好记忆、音频频谱与封面模糊背景、播放页的 Waline 评论。倍速、播放进度记忆、自动播放下一个和锁屏控制已在 zwplayer 上补回，见下节；AI 总结已补回到「正在播放」卡片下方，见「AI 总结」。
 
 「正在播放」卡片补回了旧播放页的「原始链接」和可展开的「简介」：`/api/media_list` 的每个条目带 `source_url` 和 `description`（来自媒体标签 `purl`／`comment` 与 `description`／`synopsis`，与旧页相同），字段为空时对应元素隐藏。原始链接与作者、格式信息同一行；简介默认展开，保留原文换行，超过 240px 在框内滚动，切换条目时重新展开。旧页的专辑、日期、类型未补回。
 
@@ -51,7 +51,17 @@ new ZWPlayer({ playerElm: mount, url, poster, fluid: true, autoplay, speedButton
 - **歌词**：音频条目带 `lyrics_url`（没有旁挂歌词时为空串），指向 `/lyrics/<音频文件名>.lrc`。该路由按音频文件鉴权（旁挂歌词不一定单独登记了归属），用 `find_audio_lyrics()` 选出同名歌词（无语言后缀、简体、繁体、英文的顺序，LRC 优先于 VTT、SRT），LRC 原样返回，其余经 `ffmpeg -f lrc` 转换；多行字幕会变成同一时间戳的几行，zwplayer 显示为主歌词加翻译。前端同样先取回文本再 `setLyrics(text)`，换源时先 `setLyrics('')`，因为 `play(url)` 不会清掉上一首的歌词。zwplayer 的 LRC 解析只认两位分钟数，超过 100 分钟的部分不显示。zwplayer 每换一句就对当前行调用 `scrollIntoView({block: 'center'})`，它会连带滚动整个页面，用户下拉页面时会被拽回播放器；`confineLyricsScrolling()` 在 `Element.prototype` 上接管该方法，只对 `.zwp-music-lyrics` 里的元素改为滚动歌词容器本身（歌词行随切歌和面板切换重建，逐个元素替换会漏），其他元素仍调用原生实现。
 - **iOS 限制**：zwplayer 对音频也使用 `<video>` 元素，iOS 切后台或锁屏时系统可能暂停播放，需以真机测试为准。
 
-对应的后端未删除，仍可用且仍有测试覆盖：`/subtitles/...` 字幕转换路由、`/api/ai_summary*` 与 `/api/ai_summaries*`、`ai_summary_worker.py` 及其 SQLite 存储（Chrome 扩展仍在用）。`find_audio_lyrics()`、`get_local_summary_tracks()` 等只被旧播放页调用的辅助函数现在没有调用方。
+### AI 总结
+
+「正在播放」卡片下方的 `.dl-summary` 面板，只对 `/api/media_list` 中 `ai_summary` 为 `true` 的条目显示：视频有字幕轨道，音频由 `get_local_summary_tracks()` 找到旁挂歌词／字幕或内嵌字幕。`AI_API_*` 未配置时（引导 JSON 的 `aiSummary` 为 `false`）面板仍显示，按钮禁用并提示未配置。
+
+- 点击「生成总结」后 `POST /api/ai_summary`，只传 `filename`，字幕由后端选择（外挂优先，其次首条内嵌轨道）；命中已保存的总结时直接返回 200。
+- 返回 202 时读取 `/api/ai_summary/jobs/<job_id>/stream` 的 NDJSON，把 `partial_markdown` 实时渲染出来；断线最多重连 3 次。
+- 结果按文件名缓存在页面内存里，切换条目再切回直接显示；生成中切走不会中断，切回后继续显示进度。
+- Markdown 用 jsDelivr 上的 `marked` 渲染、`DOMPurify` 清洗（去掉 `img`／`svg`／`math`／`style` 和内联样式，链接新窗口打开）；两个库没载入时按纯文本显示。支持复制原始 Markdown 和展开／收起。
+- 与旧播放页的区别：不再随播放器当前显示的字幕轨道切换总结语言。
+
+`/subtitles/...` 字幕转换路由、`/api/ai_summaries*` 扩展接口和 `ai_summary_worker.py` 保持不变（Chrome 扩展仍在用）。
 
 删除的文件：`templates/player.html`、`templates/audio_player.html`、`templates/_audio_controller.html`、`static/player.css`、`static/refresh.css`、`static/media-library.js`、`static/background-playback.js`。`static/style.css` 保留，`templates/content_base.html`（关于／条款／隐私）和 chrome 扩展仍在用。
 

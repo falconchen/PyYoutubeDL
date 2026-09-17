@@ -120,6 +120,12 @@
     var nowSource = document.querySelector('.dl-now-source');
     var nowDescription = document.querySelector('.dl-now-description');
     var nowDescriptionText = document.querySelector('.dl-now-description-text');
+    var summaryPanel = document.querySelector('.dl-summary');
+    var summaryStatus = document.querySelector('.dl-summary-status');
+    var summaryContent = document.querySelector('.dl-summary-content');
+    var summaryGenerate = document.querySelector('[data-summary="generate"]');
+    var summaryCopy = document.querySelector('[data-summary="copy"]');
+    var summaryToggle = document.querySelector('[data-summary="toggle"]');
     var tabButtons = Array.prototype.slice.call(document.querySelectorAll('.dl-tab'));
     var playlistItems = document.querySelector('.dl-playlist-items');
     var playlistEmpty = document.querySelector('.dl-playlist-empty');
@@ -156,6 +162,11 @@
     var mediaLibrary = null;
     var libraryTab = 'video';
     var currentMedia = null;
+    var aiSummaryConfigured = false;
+    // filename -> { markdown, subtitle }；只在本页会话内缓存，服务端另有持久化。
+    var summaryResults = {};
+    // 正在生成的文件名，切走再切回时继续显示进度而不是重复提交。
+    var summaryPending = {};
     var zwplayer = null;
     /** 当前 zwplayer 实例创建时的媒体类型（video/audio）。 */
     var playerType = null;
@@ -1478,8 +1489,213 @@
         nowDescription.open = false;
     }
 
+    /* AI 总结 */
+
+    var SUMMARY_STAGE_LABELS = {
+        queued: '总结任务已排队…',
+        resolving: '正在读取媒体信息…',
+        downloading_subtitle: '正在准备字幕…',
+        generating: 'AI 正在生成总结…'
+    };
+
+    function isCurrentMedia(filename) {
+        return Boolean(currentMedia && currentMedia.filename === filename);
+    }
+
+    function resetSummaryContent() {
+        summaryContent.replaceChildren();
+        summaryContent.hidden = true;
+        summaryContent.classList.remove('is-collapsed');
+        summaryCopy.hidden = true;
+        summaryToggle.hidden = true;
+    }
+
+    function renderSummaryMarkdown(markdown, streaming) {
+        try {
+            if (
+                !window.marked || typeof window.marked.parse !== 'function'
+                || !window.DOMPurify
+            ) {
+                throw new Error('Markdown 渲染组件未加载');
+            }
+            // 模型输出不可信：去掉脚本、图片、SVG、MathML 和内联样式。
+            summaryContent.innerHTML = window.DOMPurify.sanitize(
+                window.marked.parse(markdown, { gfm: true, breaks: true }),
+                { FORBID_TAGS: ['img', 'svg', 'math', 'style'], FORBID_ATTR: ['style'] }
+            );
+            summaryContent.querySelectorAll('a[href]').forEach(function (link) {
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+            });
+        } catch (error) {
+            summaryContent.textContent = markdown;
+        }
+        summaryContent.hidden = false;
+        summaryContent.classList.remove('is-collapsed');
+        summaryCopy.hidden = Boolean(streaming);
+        summaryToggle.hidden = Boolean(streaming);
+        summaryToggle.textContent = '收起';
+        summaryToggle.setAttribute('aria-expanded', 'true');
+    }
+
+    function renderSummaryPanel(item) {
+        var available = Boolean(item && item.ai_summary);
+        summaryPanel.hidden = !available;
+        if (!available) {
+            resetSummaryContent();
+            return;
+        }
+        var result = summaryResults[item.filename];
+        var pending = summaryPending[item.filename];
+        if (result) {
+            renderSummaryMarkdown(result.markdown);
+        } else if (pending && pending.partial) {
+            renderSummaryMarkdown(pending.partial, true);
+        } else {
+            resetSummaryContent();
+        }
+        summaryGenerate.hidden = Boolean(result);
+        summaryGenerate.disabled = !aiSummaryConfigured || Boolean(pending);
+        summaryGenerate.textContent = pending ? '生成中…' : '生成总结';
+        if (!aiSummaryConfigured) {
+            summaryStatus.textContent = 'AI 总结尚未配置。';
+        } else if (pending) {
+            summaryStatus.textContent = pending.status;
+        } else if (result) {
+            summaryStatus.textContent = result.subtitle
+                ? '已根据' + result.subtitle + '生成总结。'
+                : '已生成总结。';
+        } else {
+            summaryStatus.textContent = '读取字幕或歌词，按需生成简体中文总结。';
+        }
+    }
+
+    function updateSummaryProgress(filename, status, partial) {
+        var pending = summaryPending[filename];
+        if (!pending) return;
+        pending.status = status;
+        if (typeof partial === 'string' && partial) pending.partial = partial;
+        if (isCurrentMedia(filename)) renderSummaryPanel(currentMedia);
+    }
+
+    async function consumeSummaryStream(jobId, onMessage) {
+        var response = await fetch(
+            '/api/ai_summary/jobs/' + encodeURIComponent(jobId) + '/stream',
+            { headers: { Accept: 'application/x-ndjson' }, credentials: 'same-origin' }
+        );
+        if (!response.ok || !response.body) {
+            var failure = await response.json().catch(function () { return {}; });
+            throw new Error(failure.message || '无法连接总结流');
+        }
+        var reader = response.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+        var last = null;
+
+        function handle(line) {
+            if (!line.trim()) return;
+            var message = JSON.parse(line);
+            if (message.type === 'keepalive') return;
+            last = message;
+            onMessage(message);
+        }
+
+        while (true) {
+            var chunk = await reader.read();
+            buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done });
+            var lines = buffer.split('\n');
+            buffer = lines.pop();
+            lines.forEach(handle);
+            if (chunk.done) break;
+        }
+        handle(buffer);
+        if (!last || (last.status !== 'completed' && last.status !== 'failed')) {
+            throw new Error('AI 总结流提前结束');
+        }
+        return last;
+    }
+
+    async function generateSummary() {
+        var item = currentMedia;
+        if (!aiSummaryConfigured || !item || !item.ai_summary) return;
+        var filename = item.filename;
+        if (summaryResults[filename] || summaryPending[filename]) return;
+
+        summaryPending[filename] = { status: '正在提交总结任务…', partial: '' };
+        renderSummaryPanel(item);
+        try {
+            var response = await fetch('/api/ai_summary', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ filename: filename })
+            });
+            var result = await response.json().catch(function () { return {}; });
+            if (response.status === 202 && result.success && result.job_id) {
+                var jobId = result.job_id;
+                var streamError = null;
+                for (var attempt = 0; attempt < 3; attempt += 1) {
+                    try {
+                        result = await consumeSummaryStream(jobId, function (message) {
+                            updateSummaryProgress(
+                                filename,
+                                SUMMARY_STAGE_LABELS[message.status] || '正在生成总结…',
+                                message.partial_markdown
+                            );
+                        });
+                        streamError = null;
+                        break;
+                    } catch (error) {
+                        streamError = error;
+                        updateSummaryProgress(filename, '连接中断，正在恢复…');
+                        await new Promise(function (resolve) { window.setTimeout(resolve, 1000); });
+                    }
+                }
+                if (streamError) throw streamError;
+            }
+            if (!result.success || typeof result.summary !== 'string') {
+                throw new Error(
+                    result.message || (result.error && result.error.message) || result.msg
+                    || '生成总结失败'
+                );
+            }
+            summaryResults[filename] = { markdown: result.summary, subtitle: result.subtitle || '' };
+            delete summaryPending[filename];
+            if (isCurrentMedia(filename)) renderSummaryPanel(currentMedia);
+        } catch (error) {
+            delete summaryPending[filename];
+            if (isCurrentMedia(filename)) {
+                renderSummaryPanel(currentMedia);
+                summaryStatus.textContent = (error && error.message) || '生成总结失败，请稍后重试。';
+            }
+        }
+    }
+
+    async function copySummary() {
+        var result = currentMedia && summaryResults[currentMedia.filename];
+        if (!result) return;
+        try {
+            await copyText(result.markdown);
+            summaryStatus.textContent = 'AI 总结已复制。';
+        } catch (error) {
+            summaryStatus.textContent = '复制失败，请手动选择总结内容。';
+        }
+    }
+
+    function toggleSummary() {
+        var collapse = !summaryContent.classList.contains('is-collapsed');
+        summaryContent.classList.toggle('is-collapsed', collapse);
+        summaryToggle.textContent = collapse ? '展开' : '收起';
+        summaryToggle.setAttribute('aria-expanded', String(!collapse));
+    }
+
+    summaryGenerate.addEventListener('click', generateSummary);
+    summaryCopy.addEventListener('click', copySummary);
+    summaryToggle.addEventListener('click', toggleSummary);
+
     function renderNowPlaying(item) {
         renderNowSource(item);
+        renderSummaryPanel(item);
         if (!item) {
             nowTitle.textContent = '未选择媒体';
             nowMeta.textContent = '从右侧播放列表中选择已下载的媒体';
@@ -1998,6 +2214,7 @@
         // 登录态只影响账号 UI；匿名会话同样可以轮询任务和读取媒体库。
         signedIn = Boolean(payload.signedIn);
         loginUrl = payload.loginUrl || '/login';
+        aiSummaryConfigured = Boolean(payload.aiSummary);
         if (payload.tab === 'audio') libraryTab = 'audio';
 
         syncSubmitState();

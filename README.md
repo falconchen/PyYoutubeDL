@@ -348,7 +348,7 @@ journalctl -u dropload -f    # 实时日志
 
 字幕识别与转换的后端仍然存在：`FILES_DIR` 中与 MP4 同 stem 的外挂字幕（如 `video.srt`、`video.zh-Hans.srt`）支持 VTT、SRT、ASS、SSA 和 TTML，同一语言存在多种格式时依次优先 VTT、SRT、ASS、SSA、TTML；没有外挂字幕时用 `ffprobe` 识别 MP4 内嵌字幕。`/subtitles/...` 路由通过 `ffmpeg` 将任一来源转换为 WebVTT，供 AI 总结和外部调用使用。该功能不修改原视频，但运行环境必须能够直接执行 `ffprobe` 和 `ffmpeg`。
 
-支持按需生成 AI 总结。播放页重做后，网页上不再有「生成总结」按钮，入口是 `/api/ai_summary`、`/api/ai_summaries` 接口和 Chrome 扩展。后端优先读取同名外挂字幕，没有时再提取 MP4 内嵌字幕，通过 `chat/completions` 兼容接口生成简体中文总结。`AI_API_TOKEN` 不会发送给浏览器。请在不提交到 Git 的 `config.json` 中配置：
+支持按需生成 AI 总结。媒体库「正在播放」卡片下方有「生成总结」按钮（仅对有字幕或歌词的条目显示），此外还可以通过 `/api/ai_summaries` 接口和 Chrome 扩展使用。后端优先读取同名外挂字幕，没有时再提取 MP4 内嵌字幕，通过 `chat/completions` 兼容接口生成简体中文总结。`AI_API_TOKEN` 不会发送给浏览器。请在不提交到 Git 的 `config.json` 中配置：
 
 ```json
 {

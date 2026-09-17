@@ -411,6 +411,167 @@
     display: none;
 }
 
+/* AI 总结：挂在「正在播放」卡片下方，只对有字幕或歌词的条目显示。 */
+.dl-summary {
+    margin-top: 12px;
+    padding: 16px;
+    border: 1px solid #e3eaf4;
+    border-radius: 12px;
+    background: #fff;
+    min-width: 0;
+}
+
+.dl-summary[hidden],
+.dl-summary-button[hidden],
+.dl-summary-content[hidden] {
+    display: none;
+}
+
+.dl-summary-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+}
+
+.dl-summary-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: #1e2b42;
+}
+
+.dl-summary-title .dl-icon {
+    color: #1769e0;
+}
+
+.dl-summary-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.dl-summary-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 8px;
+    background: #1769e0;
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.dl-summary-button:hover:not(:disabled) {
+    background: #135bc4;
+}
+
+.dl-summary-button.is-secondary {
+    background: #e6efff;
+    color: #1769e0;
+}
+
+.dl-summary-button.is-secondary:hover:not(:disabled) {
+    background: #d6e6ff;
+}
+
+.dl-summary-button:disabled {
+    background: #c3cddb;
+    color: #fff;
+    cursor: not-allowed;
+}
+
+.dl-summary-button:focus-visible {
+    outline: 2px solid #1769e0;
+    outline-offset: 2px;
+}
+
+.dl-summary-button .dl-icon {
+    width: 14px;
+    height: 14px;
+}
+
+.dl-summary-status {
+    margin: 8px 0 0;
+    font-size: 13px;
+    color: #6b7a90;
+}
+
+.dl-summary-status:empty {
+    display: none;
+}
+
+.dl-summary-content {
+    position: relative;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #e3eaf4;
+    font-size: 14px;
+    line-height: 1.75;
+    color: #1e2b42;
+    overflow-x: auto;
+    overflow-wrap: anywhere;
+}
+
+.dl-summary-content.is-collapsed {
+    max-height: 320px;
+    overflow: hidden;
+}
+
+.dl-summary-content.is-collapsed::after {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 56px;
+    background: linear-gradient(rgba(255, 255, 255, 0), #fff);
+    content: '';
+    pointer-events: none;
+}
+
+.dl-summary-content > :first-child {
+    margin-top: 0;
+}
+
+.dl-summary-content > :last-child {
+    margin-bottom: 0;
+}
+
+.dl-summary-content h1,
+.dl-summary-content h2,
+.dl-summary-content h3,
+.dl-summary-content h4 {
+    margin: 1em 0 0.4em;
+    font-size: 15px;
+    line-height: 1.5;
+}
+
+.dl-summary-content ul,
+.dl-summary-content ol {
+    padding-left: 1.4em;
+}
+
+.dl-summary-content a {
+    color: #1769e0;
+}
+
+.dl-summary-content pre {
+    overflow-x: auto;
+    padding: 10px;
+    border-radius: 8px;
+    background: #f6f9fd;
+}
+
 /* 媒体库：播放列表 */
 
 .dl-playlist {

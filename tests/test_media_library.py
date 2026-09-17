@@ -443,3 +443,43 @@ def test_lyrics_follow_audio_access_rules():
     assert others.status_code == 404
     assert video.status_code == 404
     assert missing.status_code == 404
+
+
+def test_media_list_marks_items_that_can_be_summarized():
+    with logged_in_client() as (client, _user, _db), TemporaryDirectory() as files_dir:
+        for name in ['clip.mp4', 'plain.mp4', 'song.mp3', 'silent.mp3']:
+            Path(files_dir, name).write_bytes(b'x')
+        for name in ['clip.zh-Hans.srt', 'song.lrc']:
+            Path(files_dir, name).write_text(
+                '1\n00:00:01,000 --> 00:00:02,000\n你好\n', encoding='utf-8'
+            )
+        with (
+            patch('app.FILES_DIR', files_dir),
+            patch('app._probe_embedded_subtitles', return_value=()),
+        ):
+            payload = client.get('/api/media_list').get_json()
+
+    items = {item['filename']: item for item in payload['video'] + payload['audio']}
+    assert items['clip.mp4']['ai_summary'] is True
+    assert items['plain.mp4']['ai_summary'] is False
+    assert items['song.mp3']['ai_summary'] is True
+    assert items['silent.mp3']['ai_summary'] is False
+
+
+def test_library_has_ai_summary_panel_and_configured_flag():
+    with logged_in_client() as (client, _user, _db):
+        with patch('app.ai_summary_is_configured', return_value=True):
+            enabled = client.get('/player').get_data(as_text=True)
+        with patch('app.ai_summary_is_configured', return_value=False):
+            disabled = client.get('/player').get_data(as_text=True)
+
+    assert '<section class="dl-summary"' in enabled
+    assert 'data-summary="generate"' in enabled
+    assert bootstrap_payload(enabled)['aiSummary'] is True
+    assert bootstrap_payload(disabled)['aiSummary'] is False
+    script = Path(app_module.app.static_folder, 'dropload.js').read_text(
+        encoding='utf-8',
+    )
+    assert "fetch('/api/ai_summary'," in script
+    assert "'/api/ai_summary/jobs/' + encodeURIComponent(jobId) + '/stream'" in script
+    assert 'renderSummaryPanel(item);' in script

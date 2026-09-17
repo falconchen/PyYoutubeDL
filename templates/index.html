@@ -245,6 +245,25 @@
                         <svg class="dl-icon" aria-hidden="true"><use href="#i-download"></use></svg>
                     </a>
                 </div>
+                <section class="dl-summary" aria-labelledby="dl-summary-title" hidden>
+                    <div class="dl-summary-header">
+                        <h2 id="dl-summary-title" class="dl-summary-title">
+                            <svg class="dl-icon" aria-hidden="true"><use href="#i-sparkles"></use></svg>
+                            AI 总结
+                        </h2>
+                        <div class="dl-summary-actions">
+                            <button type="button" class="dl-summary-button is-secondary" data-summary="copy" hidden>
+                                <svg class="dl-icon" aria-hidden="true"><use href="#i-copy"></use></svg>
+                                <span>复制</span>
+                            </button>
+                            <button type="button" class="dl-summary-button is-secondary" data-summary="toggle"
+                                    aria-controls="dl-summary-content" aria-expanded="true" hidden>收起</button>
+                            <button type="button" class="dl-summary-button" data-summary="generate">生成总结</button>
+                        </div>
+                    </div>
+                    <p class="dl-summary-status" role="status" aria-live="polite"></p>
+                    <div id="dl-summary-content" class="dl-summary-content" hidden></div>
+                </section>
             </div>
 
             <aside class="dl-card dl-playlist" aria-label="播放列表">
@@ -396,7 +415,9 @@
         </script>
     {% endif %}
 
-    <script id="dl-bootstrap" type="application/json">{{ {'tasks': tasks, 'url': url, 'view': view, 'tab': tab, 'file': requested_file, 'signedIn': current_user is not none, 'loginUrl': url_for('login')} | tojson }}</script>
+    <script id="dl-bootstrap" type="application/json">{{ {'tasks': tasks, 'url': url, 'view': view, 'tab': tab, 'file': requested_file, 'signedIn': current_user is not none, 'aiSummary': ai_summary_configured, 'loginUrl': url_for('login')} | tojson }}</script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@18.0.7/lib/marked.umd.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.12/dist/purify.min.js" defer></script>
     <script src="{{ url_for('static', filename='zwplayer/zwplayer.js') }}" defer></script>
     <script src="{{ 'dropload.js' | versioned }}" defer></script>
 </body>
