@@ -415,7 +415,8 @@
 
 .dl-playlist {
     display: flex;
-    min-height: 460px;
+    min-height: min(460px, 70vh);
+    max-height: 70vh;
     flex-direction: column;
     overflow: hidden;
 }
@@ -492,7 +493,9 @@
     display: flex;
     flex: 1;
     flex-direction: column;
+    min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 8px;
 }
 
@@ -1075,7 +1078,9 @@
     display: flex;
     flex: 1;
     flex-direction: column;
+    min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .dl-task-list {
@@ -1800,9 +1805,11 @@
         gap: 8px;
     }
 
-    .dl-tasks {
-        min-height: 620px;
-        max-height: none;
+    /* 单栏时侧栏排在主卡片下方，限高后条目多了在卡片内滚动。 */
+    .dl-tasks,
+    .dl-playlist {
+        min-height: min(620px, 80vh);
+        max-height: min(720px, 80vh);
     }
 }
 
@@ -1818,8 +1825,12 @@
         grid-template-columns: minmax(0, 1fr) 390px;
     }
 
+    /* 双栏时侧栏不参与行高计算，拉伸到左栏高度，条目多了在卡片内滚动。 */
+    .dl-tasks,
     .dl-playlist {
         min-height: 620px;
+        max-height: none;
+        contain: size;
     }
 
     .dl-hero {

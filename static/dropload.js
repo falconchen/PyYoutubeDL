@@ -123,6 +123,7 @@
     var tabButtons = Array.prototype.slice.call(document.querySelectorAll('.dl-tab'));
     var playlistItems = document.querySelector('.dl-playlist-items');
     var playlistEmpty = document.querySelector('.dl-playlist-empty');
+    var playlistScroll = document.querySelector('.dl-playlist-scroll');
     var libraryActionMessage = document.querySelector('.dl-library-action-message');
     var mediaDeleteOverlay = document.querySelector('.dl-media-delete-overlay');
     var mediaDeleteDialog = document.querySelector('.dl-media-delete-dialog');
@@ -1160,6 +1161,7 @@
         lastProgressSaveAt = 0;
         renderNowPlaying(item);
         renderPlaylist();
+        revealCurrentPlaylistItem();
         // 首次载入与深链定位不改地址；用户切换、自动下一个、锁屏切换才同步。
         if (autoplay) updateLocationForMedia(item);
 
@@ -1721,6 +1723,19 @@
         }
     }
 
+    function revealCurrentPlaylistItem() {
+        // 只滚动播放列表容器：scrollIntoView 会连带滚动页面，自动播放下一条时会把页面拽走。
+        var row = playlistItems.querySelector('.dl-playlist-row.is-current');
+        if (!row || !playlistScroll || playlistScroll.clientHeight === 0) return;
+        var rowRect = row.getBoundingClientRect();
+        var scrollRect = playlistScroll.getBoundingClientRect();
+        var style = window.getComputedStyle(playlistScroll);
+        var top = scrollRect.top + (parseFloat(style.paddingTop) || 0);
+        var bottom = scrollRect.bottom - (parseFloat(style.paddingBottom) || 0);
+        if (rowRect.top < top) playlistScroll.scrollTop -= top - rowRect.top;
+        else if (rowRect.bottom > bottom) playlistScroll.scrollTop += rowRect.bottom - bottom;
+    }
+
     async function loadLibrary(preferredFile) {
         if (mediaLibrary || libraryLoading) {
             if (mediaLibrary) selectInitialMedia(preferredFile);
@@ -1797,6 +1812,9 @@
             if (libraryTab === button.dataset.tab) return;
             libraryTab = button.dataset.tab;
             renderPlaylist();
+            // 两个标签共用一个滚动容器，切换后不能停在上一个标签的位置。
+            playlistScroll.scrollTop = 0;
+            revealCurrentPlaylistItem();
         });
     });
 
