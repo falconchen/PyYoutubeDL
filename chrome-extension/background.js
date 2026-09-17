@@ -54,6 +54,26 @@ async function readServerUrl() {
   return normalizeServerUrl(stored.serverUrl);
 }
 
+const ACCESS_TOKEN_PREFIX = 'dlpat_';
+
+// 个人访问令牌；旧版本把全局日志令牌存在 logToken，只有 dlpat_ 开头的才是个人令牌。
+async function readAccessToken() {
+  const stored = await chrome.storage.local.get({ accessToken: '', logToken: '' });
+  const token = (stored.accessToken || stored.logToken || '').trim();
+  return token.startsWith(ACCESS_TOKEN_PREFIX) ? token : '';
+}
+
+function authHeaders(token, headers = {}) {
+  return token ? { ...headers, Authorization: `Bearer ${token}` } : headers;
+}
+
+function responseError(response, result, prefix) {
+  if (response.status === 401 && !result.login_required) {
+    return new Error(`${prefix}：访问令牌无效或已过期，请在扩展设置中更新`);
+  }
+  return new Error(`${prefix}：${result.msg || `HTTP ${response.status}`}`);
+}
+
 async function readAiSummaryToken() {
   const stored = await chrome.storage.local.get({ aiSummaryToken: '' });
   return (stored.aiSummaryToken || '').trim();
@@ -366,11 +386,12 @@ async function trackPendingTasks(tasks, types, serverUrl, sourceUrl) {
 }
 
 async function fetchTaskInfo(serverUrl, tasks) {
+  const token = await readAccessToken();
   const response = await fetch(`${serverUrl}/api/task_info`, {
     method: 'POST',
-    headers: {
+    headers: authHeaders(token, {
       'Content-Type': 'application/json',
-    },
+    }),
     body: JSON.stringify({ tasks }),
   });
 
@@ -381,8 +402,7 @@ async function fetchTaskInfo(serverUrl, tasks) {
     // 非 JSON 错误页由下面的状态检查统一处理。
   }
   if (!response.ok || !result.success || !Array.isArray(result.tasks)) {
-    const detail = result.msg || `HTTP ${response.status}`;
-    throw new Error(`查询任务状态失败：${detail}`);
+    throw responseError(response, result, '查询任务状态失败');
   }
   return result.tasks;
 }
@@ -476,7 +496,7 @@ function pollPendingTasks() {
 }
 
 async function addDownloadTask(linkUrl, types) {
-  const serverUrl = await readServerUrl();
+  const [serverUrl, token] = await Promise.all([readServerUrl(), readAccessToken()]);
   const endpoint = `${serverUrl}/api/add_task`;
   const taskTypes = Array.isArray(types) ? types : [types];
 
@@ -484,9 +504,9 @@ async function addDownloadTask(linkUrl, types) {
   try {
     response = await fetch(endpoint, {
       method: 'POST',
-      headers: {
+      headers: authHeaders(token, {
         'Content-Type': 'application/json',
-      },
+      }),
       body: JSON.stringify({
         url: linkUrl,
         types: taskTypes,
@@ -504,8 +524,7 @@ async function addDownloadTask(linkUrl, types) {
   }
 
   if (!response.ok || !result.success) {
-    const detail = result.msg || `HTTP ${response.status}`;
-    throw new Error(`yter 拒绝了任务：${detail}`);
+    throw responseError(response, result, 'yter 拒绝了任务');
   }
 
   return {

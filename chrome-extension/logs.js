@@ -14,7 +14,7 @@ const reconnectButton = document.querySelector('#reconnect-button');
 const autoscrollButton = document.querySelector('#autoscroll-button');
 
 let serverUrl = DEFAULT_SERVER_URL;
-let logToken = '';
+let accessToken = '';
 let cursor = null;
 let fileId = null;
 let pollTimer = null;
@@ -83,6 +83,17 @@ function clearPollTimer() {
   }
 }
 
+// 个人访问令牌走 Bearer；其他值按已弃用的全局 EXTENSION_LOG_TOKEN 处理
+function logAuthHeaders(token) {
+  return token.startsWith('dlpat_')
+    ? { Authorization: `Bearer ${token}` }
+    : { 'X-Yter-Log-Token': token };
+}
+
+function scopeLabel(scope) {
+  return scope === 'own' ? '仅我的任务' : '全部日志';
+}
+
 function schedulePoll(delay) {
   clearPollTimer();
   if (running && !document.hidden) {
@@ -93,13 +104,13 @@ function schedulePoll(delay) {
 async function readSettings() {
   const [synced, local] = await Promise.all([
     chrome.storage.sync.get({ serverUrl: DEFAULT_SERVER_URL }),
-    chrome.storage.local.get({ logToken: '' }),
+    chrome.storage.local.get({ accessToken: '', logToken: '' }),
   ]);
   serverUrl = normalizeServerUrl(synced.serverUrl);
-  logToken = local.logToken.trim();
+  accessToken = (local.accessToken || local.logToken || '').trim();
   serverLabel.textContent = serverUrl;
-  if (!logToken) {
-    throw new Error('请先在扩展设置中填写日志访问令牌');
+  if (!accessToken) {
+    throw new Error('请先在扩展设置中填写个人访问令牌');
   }
 }
 
@@ -115,9 +126,7 @@ async function pollLog() {
     const query = queryParams.size ? `?${queryParams.toString()}` : '';
     const response = await fetch(`${serverUrl}/api/downloader_log${query}`, {
       cache: 'no-store',
-      headers: {
-        'X-Yter-Log-Token': logToken,
-      },
+      headers: logAuthHeaders(accessToken),
     });
     let result = {};
     try {
@@ -127,10 +136,10 @@ async function pollLog() {
     }
     if (!response.ok || !result.success) {
       if (response.status === 401) {
-        throw new Error('日志访问令牌错误');
+        throw new Error('访问令牌无效或已过期');
       }
       if (response.status === 503) {
-        throw new Error('服务器尚未配置 EXTENSION_LOG_TOKEN');
+        throw new Error('服务器未启用旧日志令牌，请改用个人访问令牌');
       }
       throw new Error(result.msg || `HTTP ${response.status}`);
     }
@@ -143,6 +152,7 @@ async function pollLog() {
     appendLogText(result.text);
     cursor = result.cursor;
     fileId = result.file_id;
+    serverLabel.textContent = `${serverUrl} · ${scopeLabel(result.scope)}`;
     setConnectionState('connected', '实时连接中');
     schedulePoll(result.has_more ? 0 : POLL_INTERVAL_MS);
   } catch (error) {

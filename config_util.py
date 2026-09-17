@@ -39,7 +39,7 @@ DEFAULT_CONFIG = {
     "AI_SUMMARY_ACCESS_TOKEN": "",  # Chrome 扩展调用 AI 总结接口的独立令牌
     "AI_SUMMARY_JOB_RETENTION_DAYS": 30, # 已完成/失败 AI 任务记录保留天数
     "BARK_DEVICE_TOKEN": "",        # Bark 通知推送 Token
-    "EXTENSION_LOG_TOKEN": "",      # Chrome 扩展读取 downloader.log 的访问令牌；为空时禁用接口
+    "EXTENSION_LOG_TOKEN": "",      # 已弃用：全局 downloader.log 令牌，请改用个人访问令牌；为空时禁用该旧方式
     
     # WebDAV上传器配置
     "ENABLE_WEBDAV_UPLOAD": True,  # 是否将下载完成的文件上传到 WebDAV

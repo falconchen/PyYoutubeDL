@@ -27,15 +27,15 @@
         required
       >
       <p class="help">只支持 http 或 https。自定义地址需要在保存时授予该站点访问权限。</p>
-      <label class="secondary-label" for="log-token">日志访问令牌</label>
+      <label class="secondary-label" for="access-token">个人访问令牌</label>
       <input
-        id="log-token"
-        name="log-token"
+        id="access-token"
+        name="access-token"
         type="password"
         autocomplete="off"
-        placeholder="与服务器 EXTENSION_LOG_TOKEN 一致"
+        placeholder="dlpat_…"
       >
-      <p class="help">仅保存在本机，用于访问扩展实时日志页；不影响提交下载任务。</p>
+      <p class="help">在 yter 登录后打开“个人设置”生成。用于以你的账号提交下载、跟踪任务和查看实时日志；仅保存在本机。留空则以匿名身份提交。</p>
       <label class="secondary-label" for="ai-summary-token">AI总结访问令牌</label>
       <input
         id="ai-summary-token"

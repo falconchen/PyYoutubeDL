@@ -11,11 +11,13 @@
 - `task_owners` / `media_owners`：登录用户的任务与下载产物归属。
 - `anonymous_task_owners` / `anonymous_media_owners`：匿名会话的资源归属；
   `anonymous_daily_usage` 按脱敏后的 IP 和日期记录每日下载额度。
+- `access_tokens`：个人访问令牌，只存 SHA-256 哈希，供扩展与脚本调用 API。
 
 约定与 ai_summary_store.py 保持一致：WAL、外键、busy_timeout，
 以及用 PRAGMA user_version 做迁移。
 """
 
+import hashlib
 import os
 import secrets
 import sqlite3
@@ -23,7 +25,7 @@ import time
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 ROLE_ADMIN = 'admin'
 ROLE_USER = 'user'
@@ -32,6 +34,26 @@ STATUS_PENDING = 'pending'
 STATUS_DISABLED = 'disabled'
 
 PROVIDER_GOOGLE = 'google'
+
+ACCESS_TOKENS_SCHEMA = '''
+CREATE TABLE IF NOT EXISTS access_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL DEFAULT '',
+    token_hash TEXT NOT NULL UNIQUE,
+    prefix TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    last_used_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_access_token_user
+    ON access_tokens(user_id, created_at DESC);
+'''
+
+ACCESS_TOKEN_PREFIX = 'dlpat_'
+# 最后使用时间的最小写回间隔，避免每个轮询请求都写库
+ACCESS_TOKEN_TOUCH_INTERVAL = 60
 
 
 def now_ts():
@@ -156,6 +178,7 @@ def init_db(db_path):
                 );
                 '''
             )
+            db.executescript(ACCESS_TOKENS_SCHEMA)
             db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
         elif version == 1:
             db.executescript(
@@ -191,6 +214,9 @@ def init_db(db_path):
                 );
                 '''
             )
+            version = 2
+        if version == 2:
+            db.executescript(ACCESS_TOKENS_SCHEMA)
             db.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
 
 
@@ -447,6 +473,95 @@ def users_with_google_token(db_path):
             (STATUS_ACTIVE,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+# --- 个人访问令牌 -------------------------------------------------------
+
+
+def hash_access_token(token):
+    return hashlib.sha256((token or '').encode('utf-8')).hexdigest()
+
+
+def create_access_token(db_path, user_id, name='', expires_in_days=None):
+    """生成个人访问令牌。明文只在这里返回一次，库里只保留哈希。
+
+    Returns:
+        tuple: (明文令牌, 不含哈希的令牌记录)。
+    """
+    token = ACCESS_TOKEN_PREFIX + secrets.token_urlsafe(32)
+    token_id = new_id()
+    timestamp = now_ts()
+    expires_at = (
+        timestamp + int(expires_in_days) * 86400 if expires_in_days else None
+    )
+    with connect(db_path) as db:
+        db.execute(
+            '''INSERT INTO access_tokens
+               (id, user_id, name, token_hash, prefix, created_at, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            (
+                token_id,
+                user_id,
+                (name or '').strip()[:100],
+                hash_access_token(token),
+                token[:len(ACCESS_TOKEN_PREFIX) + 4],
+                timestamp,
+                expires_at,
+            ),
+        )
+    records = [r for r in list_access_tokens(db_path, user_id) if r['id'] == token_id]
+    return token, records[0]
+
+
+def list_access_tokens(db_path, user_id):
+    with connect(db_path) as db:
+        rows = db.execute(
+            '''SELECT id, user_id, name, prefix, created_at, expires_at, last_used_at
+               FROM access_tokens WHERE user_id = ?
+               ORDER BY created_at DESC''',
+            (user_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def revoke_access_token(db_path, user_id, token_id):
+    """撤销令牌；只删当前用户自己的，返回是否删除成功。"""
+    with connect(db_path) as db:
+        cursor = db.execute(
+            'DELETE FROM access_tokens WHERE id = ? AND user_id = ?',
+            (token_id, user_id),
+        )
+    return cursor.rowcount > 0
+
+
+def authenticate_access_token(db_path, token):
+    """校验令牌并返回所属的启用用户；无效、过期或账号停用时返回 None。"""
+    if not token or not token.startswith(ACCESS_TOKEN_PREFIX):
+        return None
+    timestamp = now_ts()
+    with connect(db_path) as db:
+        row = db.execute(
+            '''SELECT u.*, t.id AS token_id, t.expires_at AS token_expires_at,
+                      t.last_used_at AS token_last_used_at
+               FROM access_tokens t
+               JOIN users u ON u.id = t.user_id
+               WHERE t.token_hash = ?''',
+            (hash_access_token(token),),
+        ).fetchone()
+        if row is None or row['status'] != STATUS_ACTIVE:
+            return None
+        if row['token_expires_at'] is not None and row['token_expires_at'] <= timestamp:
+            return None
+        last_used = row['token_last_used_at']
+        if last_used is None or timestamp - last_used >= ACCESS_TOKEN_TOUCH_INTERVAL:
+            db.execute(
+                'UPDATE access_tokens SET last_used_at = ? WHERE id = ?',
+                (timestamp, row['token_id']),
+            )
+    user = dict(row)
+    for key in ('token_id', 'token_expires_at', 'token_last_used_at'):
+        user.pop(key)
+    return user
 
 
 # --- 任务与媒体归属 -----------------------------------------------------

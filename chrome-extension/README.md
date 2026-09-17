@@ -11,14 +11,15 @@
 
 默认服务地址是 `https://yter.cellmean.com`。如需使用其他部署地址，可点击浏览器工具栏中的扩展图标重新配置；保存自定义地址时，Chrome 会请求该站点的访问权限。
 
-实时日志需要服务端在 `config.json` 中配置足够长的随机令牌，并在扩展设置中填写相同值：
+### 个人访问令牌
 
-```json
-"EXTENSION_LOG_TOKEN": "replace_with_a_long_random_token",
-"AI_SUMMARY_ACCESS_TOKEN": "replace_with_a_different_long_random_token"
-```
+登录 yter 后，在右上角账号菜单打开“个人设置”（`/profile`），填写名称、选择有效期并生成令牌（以 `dlpat_` 开头，只显示一次），粘贴到扩展设置的“个人访问令牌”中。
 
-令牌为空时，服务端 `/api/downloader_log` 返回 503 并保持禁用。扩展把令牌保存在 `chrome.storage.local`，不会随 Chrome 账号同步，也不会放入 URL。
+配置令牌后，扩展提交下载、轮询任务状态和读取实时日志都以你的账号身份进行（`Authorization: Bearer <token>`），不受匿名每日额度限制。实时日志按账号角色返回：管理员看到完整 `downloader.log`，普通用户只看到自己任务相关的行。未填写令牌时，下载任务以匿名身份提交。令牌可在个人设置页随时撤销，并显示最后使用时间。
+
+扩展把令牌保存在 `chrome.storage.local`，不会随 Chrome 账号同步，也不会放入 URL。
+
+旧的全局 `EXTENSION_LOG_TOKEN` 已弃用，但服务端仍兼容：在“个人访问令牌”里填入非 `dlpat_` 开头的值时，日志页会按旧方式发送 `X-Yter-Log-Token` 读取完整日志，该值不会用于提交下载。AI 总结仍使用独立的 `AI_SUMMARY_ACCESS_TOKEN`。
 
 AI 总结相关令牌和后台逻辑暂时保留以兼容现有配置，但弹窗和右键菜单不再显示 AI 总结入口。
 

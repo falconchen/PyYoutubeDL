@@ -1,5 +1,5 @@
 #!venv/bin/python
-from flask import Flask, request, render_template, redirect, url_for, send_from_directory, jsonify, abort, Response, stream_with_context, session
+from flask import Flask, request, render_template, redirect, url_for, send_from_directory, jsonify, abort, Response, stream_with_context, session, g
 import os
 import glob
 import html
@@ -94,6 +94,7 @@ TASK_ID_PATTERN = re.compile(r'^[va][A-Za-z0-9_-]{1,127}$')
 TASK_STATE_EXTENSIONS = task_queue.TASK_STATE_FILES
 DOWNLOADER_LOG_INITIAL_BYTES = 64 * 1024
 DOWNLOADER_LOG_MAX_BYTES = 128 * 1024
+DOWNLOADER_LOG_OWN_TASK_LIMIT = 50
 PROGRESS_MARKER = 'PYDL_PROGRESS|'
 ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
 DEFAULT_PROGRESS_PATTERN = re.compile(
@@ -135,8 +136,39 @@ SESSION_USER_KEY = 'user_id'
 SESSION_ANONYMOUS_KEY = 'anonymous_id'
 
 
+def bearer_token():
+    """取出 ``Authorization: Bearer`` 里的令牌；只在 /api/ 下生效。"""
+    if not request.path.startswith('/api/'):
+        return None
+    scheme, _, token = request.headers.get('Authorization', '').partition(' ')
+    if scheme.lower() != 'bearer':
+        return None
+    return token.strip() or None
+
+
+def token_user():
+    """按个人访问令牌解析用户，结果在单个请求内缓存。"""
+    if 'token_user' not in g:
+        token = bearer_token()
+        g.token_user = (
+            user_store.authenticate_access_token(USER_DB_PATH, token)
+            if token
+            else None
+        )
+    return g.token_user
+
+
+def is_token_request():
+    return bearer_token() is not None
+
+
 def current_user():
-    """返回当前登录用户；未登录、已删除或被停用时返回 None。"""
+    """返回当前登录用户；未登录、已删除或被停用时返回 None。
+
+    带个人访问令牌的 API 请求以令牌所属用户为准，不读取会话。
+    """
+    if is_token_request():
+        return token_user()
     user_id = session.get(SESSION_USER_KEY)
     if not user_id:
         return None
@@ -258,6 +290,17 @@ def login_required(view):
     return wrapped
 
 
+def session_login_required(view):
+    """只接受浏览器会话的登录校验，令牌不能管理账号和令牌本身。"""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if request.headers.get('Authorization'):
+            abort(403)
+        return login_required(view)(*args, **kwargs)
+
+    return wrapped
+
+
 def admin_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -305,6 +348,14 @@ def redirect_localhost_to_loopback():
     # 301 会让浏览器把 POST 改成 GET 并丢掉请求体，非 GET/HEAD 用 308 保留方法。
     status = 301 if request.method in ('GET', 'HEAD') else 308
     return redirect(target, code=status)
+
+
+@app.before_request
+def reject_invalid_access_token():
+    """带了令牌却无效时直接拒绝，避免静默降级成匿名请求占用 IP 额度。"""
+    if is_token_request() and token_user() is None:
+        return jsonify({"success": False, "msg": "访问令牌无效或已过期"}), 401
+    return None
 
 
 @app.route('/healthz', methods=['GET'])
@@ -2054,6 +2105,74 @@ def admin_set_status(user_id):
     return redirect(url_for('admin'))
 
 
+ACCESS_TOKEN_EXPIRY_CHOICES = {'30': 30, '90': 90, '365': 365, 'never': None}
+NEW_ACCESS_TOKEN_KEY = 'new_access_token'
+
+
+def format_timestamp(value):
+    if not value:
+        return ''
+    timezone = pytz.timezone(config.get('TIMEZONE', 'UTC'))
+    return datetime.fromtimestamp(int(value), timezone).strftime('%Y-%m-%d %H:%M')
+
+
+@app.route('/profile', methods=['GET'])
+@session_login_required
+def profile():
+    user = request.user
+    now = user_store.now_ts()
+    tokens = [
+        {
+            **token,
+            'expired': bool(token['expires_at'] and token['expires_at'] <= now),
+            'created_label': format_timestamp(token['created_at']),
+            'expires_label': format_timestamp(token['expires_at']) or '永不过期',
+            'last_used_label': format_timestamp(token['last_used_at']) or '从未使用',
+        }
+        for token in user_store.list_access_tokens(USER_DB_PATH, user['id'])
+    ]
+    response = app.make_response(render_template(
+        'profile.html',
+        current_user=user,
+        google_identity=user_store.get_identity_for_user(
+            USER_DB_PATH, user_store.PROVIDER_GOOGLE, user['id']
+        ),
+        tokens=tokens,
+        new_token=session.pop(NEW_ACCESS_TOKEN_KEY, None),
+        server_url=request.host_url.rstrip('/'),
+    ))
+    # 新令牌只展示一次，不允许浏览器或代理缓存这个页面
+    response.headers['Cache-Control'] = 'no-store, private'
+    return response
+
+
+@app.route('/profile/tokens', methods=['POST'])
+@session_login_required
+def profile_create_token():
+    expires_in = request.form.get('expires_in', '90')
+    if expires_in not in ACCESS_TOKEN_EXPIRY_CHOICES:
+        abort(400)
+    name = (request.form.get('name') or '').strip() or 'Chrome 扩展'
+    token, record = user_store.create_access_token(
+        USER_DB_PATH,
+        request.user['id'],
+        name=name,
+        expires_in_days=ACCESS_TOKEN_EXPIRY_CHOICES[expires_in],
+    )
+    session[NEW_ACCESS_TOKEN_KEY] = {'token': token, 'name': record['name']}
+    app.logger.info('用户 %s 创建了访问令牌 %s', request.user['email'], record['id'])
+    return redirect(url_for('profile'))
+
+
+@app.route('/profile/tokens/<token_id>/revoke', methods=['POST'])
+@session_login_required
+def profile_revoke_token(token_id):
+    if not user_store.revoke_access_token(USER_DB_PATH, request.user['id'], token_id):
+        abort(404)
+    app.logger.info('用户 %s 撤销了访问令牌 %s', request.user['email'], token_id)
+    return redirect(url_for('profile'))
+
+
 @app.route('/about')
 def about():
     return render_template('about.html')
@@ -3255,6 +3374,27 @@ def redact_task_log_text(text):
     return text.replace(project_root, '📁')
 
 
+def task_url_map(tasks):
+    """返回存在的任务 ``{任务 ID: 原始 URL}``，用于在全局日志里定位相关行。"""
+    task_urls = {}
+    for task in tasks:
+        task_info = get_task_info(task)
+        if task_info.get('exists'):
+            task_urls[task] = task_info.get('url', '')
+    return task_urls
+
+
+def filter_log_lines_for_tasks(text, task_urls):
+    """只保留提到这些任务 ID 或 URL 的日志行。"""
+    markers = [
+        marker for marker in [*task_urls.keys(), *task_urls.values()] if marker
+    ]
+    return '\n'.join(
+        line for line in text.splitlines()
+        if any(marker in line for marker in markers)
+    )
+
+
 @app.route('/api/task_log', methods=['POST'])
 def api_task_log():
     """返回指定任务相关的日志，供首页侧栏使用。"""
@@ -3269,11 +3409,7 @@ def api_task_log():
     if not tasks or len(tasks) > 20:
         return jsonify({"success": False, "msg": "Invalid task list"}), 400
 
-    task_urls = {}
-    for task in tasks:
-        task_info = get_task_info(task)
-        if task_info.get('exists'):
-            task_urls[task] = task_info.get('url', '')
+    task_urls = task_url_map(tasks)
 
     relevant_lines = []
     seen_lines = set()
@@ -3290,13 +3426,9 @@ def api_task_log():
         append_lines(read_task_log_tail(task_log_path))
 
     global_log_path = os.path.join(config['LOG_DIR'], 'downloader.log')
-    global_log = read_task_log_tail(global_log_path)
-    for line in global_log.splitlines():
-        if any(
-            marker and marker in line
-            for marker in [*task_urls.keys(), *task_urls.values()]
-        ):
-            append_lines(line)
+    append_lines(filter_log_lines_for_tasks(
+        read_task_log_tail(global_log_path), task_urls
+    ))
 
     return jsonify({
         'success': True,
@@ -3313,19 +3445,31 @@ def api_downloader_log():
         response.headers['Cache-Control'] = 'no-store, private'
         return response
 
-    configured_token = str(config.get("EXTENSION_LOG_TOKEN", "")).strip()
-    if not configured_token:
-        return log_response({
-            "success": False,
-            "msg": "Downloader log API is disabled",
-        }, 503)
-
-    request_token = request.headers.get('X-Yter-Log-Token', '')
-    if not hmac.compare_digest(request_token, configured_token):
-        return log_response({
-            "success": False,
-            "msg": "Invalid log access token",
-        }, 401)
+    # 管理员读完整日志；普通用户只看自己任务相关的行。
+    # 旧的全局 X-Yter-Log-Token 已弃用，保留兼容，按完整日志处理。
+    legacy_token = request.headers.get('X-Yter-Log-Token')
+    user = None
+    if legacy_token is not None:
+        configured_token = str(config.get("EXTENSION_LOG_TOKEN", "")).strip()
+        if not configured_token:
+            return log_response({
+                "success": False,
+                "msg": "Downloader log API is disabled; use a personal access token",
+            }, 503)
+        if not hmac.compare_digest(legacy_token, configured_token):
+            return log_response({
+                "success": False,
+                "msg": "Invalid log access token",
+            }, 401)
+        scope = 'all'
+    else:
+        user = current_user()
+        if user is None:
+            return log_response({
+                "success": False,
+                "msg": "需要登录或个人访问令牌",
+            }, 401)
+        scope = 'all' if user['role'] == user_store.ROLE_ADMIN else 'own'
 
     cursor_value = request.args.get('cursor')
     expected_file_id = request.args.get('file_id')
@@ -3353,6 +3497,7 @@ def api_downloader_log():
             "reset": cursor not in (None, 0),
             "has_more": False,
             "file_id": None,
+            "scope": scope,
         })
 
     try:
@@ -3368,7 +3513,15 @@ def api_downloader_log():
             "msg": "Failed to read downloader log",
         }, 500)
 
-    return log_response({"success": True, **result})
+    if scope == 'own':
+        # 实时日志每秒轮询一次，只匹配最近的任务，避免每次扫描大量任务文件
+        task_urls = task_url_map(user_store.user_task_ids(
+            USER_DB_PATH, user['id'], limit=DOWNLOADER_LOG_OWN_TASK_LIMIT
+        ))
+        filtered = filter_log_lines_for_tasks(result['text'], task_urls)
+        result['text'] = redact_task_log_text(filtered + '\n' if filtered else '')
+
+    return log_response({"success": True, "scope": scope, **result})
 
 @app.route('/favicon.ico')
 def favicon():

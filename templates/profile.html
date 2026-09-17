@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f4f7fb">
+    <meta name="referrer" content="no-referrer">
+    <link rel="icon" href="{{ url_for('static', filename='images/favicon.png') }}">
+    <title>个人设置 · DropLoad</title>
+    <link rel="stylesheet" href="{{ 'dropload.css' | versioned }}">
+</head>
+<body class="dropload-page">
+    <svg class="dl-sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+        <symbol id="i-arrow-down-to-line" viewBox="0 0 24 24"><path d="M12 17V3"/><path d="m6 11 6 6 6-6"/><path d="M19 21H5"/></symbol>
+    </svg>
+
+    <header class="dl-header">
+        <div class="dl-header-inner">
+            <a class="dl-brand" href="{{ url_for('index') }}">
+                <span class="dl-brand-mark"><svg class="dl-icon" aria-hidden="true"><use href="#i-arrow-down-to-line"></use></svg></span>
+                <span class="dl-brand-name">Drop<span>Load</span></span>
+            </a>
+            <div class="dl-header-actions">
+                <a class="dl-header-link" href="{{ url_for('index') }}">返回</a>
+            </div>
+        </div>
+    </header>
+
+    <div class="dl-page dl-profile">
+        <section class="dl-card dl-admin">
+            <div class="dl-admin-header">
+                <div>
+                    <h1>个人设置</h1>
+                    <p>账号信息与 API 访问令牌。</p>
+                </div>
+            </div>
+
+            <dl class="dl-profile-info">
+                <dt>邮箱</dt>
+                <dd>{{ current_user.email }}</dd>
+                <dt>昵称</dt>
+                <dd>{{ current_user.display_name }}</dd>
+                <dt>角色</dt>
+                <dd>{% if current_user.role == 'admin' %}管理员{% else %}用户{% endif %}</dd>
+                <dt>Google</dt>
+                <dd class="dl-profile-google">
+                    {% if google_identity %}
+                    <span>已绑定 {{ google_identity.email or google_identity.display_name }}</span>
+                    <a class="dl-admin-button" href="{{ url_for('oauth_start', intent='bind') }}">重新授权</a>
+                    <form method="post" action="{{ url_for('google_unbind') }}">
+                        <button class="dl-admin-button dl-admin-button-danger" type="submit">解除绑定</button>
+                    </form>
+                    {% else %}
+                    <span>未绑定</span>
+                    <a class="dl-admin-button" href="{{ url_for('oauth_start', intent='bind') }}">绑定 Google 账号</a>
+                    {% endif %}
+                </dd>
+            </dl>
+        </section>
+
+        <section class="dl-card dl-admin">
+            <div class="dl-admin-header">
+                <div>
+                    <h2>个人访问令牌</h2>
+                    <p>用于 Chrome 扩展或脚本以你的身份提交下载、查询任务和读取下载日志。令牌等同于你的账号权限，请勿分享。</p>
+                </div>
+                <span class="dl-task-count">{{ tokens|length }} 个令牌</span>
+            </div>
+
+            {% if new_token %}
+            <div class="dl-token-new" role="status">
+                <p><strong>{{ new_token.name }}</strong> 已创建。请立即复制，离开本页后无法再次查看。</p>
+                <div class="dl-token-copy">
+                    <input class="dl-auth-input" id="new-token" type="text" readonly value="{{ new_token.token }}">
+                    <button class="dl-admin-button" type="button" data-copy-target="new-token">复制</button>
+                </div>
+            </div>
+            {% endif %}
+
+            <form class="dl-token-form" method="post" action="{{ url_for('profile_create_token') }}">
+                <label class="dl-auth-label" for="token-name">名称
+                    <input class="dl-auth-input" id="token-name" name="name" type="text" maxlength="100" placeholder="Chrome 扩展">
+                </label>
+                <label class="dl-auth-label" for="token-expires">有效期
+                    <select class="dl-auth-input" id="token-expires" name="expires_in">
+                        <option value="30">30 天</option>
+                        <option value="90" selected>90 天</option>
+                        <option value="365">365 天</option>
+                        <option value="never">永不过期</option>
+                    </select>
+                </label>
+                <button class="dl-auth-submit" type="submit">生成令牌</button>
+            </form>
+
+            {% if tokens %}
+            <div class="dl-admin-scroll">
+                <table class="dl-admin-table">
+                    <thead>
+                        <tr>
+                            <th>名称</th>
+                            <th>令牌</th>
+                            <th>创建时间</th>
+                            <th>过期时间</th>
+                            <th>最后使用</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for token in tokens %}
+                        <tr>
+                            <td>{{ token.name }}</td>
+                            <td><code>{{ token.prefix }}…</code></td>
+                            <td>{{ token.created_label }}</td>
+                            <td>
+                                {% if token.expired %}
+                                <span class="dl-admin-status" data-status="disabled">已过期</span>
+                                {% else %}{{ token.expires_label }}{% endif %}
+                            </td>
+                            <td>{{ token.last_used_label }}</td>
+                            <td class="dl-admin-actions">
+                                <form method="post" action="{{ url_for('profile_revoke_token', token_id=token.id) }}"
+                                      onsubmit="return confirm('撤销后使用该令牌的扩展和脚本将立即失效，确定撤销？')">
+                                    <button class="dl-admin-button dl-admin-button-danger" type="submit">撤销</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+
+            <details class="dl-token-usage">
+                <summary>API 调用示例</summary>
+                <pre><code># 提交下载（types 可选 video、audio）
+curl -X POST {{ server_url }}/api/add_task \
+  -H "Authorization: Bearer $DROPLOAD_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.youtube.com/watch?v=...", "types": ["video"]}'
+
+# 查询任务状态
+curl -X POST {{ server_url }}/api/task_info \
+  -H "Authorization: Bearer $DROPLOAD_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"tasks": ["v20260917..."]}'
+
+# 读取下载日志（{% if current_user.role == 'admin' %}管理员可读完整日志{% else %}只包含你的任务{% endif %}；用返回的 cursor 与 file_id 增量读取）
+curl {{ server_url }}/api/downloader_log \
+  -H "Authorization: Bearer $DROPLOAD_TOKEN"</code></pre>
+                <p>Chrome 扩展：打开扩展设置，填入服务地址 <code>{{ server_url }}</code> 和上面生成的令牌。</p>
+            </details>
+        </section>
+    </div>
+
+    {% include '_site_footer.html' %}
+    <script>
+        document.querySelectorAll('[data-copy-target]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                var input = document.getElementById(button.dataset.copyTarget);
+                input.select();
+                var done = function () { button.textContent = '已复制'; };
+                if (navigator.clipboard) {
+                    navigator.clipboard.writeText(input.value).then(done, function () {
+                        document.execCommand('copy');
+                        done();
+                    });
+                } else {
+                    document.execCommand('copy');
+                    done();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

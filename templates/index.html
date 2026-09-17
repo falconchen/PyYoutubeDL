@@ -88,6 +88,7 @@
                         <a class="dl-account-item" href="{{ url_for('oauth_start', intent='bind') }}">绑定 Google 账号</a>
                         <p class="dl-account-hint">绑定后可监视 YouTube 播放列表，并授权上传到 Google Drive。</p>
                         {% endif %}
+                        <a class="dl-account-item" href="{{ url_for('profile') }}">个人设置与访问令牌</a>
                         {% if current_user.role == 'admin' %}
                         <a class="dl-account-item" href="{{ url_for('admin') }}">用户管理</a>
                         {% endif %}

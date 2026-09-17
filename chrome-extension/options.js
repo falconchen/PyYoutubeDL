@@ -1,7 +1,7 @@
 const DEFAULT_SERVER_URL = 'https://yter.cellmean.com';
 const form = document.querySelector('#settings-form');
 const serverUrlInput = document.querySelector('#server-url');
-const logTokenInput = document.querySelector('#log-token');
+const accessTokenInput = document.querySelector('#access-token');
 const aiSummaryTokenInput = document.querySelector('#ai-summary-token');
 const status = document.querySelector('#status');
 const openOptionsButton = document.querySelector('#open-options');
@@ -29,10 +29,11 @@ function setStatus(message, type) {
 async function restoreSettings() {
   const [synced, local] = await Promise.all([
     chrome.storage.sync.get({ serverUrl: DEFAULT_SERVER_URL }),
-    chrome.storage.local.get({ logToken: '', aiSummaryToken: '' }),
+    chrome.storage.local.get({ accessToken: '', logToken: '', aiSummaryToken: '' }),
   ]);
   serverUrlInput.value = synced.serverUrl;
-  logTokenInput.value = local.logToken;
+  // 兼容旧版本保存的日志令牌，保存后迁移到 accessToken
+  accessTokenInput.value = local.accessToken || local.logToken;
   aiSummaryTokenInput.value = local.aiSummaryToken;
 }
 
@@ -60,9 +61,10 @@ form.addEventListener('submit', async (event) => {
     await Promise.all([
       chrome.storage.sync.set({ serverUrl }),
       chrome.storage.local.set({
-        logToken: logTokenInput.value.trim(),
+        accessToken: accessTokenInput.value.trim(),
         aiSummaryToken: aiSummaryTokenInput.value.trim(),
       }),
+      chrome.storage.local.remove('logToken'),
     ]);
     serverUrlInput.value = serverUrl;
     setStatus('设置已保存，可以通过右键菜单提交下载。', 'success');

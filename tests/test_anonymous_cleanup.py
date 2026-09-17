@@ -31,7 +31,8 @@ class TestAnonymousCleanup(unittest.TestCase):
                         "SELECT name FROM sqlite_master WHERE type = 'table'"
                     )
                 }
-            self.assertEqual(version, 2)
+            self.assertEqual(version, user_store.SCHEMA_VERSION)
+            self.assertIn('access_tokens', tables)
             self.assertIn('anonymous_daily_usage', tables)
             self.assertIn('anonymous_task_owners', tables)
             self.assertIn('anonymous_media_owners', tables)

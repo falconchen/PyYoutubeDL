@@ -14,7 +14,8 @@ function createEvent() {
 }
 
 function createHarness(harnessOptions = {}) {
-  const localStorage = {};
+  const localStorage = { ...(harnessOptions.localStorage || {}) };
+  const requestHeaders = [];
   const alarms = new Map();
   const notifications = [];
   const overlayMessages = [];
@@ -105,6 +106,7 @@ function createHarness(harnessOptions = {}) {
   };
 
   async function fetch(url, options) {
+    requestHeaders.push({ url, headers: (options && options.headers) || {} });
     if (url.endsWith('/api/add_task')) {
       const request = JSON.parse(options.body);
       addTaskRequests.push(request);
@@ -205,6 +207,7 @@ function createHarness(harnessOptions = {}) {
 
   return {
     addTaskRequests,
+    requestHeaders,
     alarms,
     events,
     localStorage,
@@ -301,7 +304,7 @@ test('toolbar action opens the inline settings popup', () => {
     'utf8',
   );
 
-  assert.equal(manifest.version, '1.5.2');
+  assert.equal(manifest.version, '1.6.0');
   assert.equal(manifest.action.default_popup, 'popup.html');
   assert.match(popup, /<details class="settings-card">/);
   assert.doesNotMatch(popup, /<details class="settings-card" open>/);
@@ -447,10 +450,30 @@ test('extension includes a token-protected live log page', () => {
   );
 
   assert.match(popup, /href="logs\.html"/);
-  assert.match(popup, /id="log-token"/);
+  assert.match(popup, /id="access-token"/);
   assert.match(logPage, /id="log-output"/);
   assert.match(logPage, /id="pause-button"/);
   assert.match(logScript, /\/api\/downloader_log/);
   assert.match(logScript, /X-Yter-Log-Token/);
+  assert.match(logScript, /Authorization: `Bearer \$\{token\}`/);
   assert.match(logScript, /row\.textContent = line/);
+});
+
+test('sends the personal access token when submitting and polling tasks', async () => {
+  const harness = createHarness({ localStorage: { accessToken: 'dlpat_secret' } });
+  const task = await submitVideoTask(harness);
+  await harness.events.alarm.listener({ name: 'yter-task-poll' });
+
+  const byEndpoint = (suffix) => harness.requestHeaders.find(({ url }) => url.endsWith(suffix));
+  assert.ok(task);
+  assert.equal(byEndpoint('/api/add_task').headers.Authorization, 'Bearer dlpat_secret');
+  assert.equal(byEndpoint('/api/task_info').headers.Authorization, 'Bearer dlpat_secret');
+});
+
+test('does not send a legacy log token as a bearer token', async () => {
+  const harness = createHarness({ localStorage: { logToken: 'legacy-global-token' } });
+  await submitVideoTask(harness);
+
+  const request = harness.requestHeaders.find(({ url }) => url.endsWith('/api/add_task'));
+  assert.equal(request.headers.Authorization, undefined);
 });
