@@ -8,6 +8,8 @@ import json
 import re
 import subprocess
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache, wraps
 from urllib.parse import parse_qs, unquote, urlparse, urlsplit, urlunsplit
 import hashlib
@@ -1042,26 +1044,47 @@ def get_sidecar_subtitles(filename):
     return tracks
 
 
-@lru_cache(maxsize=256)
-def _probe_embedded_subtitles(filepath, file_mtime_ns, file_size):
-    """读取 MP4 的内嵌字幕流；文件属性参数用于自动失效缓存。"""
+MEDIA_PROBE_CACHE_SIZE = 1024
+MEDIA_PROBE_TAGS = 'title,artist,album,date,genre,description,synopsis,purl,comment'
+
+
+@lru_cache(maxsize=MEDIA_PROBE_CACHE_SIZE)
+def _probe_media_info(filepath, file_mtime_ns, file_size):
+    """一次 ffprobe 取回媒体库需要的时长、标签和流信息；失败时返回 None。
+
+    时长与画面高度、展示标签、内嵌字幕都从这一次结果派生，避免每个文件
+    串行启动多次 ffprobe。文件属性参数用于在文件变化时让缓存自动失效。
+    """
     del file_mtime_ns, file_size
     try:
         result = subprocess.run(
             [
-                "ffprobe", "-v", "error", "-select_streams", "s",
-                "-show_entries", "stream=index:stream_tags=language,title",
-                "-of", "json", filepath,
+                'ffprobe', '-v', 'error',
+                '-show_entries',
+                f'format=duration:format_tags={MEDIA_PROBE_TAGS}'
+                ':stream=index,codec_type,height:stream_tags=language,title',
+                '-of', 'json', filepath,
             ],
             check=True,
             capture_output=True,
             text=True,
             timeout=15,
         )
-        streams = json.loads(result.stdout).get("streams", [])
+        payload = json.loads(result.stdout)
     except (FileNotFoundError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
-        app.logger.warning("读取视频字幕流失败，已跳过字幕: %s (%s)", filepath, exc)
-        return ()
+        app.logger.warning("读取媒体信息失败，使用默认信息: %s (%s)", filepath, exc)
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+@lru_cache(maxsize=MEDIA_PROBE_CACHE_SIZE)
+def _probe_embedded_subtitles(filepath, file_mtime_ns, file_size):
+    """读取 MP4 的内嵌字幕流；文件属性参数用于自动失效缓存。"""
+    payload = _probe_media_info(filepath, file_mtime_ns, file_size)
+    streams = [
+        stream for stream in (payload or {}).get('streams') or []
+        if isinstance(stream, dict) and stream.get('codec_type') == 'subtitle'
+    ]
 
     subtitles = []
     for stream in streams:
@@ -1520,59 +1543,82 @@ def build_media_display_metadata(tags):
     }
 
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=MEDIA_PROBE_CACHE_SIZE)
 def _probe_media_metadata(filepath, file_mtime_ns, file_size):
-    """一次读取播放器需要的媒体标签；文件属性用于缓存自动失效。"""
-    del file_mtime_ns, file_size
-    try:
-        result = subprocess.run(
-            [
-                'ffprobe', '-v', 'error',
-                '-show_entries',
-                'format_tags=title,artist,album,date,genre,description,synopsis,purl,comment',
-                '-of', 'json', filepath,
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        payload = json.loads(result.stdout)
-        raw_tags = payload.get('format', {}).get('tags', {})
-    except (FileNotFoundError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
-        app.logger.warning("读取媒体 metadata 失败，使用默认信息: %s (%s)", filepath, exc)
-        raw_tags = {}
-    return build_media_display_metadata(raw_tags)
+    """读取播放器需要的媒体标签；文件属性用于缓存自动失效。"""
+    payload = _probe_media_info(filepath, file_mtime_ns, file_size) or {}
+    media_format = payload.get('format')
+    raw_tags = media_format.get('tags') if isinstance(media_format, dict) else None
+    return build_media_display_metadata(raw_tags or {})
 
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=MEDIA_PROBE_CACHE_SIZE)
 def _probe_media_dimensions(filepath, file_mtime_ns, file_size):
-    """读取媒体时长与视频高度，供媒体库列表展示；文件属性用于缓存失效。"""
-    del file_mtime_ns, file_size
-    try:
-        result = subprocess.run(
-            [
-                'ffprobe', '-v', 'error',
-                '-select_streams', 'v:0',
-                '-show_entries', 'format=duration:stream=height',
-                '-of', 'json', filepath,
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        payload = json.loads(result.stdout)
-    except (FileNotFoundError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
-        app.logger.warning("读取媒体时长失败，已忽略: %s (%s)", filepath, exc)
+    """读取媒体时长与首个视频流（含音频封面图）的高度，供媒体库列表展示。"""
+    payload = _probe_media_info(filepath, file_mtime_ns, file_size)
+    if payload is None:
         return None, None
-
-    duration = valid_nonnegative_number(payload.get('format', {}).get('duration'))
-    streams = payload.get('streams') or []
-    height = None
-    if streams:
-        height = valid_nonnegative_number(streams[0].get('height'))
+    media_format = payload.get('format')
+    duration = valid_nonnegative_number(
+        media_format.get('duration') if isinstance(media_format, dict) else None
+    )
+    video_stream = next(
+        (
+            stream for stream in payload.get('streams') or []
+            if isinstance(stream, dict) and stream.get('codec_type') == 'video'
+        ),
+        None,
+    )
+    height = valid_nonnegative_number(video_stream.get('height')) if video_stream else None
     return duration, int(height) if height else None
+
+
+MEDIA_PROBE_WORKERS = 4
+
+
+def prefetch_media_info(filenames):
+    """并发预取一批媒体的 ffprobe 信息，已缓存的文件直接命中。
+
+    子进程等待不占 GIL，线程池即可并行；之后逐个组装条目时全部命中缓存。
+    """
+    targets = []
+    for filename in filenames:
+        filepath = safe_join(FILES_DIR, filename)
+        if not filepath:
+            continue
+        try:
+            stat = os.stat(filepath)
+        except OSError:
+            continue
+        targets.append((filepath, stat.st_mtime_ns, stat.st_size))
+    if not targets:
+        return
+    workers = min(MEDIA_PROBE_WORKERS, os.cpu_count() or 1, len(targets))
+    if workers <= 1:
+        for target in targets:
+            _probe_media_info(*target)
+        return
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix='media-probe') as pool:
+        list(pool.map(lambda target: _probe_media_info(*target), targets))
+
+
+def warm_media_probe_cache():
+    """启动后在后台探测全部媒体，重启后第一个打开媒体库的用户不必等待。"""
+    try:
+        filenames = [
+            filename for filename in os.listdir(FILES_DIR)
+            if os.path.splitext(filename)[1].lower().lstrip('.')
+            in ({'mp4'} | AUDIO_EXTENSIONS)
+        ]
+        started = time.monotonic()
+        prefetch_media_info(filenames)
+        app.logger.info(
+            "媒体信息预热完成: %d 个文件，用时 %.1fs",
+            len(filenames),
+            time.monotonic() - started,
+        )
+    except Exception as exc:  # 预热失败不影响服务，列表请求时会再按需探测
+        app.logger.warning("媒体信息预热失败: %s", exc)
 
 
 def get_media_dimensions(filename):
@@ -1587,7 +1633,7 @@ def get_media_dimensions(filename):
     return _probe_media_dimensions(filepath, stat.st_mtime_ns, stat.st_size)
 
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=MEDIA_PROBE_CACHE_SIZE)
 def _probe_audio_metadata(filepath, file_mtime_ns, file_size):
     """读取音频 metadata；文件属性参数用于在文件变化时自动失效缓存。"""
     metadata = _probe_media_metadata(filepath, file_mtime_ns, file_size)
@@ -1596,7 +1642,7 @@ def _probe_audio_metadata(filepath, file_mtime_ns, file_size):
     return metadata['title'], metadata['artist'], video_id, source_url
 
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=MEDIA_PROBE_CACHE_SIZE)
 def _probe_media_source_url(filepath, file_mtime_ns, file_size):
     """读取视频等媒体文件的来源 URL；文件属性用于缓存自动失效。"""
     return _probe_media_metadata(
@@ -2611,6 +2657,7 @@ def build_media_library_items(owner=None):
         lambda name: os.path.splitext(name)[1].lower().lstrip('.')
         in AUDIO_EXTENSIONS
     )
+    prefetch_media_info(video_files + audio_files)
 
     fallback_cover_url = config.get(
         'AUDIO_PLAYER_FALLBACK_COVER_URL',
@@ -2716,8 +2763,26 @@ def build_media_library_items(owner=None):
     return videos, audios
 
 
+ANONYMOUS_CLEANUP_MIN_INTERVAL_SECONDS = 60
+_anonymous_cleanup_lock = threading.Lock()
+_anonymous_cleanup_last_run = {}
+
+
 def cleanup_expired_anonymous_media():
-    """删除超过匿名保留期的本地媒体及其归属记录。"""
+    """删除超过匿名保留期的本地媒体及其归属记录。
+
+    媒体列表和每个 /files/ 分段请求都会调用这里，同一组目录 60 秒内只执行一次：
+    downloader 另有每小时一次的清理循环，节流只会让过期匿名文件最多晚 60 秒删除。
+    未登记归属的新文件由 require_media_access / build_media_library_items 中的
+    sync_media_ownership() 补齐，不受节流影响。
+    """
+    key = (USER_DB_PATH, FILES_DIR, URLS_DIR)
+    now = time.monotonic()
+    with _anonymous_cleanup_lock:
+        last_run = _anonymous_cleanup_last_run.get(key)
+        if last_run is not None and now - last_run < ANONYMOUS_CLEANUP_MIN_INTERVAL_SECONDS:
+            return
+        _anonymous_cleanup_last_run[key] = now
     cleanup_config = dict(config)
     cleanup_config['USER_DB_PATH'] = USER_DB_PATH
     cleanup_config['FILES_DIR'] = FILES_DIR
@@ -3763,8 +3828,16 @@ if __name__ == "__main__":
     # 仅当配置了 YTC 时才在启动时获取 cookie
     if config.get("YTC"):
         get_youtube_cookie()
+    debug = config.get("FLASK_DEBUG", True)
+    # 调试模式的自动重载会先起一个只负责监视文件的父进程，只在真正提供服务的子进程里预热。
+    if not debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        threading.Thread(
+            target=warm_media_probe_cache,
+            name='media-probe-warmup',
+            daemon=True,
+        ).start()
     app.run(
         host=config.get("FLASK_HOST", "0.0.0.0"),
         port=config.get("FLASK_PORT", 5100),
-        debug=config.get("FLASK_DEBUG", True)
+        debug=debug
     )

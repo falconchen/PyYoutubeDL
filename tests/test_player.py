@@ -27,6 +27,7 @@ class TestPlayerPage(unittest.TestCase):
         self.client = app.test_client()
         app.testing = True
         install_auth(self)
+        app_module._probe_media_info.cache_clear()
         app_module._probe_media_metadata.cache_clear()
         app_module._probe_media_source_url.cache_clear()
         self.source_url_patcher = patch('app.get_media_source_url', return_value='')
@@ -45,6 +46,7 @@ class TestPlayerPage(unittest.TestCase):
             ),
             stderr='',
         )
+        app_module._probe_media_info.cache_clear()
         app_module._probe_media_source_url.cache_clear()
 
         with patch('app.subprocess.run', return_value=probe_result) as run:
@@ -229,13 +231,16 @@ class TestPlayerPage(unittest.TestCase):
             returncode=0,
             stdout='''{
                 "streams": [
-                    {"index": 2, "tags": {"language": "zho"}},
-                    {"index": 3, "tags": {"language": "zho"}}
+                    {"index": 0, "codec_type": "video", "height": 720},
+                    {"index": 1, "codec_type": "audio"},
+                    {"index": 2, "codec_type": "subtitle", "tags": {"language": "zho"}},
+                    {"index": 3, "codec_type": "subtitle", "tags": {"language": "zho"}}
                 ]
             }''',
             stderr='',
         )
 
+        app_module._probe_media_info.cache_clear()
         app_module._probe_embedded_subtitles.cache_clear()
         with patch('app.subprocess.run', return_value=probe_result):
             subtitles = app_module._probe_embedded_subtitles(

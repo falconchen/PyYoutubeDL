@@ -550,3 +550,93 @@ def test_subtitle_panel_settings_are_remembered():
     assert 'saveSubtitleSettings(this._subtitleSettings);' in script
     assert "getAttribute('data-action') !== 'restoreDefaults'" in script
     assert '/^#[0-9a-f]{6}$/i' in script
+
+
+def _clear_media_probe_caches():
+    for cached in (
+        app_module._probe_media_info,
+        app_module._probe_media_metadata,
+        app_module._probe_media_dimensions,
+        app_module._probe_embedded_subtitles,
+        app_module._probe_audio_metadata,
+        app_module._probe_media_source_url,
+    ):
+        cached.cache_clear()
+
+
+def test_media_list_probes_each_file_once_and_derives_all_fields():
+    import subprocess
+
+    probe_output = json.dumps({
+        'format': {
+            'duration': '61.5',
+            'tags': {'title': '探测标题', 'artist': '作者', 'comment': 'https://example.com/v'},
+        },
+        'streams': [
+            {'index': 0, 'codec_type': 'video', 'height': 1080},
+            {'index': 1, 'codec_type': 'audio'},
+            {'index': 2, 'codec_type': 'subtitle', 'tags': {'language': 'eng'}},
+        ],
+    })
+    _clear_media_probe_caches()
+    with logged_in_client() as (client, _user, _db), TemporaryDirectory() as files_dir:
+        for name in ['one.mp4', 'two.mp4', 'song.mp3']:
+            Path(files_dir, name).write_bytes(name.encode())
+        with (
+            patch('app.FILES_DIR', files_dir),
+            patch('app.subprocess.run', return_value=subprocess.CompletedProcess(
+                args=['ffprobe'], returncode=0, stdout=probe_output, stderr='',
+            )) as run,
+        ):
+            payload = client.get('/api/media_list').get_json()
+            first_calls = run.call_count
+            client.get('/api/media_list')
+            second_calls = run.call_count
+    _clear_media_probe_caches()
+
+    assert first_calls == 3
+    assert second_calls == 3
+    video = next(item for item in payload['video'] if item['filename'] == 'one.mp4')
+    assert video['duration'] == 61.5
+    assert video['height'] == 1080
+    assert video['title'] == '探测标题'
+    assert video['source_url'] == 'https://example.com/v'
+    assert [track['language'] for track in video['subtitles']] == ['en']
+    assert video['ai_summary'] is True
+    song = payload['audio'][0]
+    assert song['ai_summary'] is True
+
+
+def test_media_probe_failure_falls_back_to_empty_fields():
+    import subprocess
+
+    _clear_media_probe_caches()
+    with logged_in_client() as (client, _user, _db), TemporaryDirectory() as files_dir:
+        Path(files_dir, 'broken.mp4').write_bytes(b'x')
+        with (
+            patch('app.FILES_DIR', files_dir),
+            patch('app.subprocess.run', side_effect=subprocess.TimeoutExpired('ffprobe', 15)),
+        ):
+            payload = client.get('/api/media_list').get_json()
+    _clear_media_probe_caches()
+
+    video = payload['video'][0]
+    assert video['duration'] is None
+    assert video['height'] is None
+    assert video['title'] == 'broken.mp4'
+    assert video['subtitles'] == []
+
+
+def test_anonymous_cleanup_runs_at_most_once_per_interval():
+    with TemporaryDirectory() as directory:
+        with (
+            patch('app.USER_DB_PATH', str(Path(directory, 'users.sqlite3'))),
+            patch.dict(app_module._anonymous_cleanup_last_run, clear=True),
+            patch('app.anonymous_cleanup.cleanup_expired_media') as cleanup,
+            patch('app.time.monotonic', side_effect=[1000.0, 1030.0, 1061.0]),
+        ):
+            app_module.cleanup_expired_anonymous_media()
+            app_module.cleanup_expired_anonymous_media()
+            app_module.cleanup_expired_anonymous_media()
+
+    assert cleanup.call_count == 2

@@ -17,6 +17,7 @@ class TestAudioPlayerPage(unittest.TestCase):
         self.client = app.test_client()
         app.testing = True
         install_auth(self)
+        app_module._probe_media_info.cache_clear()
         app_module._probe_media_metadata.cache_clear()
         app_module._probe_audio_metadata.cache_clear()
         app_module._probe_media_source_url.cache_clear()
