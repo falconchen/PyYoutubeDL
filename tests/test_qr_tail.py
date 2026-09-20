@@ -24,11 +24,15 @@ def probe_payload(
     extra_streams=(),
     duration='60.0',
     tags=None,
+    pix_fmt='yuv420p',
+    codec_tag='avc1',
+    profile='High',
 ):
     streams = [{
         'index': 0, 'codec_type': 'video', 'codec_name': video_codec,
+        'codec_tag_string': codec_tag,
         'width': 1920, 'height': 1080, 'r_frame_rate': '30/1',
-        'pix_fmt': 'yuv420p', 'profile': 'High', 'time_base': '1/15360',
+        'pix_fmt': pix_fmt, 'profile': profile, 'time_base': '1/15360',
     }]
     if audio_codec:
         streams.append({
@@ -66,9 +70,38 @@ class TestLayoutChecks(unittest.TestCase):
         layout = qr_tail.describe_layout(probe_payload(audio_codec=None))
         self.assertIsNone(layout['audio_encoder'])
 
-    def test_non_h264_video_is_skipped(self):
+    def test_hevc_and_av1_pick_their_own_encoder_and_keep_the_tag(self):
+        hevc = qr_tail.describe_layout(probe_payload(
+            video_codec='hevc', codec_tag='hev1', profile='Main',
+        ))
+        self.assertEqual(hevc['video_encoder'], 'libx265')
+        self.assertEqual(hevc['profile'], 'main')
+        # tag 跟随片源，写成 hvc1 会让部分设备认不出来
+        self.assertEqual(hevc['codec_tag'], 'hev1')
+
+        av1 = qr_tail.describe_layout(probe_payload(
+            video_codec='av1', codec_tag='av01', profile='Main',
+        ))
+        self.assertEqual(av1['video_encoder'], 'libsvtav1')
+        self.assertEqual(av1['codec_tag'], 'av01')
+
+    def test_ten_bit_sources_keep_their_pixel_format_and_profile(self):
+        hevc = qr_tail.describe_layout(probe_payload(
+            video_codec='hevc', pix_fmt='yuv420p10le', codec_tag='hvc1',
+        ))
+        self.assertEqual(hevc['pix_fmt'], 'yuv420p10le')
+        self.assertEqual(hevc['profile'], 'main10')
+
+        h264 = qr_tail.describe_layout(probe_payload(pix_fmt='yuv420p10le'))
+        self.assertEqual(h264['profile'], 'high10')
+
+    def test_unsupported_codec_is_skipped(self):
         with self.assertRaises(qr_tail.TailSkipped):
-            qr_tail.describe_layout(probe_payload(video_codec='av1'))
+            qr_tail.describe_layout(probe_payload(video_codec='vp9'))
+
+    def test_unsupported_pixel_format_is_skipped(self):
+        with self.assertRaises(qr_tail.TailSkipped):
+            qr_tail.describe_layout(probe_payload(pix_fmt='yuv444p'))
 
     def test_data_stream_is_skipped(self):
         payload = probe_payload(
@@ -102,6 +135,32 @@ class TestTailCommand(unittest.TestCase):
         self.assertEqual(command[command.index('-c:a') + 1], 'aac')
         self.assertEqual(command[command.index('-ar') + 1], '48000')
         self.assertEqual(command[command.index('-video_track_timescale') + 1], '15360')
+
+    def test_tail_uses_the_source_encoder_tag_and_inline_headers(self):
+        h264 = self.build_command()
+        self.assertEqual(h264[h264.index('-c:v') + 1], 'libx264')
+        self.assertEqual(h264[h264.index('-tag:v') + 1], 'avc1')
+        # 拼接后轨道只留正片的编码配置，片尾要把参数集写进每个关键帧
+        self.assertEqual(h264[h264.index('-x264-params') + 1], 'repeat-headers=1')
+
+        hevc = self.build_command(video_codec='hevc', codec_tag='hvc1', profile='Main')
+        self.assertEqual(hevc[hevc.index('-c:v') + 1], 'libx265')
+        self.assertEqual(hevc[hevc.index('-tag:v') + 1], 'hvc1')
+        self.assertEqual(hevc[hevc.index('-x265-params') + 1], 'repeat-headers=1')
+
+        av1 = self.build_command(video_codec='av1', codec_tag='av01', profile='Main')
+        self.assertEqual(av1[av1.index('-c:v') + 1], 'libsvtav1')
+        self.assertEqual(av1[av1.index('-tag:v') + 1], 'av01')
+        # SVT-AV1 没有内嵌参数集的开关，靠拼接后的解码校验兜底
+        self.assertNotIn('-x265-params', av1)
+        self.assertNotIn('-x264-params', av1)
+
+    def test_ten_bit_tail_keeps_the_pixel_format(self):
+        command = self.build_command(
+            video_codec='hevc', pix_fmt='yuv420p10le', codec_tag='hvc1', profile='Main',
+        )
+        self.assertEqual(command[command.index('-pix_fmt') + 1], 'yuv420p10le')
+        self.assertEqual(command[command.index('-profile:v') + 1], 'main10')
 
     def test_tail_adds_one_empty_subtitle_per_source_track(self):
         command = self.build_command(subtitle_count=2)
@@ -282,17 +341,65 @@ class TestTailImage(unittest.TestCase):
 @unittest.skipUnless(
     shutil.which('ffmpeg') and shutil.which('ffprobe'), '需要 ffmpeg 与 ffprobe'
 )
+class TestTailDecodeCheck(unittest.TestCase):
+    """拼接点的参数集不一定被认，片尾必须真的解出来才算成功。"""
+
+    def make_clip(self, path, color):
+        subprocess.run(
+            [
+                'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+                '-f', 'lavfi', '-i', f'color=c={color}:size=320x240:rate=25',
+                '-t', '2', '-c:v', 'libx264', '-preset', 'ultrafast',
+                '-pix_fmt', 'yuv420p', path,
+            ],
+            check=True, capture_output=True,
+        )
+
+    def make_image(self, path, color):
+        subprocess.run(
+            [
+                'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+                '-f', 'lavfi', '-i', f'color=c={color}:size=320x240',
+                '-frames:v', '1', path,
+            ],
+            check=True, capture_output=True,
+        )
+
+    def test_matching_frame_passes(self):
+        with TemporaryDirectory() as directory:
+            clip = str(Path(directory, 'clip.mp4'))
+            image = str(Path(directory, 'tail.png'))
+            self.make_clip(clip, 'black')
+            self.make_image(image, 'black')
+            qr_tail.verify_tail_decodes(clip, image, 0.0, 2.0, LOGGER)
+
+    def test_frame_that_does_not_match_the_tail_image_fails(self):
+        with TemporaryDirectory() as directory:
+            clip = str(Path(directory, 'clip.mp4'))
+            image = str(Path(directory, 'tail.png'))
+            self.make_clip(clip, 'black')
+            self.make_image(image, 'white')
+            with self.assertRaises(qr_tail.TailSkipped):
+                qr_tail.verify_tail_decodes(clip, image, 0.0, 2.0, LOGGER)
+
+
+@unittest.skipUnless(
+    shutil.which('ffmpeg') and shutil.which('ffprobe'), '需要 ffmpeg 与 ffprobe'
+)
 class TestAppendQrTailEndToEnd(unittest.TestCase):
-    def make_sample(self, directory, extra_args=()):
+    ENCODERS = {'h264': 'libx264', 'hevc': 'libx265', 'av1': 'libsvtav1'}
+
+    def make_sample(self, directory, extra_args=(), codec='h264'):
         path = str(Path(directory, 'sample.mp4'))
+        encoder = self.ENCODERS[codec]
+        speed = ['-preset', '10'] if encoder == 'libsvtav1' else ['-preset', 'ultrafast']
         subprocess.run(
             [
                 'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
                 '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25',
                 '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
-                '-t', '2', '-c:v', 'libx264', '-preset', 'ultrafast',
-                '-profile:v', 'high', '-pix_fmt', 'yuv420p',
-                '-c:a', 'aac', *extra_args, path,
+                '-t', '2', '-c:v', encoder, *speed,
+                '-pix_fmt', 'yuv420p', '-c:a', 'aac', *extra_args, path,
             ],
             check=True,
             capture_output=True,
@@ -326,6 +433,28 @@ class TestAppendQrTailEndToEnd(unittest.TestCase):
             float(payload['format']['duration']),
             [stream['codec_type'] for stream in payload['streams']],
         )
+
+    def test_hevc_and_av1_sources_also_get_a_tail(self):
+        """B 站常给 HEVC 和 AV1；片尾要按片源编码生成才能无损拼接。"""
+        for codec in ('hevc', 'av1'):
+            with self.subTest(codec=codec):
+                with TemporaryDirectory() as directory:
+                    sample = self.make_sample(directory, codec=codec)
+                    duration_before, streams_before = self.describe(sample)
+
+                    appended = qr_tail.append_qr_tail(
+                        sample,
+                        'https://www.bilibili.com/video/BV1xx411c7mD',
+                        {'VIDEO_QR_TAIL': {'ENABLED': True, 'DURATION_SECONDS': 2}},
+                        LOGGER,
+                    )
+
+                    duration_after, streams_after = self.describe(sample)
+                    self.assertTrue(appended)
+                    self.assertAlmostEqual(
+                        duration_after, duration_before + 2, delta=0.5
+                    )
+                    self.assertEqual(streams_after, streams_before)
 
     def test_tail_is_appended_without_changing_stream_layout(self):
         with TemporaryDirectory() as directory:

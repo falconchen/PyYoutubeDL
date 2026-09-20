@@ -15,18 +15,35 @@ from urllib.parse import urlparse
 
 FFMPEG_TIMEOUT_SECONDS = 120
 
-# 片尾视频只用 libx264 生成，所以正片必须也是 H.264；音频编码器按正片选择。
-SUPPORTED_VIDEO_CODECS = {'h264'}
+# 片尾按正片的编码重新生成，才能无损拼接；每种编码对应一个编码器和默认容器 tag。
+VIDEO_ENCODERS = {
+    'h264': {'encoder': 'libx264', 'default_tag': 'avc1', 'params_option': '-x264-params'},
+    'hevc': {'encoder': 'libx265', 'default_tag': 'hvc1', 'params_option': '-x265-params'},
+    'av1': {'encoder': 'libsvtav1', 'default_tag': 'av01', 'params_option': None},
+}
 AUDIO_ENCODERS = {'aac': 'aac', 'opus': 'libopus', 'mp3': 'libmp3lame'}
-SUPPORTED_PIXEL_FORMATS = {'yuv420p', 'yuvj420p'}
+# 只支持 8-bit 与 10-bit 的 4:2:0；4:2:2、4:4:4 等继续跳过
+SUPPORTED_PIXEL_FORMATS = {'yuv420p': 8, 'yuvj420p': 8, 'yuv420p10le': 10}
 # mov_text 之外的字幕、以及 bin_data 这类数据流没法在片尾造出同样的轨道
 SUPPORTED_SUBTITLE_CODECS = {'mov_text'}
 
-H264_PROFILES = {
-    'baseline': 'baseline',
-    'constrained baseline': 'baseline',
-    'main': 'main',
-    'high': 'high',
+VIDEO_PROFILES = {
+    'h264': {
+        8: {
+            'baseline': 'baseline',
+            'constrained baseline': 'baseline',
+            'main': 'main',
+            'high': 'high',
+        },
+        10: {},  # 10-bit H.264 只有 high10
+    },
+    'hevc': {8: {}, 10: {}},
+    'av1': {8: {}, 10: {}},
+}
+DEFAULT_PROFILES = {
+    'h264': {8: 'high', 10: 'high10'},
+    'hevc': {8: 'main', 10: 'main10'},
+    'av1': {8: 'main', 10: 'main'},
 }
 
 # 拉丁字体用来画链接；提示语是中文，必须另找带中日韩字形的字体，
@@ -143,8 +160,8 @@ def probe_media(video_path, logger):
             '-show_entries',
             'format=duration:format_tags=title,artist,album,date,genre'
             ',description,synopsis,purl,comment'
-            ':stream=index,codec_type,codec_name,width,height,r_frame_rate'
-            ',pix_fmt,profile,sample_rate,channels,time_base',
+            ':stream=index,codec_type,codec_name,codec_tag_string,width,height'
+            ',r_frame_rate,pix_fmt,profile,sample_rate,channels,time_base',
             '-of', 'json', video_path,
         ],
         logger,
@@ -200,11 +217,12 @@ def describe_layout(payload):
 
     video = videos[0]
     codec_name = video.get('codec_name')
-    if codec_name not in SUPPORTED_VIDEO_CODECS:
+    if codec_name not in VIDEO_ENCODERS:
         raise TailSkipped(f'视频编码 {codec_name} 无法无损拼接')
     pix_fmt = video.get('pix_fmt')
     if pix_fmt not in SUPPORTED_PIXEL_FORMATS:
         raise TailSkipped(f'像素格式 {pix_fmt} 暂不支持')
+    bit_depth = SUPPORTED_PIXEL_FORMATS[pix_fmt]
     width, height = video.get('width'), video.get('height')
     if not isinstance(width, int) or not isinstance(height, int) or width <= 0 or height <= 0:
         raise TailSkipped('没有读到分辨率')
@@ -235,12 +253,22 @@ def describe_layout(payload):
             )
 
     profile = str(video.get('profile') or '').strip().lower()
+    encoder = VIDEO_ENCODERS[codec_name]
+    codec_tag = str(video.get('codec_tag_string') or '').strip()
     return {
         'width': width,
         'height': height,
         'frame_rate': frame_rate,
-        'pix_fmt': 'yuv420p',
-        'profile': H264_PROFILES.get(profile, 'high'),
+        # 8-bit 的 yuvj420p 只是标了 full range，片尾按 yuv420p 编即可
+        'pix_fmt': 'yuv420p' if bit_depth == 8 else pix_fmt,
+        'video_codec': codec_name,
+        'video_encoder': encoder['encoder'],
+        'params_option': encoder['params_option'],
+        # tag 跟随片源：HEVC 写成 hev1 的文件若输出成 hvc1，部分设备不认
+        'codec_tag': codec_tag or encoder['default_tag'],
+        'profile': VIDEO_PROFILES[codec_name][bit_depth].get(
+            profile, DEFAULT_PROFILES[codec_name][bit_depth]
+        ),
         'timescale': timescale_from_time_base(video.get('time_base')),
         'audio_encoder': audio_encoder,
         'sample_rate': str(audio.get('sample_rate') or '48000') if audio else '',
@@ -413,12 +441,24 @@ def build_tail_clip(image_path, layout, duration, output_path, logger):
         next_input += 1
 
     command += [
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
-        '-profile:v', layout['profile'], '-pix_fmt', layout['pix_fmt'],
+        '-c:v', layout['video_encoder'],
+        '-pix_fmt', layout['pix_fmt'],
         '-r', layout['frame_rate'], '-s', f"{layout['width']}x{layout['height']}",
-        # 片尾短，全部关键帧更利于拼接点的解码
-        '-g', '25', '-sc_threshold', '0',
+        # 片尾短，关键帧密一点更利于拼接点的解码
+        '-g', '25',
     ]
+    if layout['video_encoder'] == 'libsvtav1':
+        command += ['-preset', '8', '-crf', '32']
+    else:
+        command += ['-preset', 'veryfast', '-crf', '20', '-sc_threshold', '0']
+    if layout['profile']:
+        command += ['-profile:v', layout['profile']]
+    if layout['codec_tag']:
+        command += ['-tag:v', layout['codec_tag']]
+    if layout['params_option']:
+        # mp4 每条轨道只存一份编码配置，拼接后保留的是正片那份。让片尾的每个
+        # 关键帧自带 SPS/PPS/VPS，解码器才能在拼接点重新初始化。
+        command += [layout['params_option'], 'repeat-headers=1']
     if layout['audio_encoder']:
         command += [
             '-c:a', layout['audio_encoder'], '-b:a', '128k',
@@ -481,8 +521,60 @@ def display_tags(payload):
     }
 
 
-def verify_output(output_path, source_payload, duration, logger):
-    """拼接后长度、流布局和展示标签都要对得上，否则宁可保留原文件。"""
+# 片尾帧与原图的平均灰度差超过这个值，就认为片尾没被正确解出来（满量程 255）
+TAIL_FRAME_MAX_DIFF = 40
+
+
+def verify_tail_decodes(output_path, image_path, join_point, duration, logger):
+    """真的解一遍片尾，确认拼接点之后的画面能放出来。
+
+    mp4 每条轨道只存一份编码配置，拼接后保留的是正片那份，片尾的参数集不一定
+    被认。x264/x265 可以把参数集写进每个关键帧，SVT-AV1 没有这个开关，所以统一
+    在这里兜底：解码报错或画面对不上，就放弃拼接、保留原文件。
+    """
+    run_ffmpeg(
+        [
+            'ffmpeg', '-hide_banner', '-v', 'error',
+            '-ss', f'{max(0.0, join_point - 1):.3f}', '-i', output_path,
+            '-map', '0:v:0', '-f', 'null', '-',
+        ],
+        logger,
+        stdin=subprocess.DEVNULL,
+    )
+
+    from PIL import Image, ImageChops
+
+    frame_path = f'{output_path}.frame.png'
+    try:
+        run_ffmpeg(
+            [
+                'ffmpeg', '-hide_banner', '-v', 'error', '-y',
+                '-ss', f'{join_point + duration / 2:.3f}', '-i', output_path,
+                '-frames:v', '1', frame_path,
+            ],
+            logger,
+            stdin=subprocess.DEVNULL,
+        )
+        with Image.open(frame_path) as frame, Image.open(image_path) as expected:
+            size = (160, 90)
+            decoded = frame.convert('L').resize(size)
+            reference = expected.convert('L').resize(size)
+        difference = ImageChops.difference(decoded, reference)
+        mean_difference = sum(
+            value * count for value, count in enumerate(difference.histogram())
+        ) / (size[0] * size[1])
+        if mean_difference > TAIL_FRAME_MAX_DIFF:
+            raise TailSkipped(f'片尾画面解码异常（平均差 {mean_difference:.0f}）')
+        logger.debug('片尾画面校验通过，平均差 %.1f', mean_difference)
+    finally:
+        try:
+            os.remove(frame_path)
+        except OSError:
+            pass
+
+
+def verify_output(output_path, source_payload, duration, logger, image_path=None):
+    """拼接后长度、流布局、展示标签都要对得上，片尾还要真的能解码。"""
     payload = probe_media(output_path, logger)
     if stream_counts(payload) != stream_counts(source_payload):
         raise TailSkipped('拼接后的流布局与原文件不一致')
@@ -496,6 +588,8 @@ def verify_output(output_path, source_payload, duration, logger):
         raise TailSkipped(
             f'拼接后时长异常: {output_duration:.1f}s，预期 {source_duration + duration:.1f}s'
         )
+    if image_path:
+        verify_tail_decodes(output_path, image_path, source_duration, duration, logger)
 
 
 def append_qr_tail(video_path, source_url, config, logger):
@@ -531,7 +625,7 @@ def append_qr_tail(video_path, source_url, config, logger):
         render_tail_image(url, layout, config, image_path, logger)
         build_tail_clip(image_path, layout, duration, tail_path, logger)
         concat_clips(video_path, tail_path, list_path, output_path, logger)
-        verify_output(output_path, payload, duration, logger)
+        verify_output(output_path, payload, duration, logger, image_path=image_path)
         os.replace(output_path, video_path)
         temporary_paths.remove(output_path)
         logger.info('已追加 %.0f 秒二维码片尾: %s', duration, basename)
