@@ -27,6 +27,7 @@ from config_util import (
 )
 from log_util import setup_logger
 import anonymous_cleanup
+import qr_tail
 import task_queue
 
 # 加载配置
@@ -839,6 +840,8 @@ class DownloadHandler(FileSystemEventHandler):
                         moved = self.move_completed_item(
                             task_tmp_dir,
                             completed_filepath,
+                            mode=mode,
+                            source_url=url,
                         )
                         if moved is not None:
                             item_filepaths, item_file_sizes = moved
@@ -866,6 +869,7 @@ class DownloadHandler(FileSystemEventHandler):
                 started_at=started_at,
                 previous_moved_filepaths=moved_filepaths,
                 previous_moved_file_sizes=moved_file_sizes,
+                source_url=url,
             ):
                 logger.error(f"下载产物移动失败，临时文件已保留: {task_tmp_dir}")
                 return False
@@ -888,6 +892,14 @@ class DownloadHandler(FileSystemEventHandler):
                         title="下载失败",
                         content=f"URL: {url}\n原因: {failure_reason}")
             return False
+
+    def _append_qr_tails(self, paths, mode, source_url):
+        """移动前给视频追加二维码片尾，让上传和媒体库只看到最终文件。"""
+        if mode != 'video' or not qr_tail.is_enabled(config):
+            return
+        for path in paths:
+            if os.path.splitext(path)[1].lower() == '.mp4' and os.path.isfile(path):
+                qr_tail.append_qr_tail(path, source_url, config, logger)
 
     def _move_paths(self, paths):
         """移动给定产物并返回成功移动的路径、大小及整体结果。"""
@@ -914,7 +926,9 @@ class DownloadHandler(FileSystemEventHandler):
                 move_succeeded = False
         return move_succeeded, moved_filepaths, moved_file_sizes
 
-    def move_completed_item(self, tmp_dir, completed_filepath):
+    def move_completed_item(
+        self, tmp_dir, completed_filepath, mode=None, source_url='',
+    ):
         """立即移动一个完成的媒体条目及其外挂字幕。"""
         tmp_dir_realpath = os.path.realpath(tmp_dir)
         completed_realpath = os.path.realpath(completed_filepath)
@@ -940,6 +954,7 @@ class DownloadHandler(FileSystemEventHandler):
             if os.path.splitext(filename)[1].lower() in SUBTITLE_OUTPUT_EXTENSIONS:
                 paths.append(os.path.join(tmp_dir, filename))
 
+        self._append_qr_tails([completed_filepath], mode, source_url)
         move_succeeded, moved_filepaths, moved_file_sizes = self._move_paths(paths)
         if not move_succeeded:
             logger.error("条目产物移动不完整，将在任务结束时重试: %s", media_basename)
@@ -953,6 +968,7 @@ class DownloadHandler(FileSystemEventHandler):
         started_at=None,
         previous_moved_filepaths=None,
         previous_moved_file_sizes=None,
+        source_url='',
     ):
         """
         将下载完成的文件从临时目录移动到正式的文件输出目录。
@@ -962,12 +978,14 @@ class DownloadHandler(FileSystemEventHandler):
             task_id (str | None): 任务 ID；提供时记录最终产物文件名。
             mode (str | None): video 或 audio，用于选择最终主媒体。
             started_at (float | None): 完整处理计时起点。
+            source_url (str): 任务原始链接，用于生成二维码片尾。
         """
         moved_filepaths = list(previous_moved_filepaths or [])
         moved_file_sizes = dict(previous_moved_file_sizes or {})
         remaining_paths = [
             os.path.join(tmp_dir, filename) for filename in os.listdir(tmp_dir)
         ]
+        self._append_qr_tails(remaining_paths, mode, source_url)
         move_succeeded, final_filepaths, final_file_sizes = self._move_paths(
             remaining_paths
         )

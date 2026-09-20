@@ -1,0 +1,253 @@
+"""视频片尾二维码：参数拼装、跳过分支，以及一次真实的端到端拼接。"""
+import json
+import logging
+import os
+import shutil
+import subprocess
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
+import qr_tail
+
+LOGGER = logging.getLogger('qr_tail_test')
+LOGGER.addHandler(logging.NullHandler())
+
+ENABLED_CONFIG = {'VIDEO_QR_TAIL': {'ENABLED': True, 'DURATION_SECONDS': 5}}
+
+
+def probe_payload(
+    video_codec='h264',
+    audio_codec='aac',
+    subtitle_count=0,
+    extra_streams=(),
+    duration='60.0',
+    tags=None,
+):
+    streams = [{
+        'index': 0, 'codec_type': 'video', 'codec_name': video_codec,
+        'width': 1920, 'height': 1080, 'r_frame_rate': '30/1',
+        'pix_fmt': 'yuv420p', 'profile': 'High', 'time_base': '1/15360',
+    }]
+    if audio_codec:
+        streams.append({
+            'index': 1, 'codec_type': 'audio', 'codec_name': audio_codec,
+            'sample_rate': '48000', 'channels': 2, 'time_base': '1/48000',
+        })
+    for offset in range(subtitle_count):
+        streams.append({
+            'index': 2 + offset, 'codec_type': 'subtitle',
+            'codec_name': 'mov_text', 'time_base': '1/1000',
+        })
+    streams.extend(extra_streams)
+    return {
+        'streams': streams,
+        'format': {'duration': duration, 'tags': tags or {}},
+    }
+
+
+class TestLayoutChecks(unittest.TestCase):
+    def test_supported_layout_reports_encoder_settings(self):
+        layout = qr_tail.describe_layout(probe_payload(subtitle_count=3))
+
+        self.assertEqual(layout['width'], 1920)
+        self.assertEqual(layout['frame_rate'], '30/1')
+        self.assertEqual(layout['profile'], 'high')
+        self.assertEqual(layout['timescale'], 15360)
+        self.assertEqual(layout['audio_encoder'], 'aac')
+        self.assertEqual(layout['subtitle_count'], 3)
+
+    def test_opus_audio_uses_libopus(self):
+        layout = qr_tail.describe_layout(probe_payload(audio_codec='opus'))
+        self.assertEqual(layout['audio_encoder'], 'libopus')
+
+    def test_video_only_file_needs_no_audio_encoder(self):
+        layout = qr_tail.describe_layout(probe_payload(audio_codec=None))
+        self.assertIsNone(layout['audio_encoder'])
+
+    def test_non_h264_video_is_skipped(self):
+        with self.assertRaises(qr_tail.TailSkipped):
+            qr_tail.describe_layout(probe_payload(video_codec='av1'))
+
+    def test_data_stream_is_skipped(self):
+        payload = probe_payload(
+            extra_streams=({'index': 3, 'codec_type': 'data', 'codec_name': 'bin_data'},),
+        )
+        with self.assertRaises(qr_tail.TailSkipped):
+            qr_tail.describe_layout(payload)
+
+    def test_audio_timebase_mismatch_is_skipped(self):
+        """HE-AAC 的容器时间基是采样率的一半，拼接后时长会翻倍。"""
+        payload = probe_payload()
+        payload['streams'][1]['time_base'] = '1/24000'
+        with self.assertRaises(qr_tail.TailSkipped):
+            qr_tail.describe_layout(payload)
+
+
+class TestTailCommand(unittest.TestCase):
+    def build_command(self, **layout_overrides):
+        layout = qr_tail.describe_layout(probe_payload(**layout_overrides))
+        with patch('qr_tail.run_ffmpeg') as run:
+            qr_tail.build_tail_clip('/tmp/tail.png', layout, 5, '/tmp/tail.mp4', LOGGER)
+        return run.call_args.args[0]
+
+    def test_tail_matches_source_encoding(self):
+        command = self.build_command()
+
+        self.assertIn('libx264', command)
+        self.assertEqual(command[command.index('-profile:v') + 1], 'high')
+        self.assertEqual(command[command.index('-r') + 1], '30/1')
+        self.assertEqual(command[command.index('-s') + 1], '1920x1080')
+        self.assertEqual(command[command.index('-c:a') + 1], 'aac')
+        self.assertEqual(command[command.index('-ar') + 1], '48000')
+        self.assertEqual(command[command.index('-video_track_timescale') + 1], '15360')
+
+    def test_tail_adds_one_empty_subtitle_per_source_track(self):
+        command = self.build_command(subtitle_count=2)
+
+        self.assertEqual(command.count(os.devnull), 2)
+        self.assertIn('mov_text', command)
+        self.assertIn('1:a:0', command)
+        self.assertIn('2:s:0', command)
+        self.assertIn('3:s:0', command)
+
+    def test_video_only_tail_has_no_audio_options(self):
+        command = self.build_command(audio_codec=None)
+
+        self.assertNotIn('-c:a', command)
+        self.assertNotIn('anullsrc', ' '.join(command))
+
+
+class TestAppendQrTail(unittest.TestCase):
+    def test_disabled_config_does_nothing(self):
+        with patch('qr_tail.probe_media') as probe:
+            self.assertFalse(
+                qr_tail.append_qr_tail('/tmp/video.mp4', 'https://e.com/v', {}, LOGGER)
+            )
+        probe.assert_not_called()
+
+    def test_source_url_falls_back_to_media_tags(self):
+        tagged = probe_payload(tags={'purl': 'https://www.youtube.com/watch?v=abc'})
+        self.assertEqual(
+            qr_tail.source_url_from_tags(tagged['format']['tags']),
+            'https://www.youtube.com/watch?v=abc',
+        )
+
+    def test_missing_source_url_skips_without_touching_file(self):
+        with TemporaryDirectory() as directory:
+            video = Path(directory, 'video.mp4')
+            video.write_bytes(b'original')
+            with patch('qr_tail.probe_media', return_value=probe_payload()):
+                appended = qr_tail.append_qr_tail(
+                    str(video), '', ENABLED_CONFIG, LOGGER
+                )
+
+            self.assertFalse(appended)
+            self.assertEqual(video.read_bytes(), b'original')
+
+    def test_failed_concat_keeps_original_and_cleans_temp_files(self):
+        with TemporaryDirectory() as directory:
+            video = Path(directory, 'video.mp4')
+            video.write_bytes(b'original')
+            with (
+                patch('qr_tail.probe_media', return_value=probe_payload()),
+                patch('qr_tail.render_tail_image'),
+                patch('qr_tail.build_tail_clip'),
+                patch(
+                    'qr_tail.concat_clips',
+                    side_effect=qr_tail.TailSkipped('ffmpeg 失败'),
+                ),
+            ):
+                appended = qr_tail.append_qr_tail(
+                    str(video), 'https://e.com/v', ENABLED_CONFIG, LOGGER
+                )
+
+            self.assertFalse(appended)
+            self.assertEqual(video.read_bytes(), b'original')
+            self.assertEqual([p.name for p in Path(directory).iterdir()], ['video.mp4'])
+
+    def test_wrong_output_duration_keeps_original(self):
+        source = probe_payload(duration='60.0')
+        with TemporaryDirectory() as directory:
+            video = Path(directory, 'video.mp4')
+            video.write_bytes(b'original')
+
+            def fake_concat(video_path, tail_path, list_path, output_path, logger):
+                Path(output_path).write_bytes(b'joined')
+
+            with (
+                patch('qr_tail.probe_media', side_effect=[
+                    source,
+                    probe_payload(duration='120.0'),  # 拼接结果时长不对
+                ]),
+                patch('qr_tail.render_tail_image'),
+                patch('qr_tail.build_tail_clip'),
+                patch('qr_tail.concat_clips', side_effect=fake_concat),
+            ):
+                appended = qr_tail.append_qr_tail(
+                    str(video), 'https://e.com/v', ENABLED_CONFIG, LOGGER
+                )
+
+            self.assertFalse(appended)
+            self.assertEqual(video.read_bytes(), b'original')
+
+
+@unittest.skipUnless(
+    shutil.which('ffmpeg') and shutil.which('ffprobe'), '需要 ffmpeg 与 ffprobe'
+)
+class TestAppendQrTailEndToEnd(unittest.TestCase):
+    def make_sample(self, directory, extra_args=()):
+        path = str(Path(directory, 'sample.mp4'))
+        subprocess.run(
+            [
+                'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+                '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25',
+                '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
+                '-t', '2', '-c:v', 'libx264', '-preset', 'ultrafast',
+                '-profile:v', 'high', '-pix_fmt', 'yuv420p',
+                '-c:a', 'aac', *extra_args, path,
+            ],
+            check=True,
+            capture_output=True,
+        )
+        return path
+
+    def describe(self, path):
+        result = subprocess.run(
+            [
+                'ffprobe', '-v', 'error', '-show_entries',
+                'format=duration:stream=codec_type', '-of', 'json', path,
+            ],
+            check=True, capture_output=True, text=True,
+        )
+        payload = json.loads(result.stdout)
+        return (
+            float(payload['format']['duration']),
+            [stream['codec_type'] for stream in payload['streams']],
+        )
+
+    def test_tail_is_appended_without_changing_stream_layout(self):
+        with TemporaryDirectory() as directory:
+            sample = self.make_sample(directory)
+            duration_before, streams_before = self.describe(sample)
+
+            appended = qr_tail.append_qr_tail(
+                sample,
+                'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+                {'VIDEO_QR_TAIL': {'ENABLED': True, 'DURATION_SECONDS': 2}},
+                LOGGER,
+            )
+
+            duration_after, streams_after = self.describe(sample)
+            self.assertTrue(appended)
+            self.assertAlmostEqual(duration_after, duration_before + 2, delta=0.5)
+            self.assertEqual(streams_after, streams_before)
+            # 临时文件不留在目录里
+            self.assertEqual(
+                sorted(p.name for p in Path(directory).iterdir()), ['sample.mp4']
+            )
+
+
+if __name__ == '__main__':
+    unittest.main()

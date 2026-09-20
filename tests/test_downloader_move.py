@@ -557,6 +557,66 @@ class TestDownloaderMove(unittest.TestCase):
                 {'video.mp4', 'video.zh-Hans.srt'},
             )
 
+    def test_qr_tail_runs_before_the_file_leaves_the_temp_directory(self):
+        """先追加片尾再移动，WebDAV 和媒体库才不会看到未处理的版本。"""
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            tmp_dir = root_path / 'tmp' / 'task'
+            files_dir = root_path / 'files'
+            tmp_dir.mkdir(parents=True)
+            files_dir.mkdir()
+            video = tmp_dir / 'video.mp4'
+            video.write_bytes(b'video')
+            seen = {}
+
+            def record(path, source_url, config, logger):
+                seen['path'] = path
+                seen['source_url'] = source_url
+                seen['still_in_tmp'] = Path(path).exists()
+                return True
+
+            with (
+                patch.dict(downloader.config, {
+                    'FILES_DIR': str(files_dir),
+                    'VIDEO_QR_TAIL': {'ENABLED': True},
+                }),
+                patch('downloader.qr_tail.append_qr_tail', side_effect=record),
+            ):
+                self.handler.move_completed_item(
+                    str(tmp_dir),
+                    str(video),
+                    mode='video',
+                    source_url='https://example.com/watch?v=abc',
+                )
+
+            self.assertEqual(seen['path'], str(video))
+            self.assertEqual(seen['source_url'], 'https://example.com/watch?v=abc')
+            self.assertTrue(seen['still_in_tmp'])
+            self.assertTrue((files_dir / 'video.mp4').exists())
+
+    def test_qr_tail_is_skipped_for_audio_tasks(self):
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            tmp_dir = root_path / 'tmp' / 'task'
+            files_dir = root_path / 'files'
+            tmp_dir.mkdir(parents=True)
+            files_dir.mkdir()
+            audio = tmp_dir / 'song.mp3'
+            audio.write_bytes(b'audio')
+
+            with (
+                patch.dict(downloader.config, {
+                    'FILES_DIR': str(files_dir),
+                    'VIDEO_QR_TAIL': {'ENABLED': True},
+                }),
+                patch('downloader.qr_tail.append_qr_tail') as append,
+            ):
+                self.handler.move_completed_item(
+                    str(tmp_dir), str(audio), mode='audio', source_url='https://e.com/a',
+                )
+
+            append.assert_not_called()
+
     def test_completed_item_outside_task_directory_is_rejected(self):
         with tempfile.TemporaryDirectory() as root:
             root_path = Path(root)
