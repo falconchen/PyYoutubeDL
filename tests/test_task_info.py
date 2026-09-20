@@ -278,16 +278,20 @@ class TestTaskInfoAPI(unittest.TestCase):
             encoding='utf-8',
         )
 
-        self.assertIn('const METADATA_TIMEOUT_MS = 30000;', template)
+        self.assertIn('const METADATA_JOB_TIMEOUT_MS = 90000;', template)
+        self.assertIn('const METADATA_POLL_INTERVAL_MS = 1000;', template)
+        self.assertIn('const METADATA_REQUEST_TIMEOUT_MS = 10000;', template)
         self.assertIn('const METADATA_MAX_ATTEMPTS = 2;', template)
-        self.assertIn("fetch('/api/video_info_basic'", template)
+        self.assertIn("fetchMetadataJson('/api/video_info_basic'", template)
+        self.assertIn('fetchMetadataJson(submitted.poll_url', template)
+        self.assertIn("data.status === 'pending'", template)
         self.assertNotIn("fetch('/api/video_info',", template)
         self.assertIn('setThumbnail(data.thumbnail, data.title || \'视频缩略图\')', template)
         self.assertIn('thumbnail.hidden = false;', template)
         self.assertIn('const sourceUrls = data.tasks', template)
         self.assertIn('sourceUrls.every(url => url === sourceUrls[0])', template)
         self.assertIn('(data.tasks.length === 1 || hasSharedSource)', template)
-        self.assertIn('error.name === \'AbortError\'', template)
+        self.assertIn("error.name === 'AbortError'", template)
         self.assertIn('正在重试获取标题…', template)
         self.assertIn('updateMetadata(url, attempt + 1)', template)
 

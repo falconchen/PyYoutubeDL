@@ -355,29 +355,80 @@
             missing: '未找到'
         };
 
-        const METADATA_TIMEOUT_MS = 30000;
+        const METADATA_JOB_TIMEOUT_MS = 90000;
+        const METADATA_POLL_INTERVAL_MS = 1000;
+        const METADATA_REQUEST_TIMEOUT_MS = 10000;
         const METADATA_MAX_ATTEMPTS = 2;
         const METADATA_RETRY_DELAY_MS = 1500;
 
-        function updateMetadata(url, attempt = 1) {
-            if (!url || !videoInfo) return;
+        function metadataDelay(milliseconds) {
+            return new Promise(resolve => window.setTimeout(resolve, milliseconds));
+        }
+
+        async function fetchMetadataJson(url, options = {}) {
             const controller = new AbortController();
-            const timeout = window.setTimeout(() => controller.abort(), METADATA_TIMEOUT_MS);
-            fetch('/api/video_info_basic', {
+            const timeout = window.setTimeout(
+                () => controller.abort(),
+                METADATA_REQUEST_TIMEOUT_MS
+            );
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    signal: controller.signal
+                });
+                return {response, data: await response.json()};
+            } finally {
+                window.clearTimeout(timeout);
+            }
+        }
+
+        function metadataHttpError(response, data) {
+            const error = new Error(data.msg || `HTTP ${response.status}`);
+            error.httpStatus = response.status;
+            return error;
+        }
+
+        async function fetchMetadata(url) {
+            const submittedResult = await fetchMetadataJson('/api/video_info_basic', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    url: url
-                }),
-                signal: controller.signal
-            })
-            .then(response => {
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                return response.json();
-            })
-            .then(data => {
+                body: JSON.stringify({url: url})
+            });
+            const submitResponse = submittedResult.response;
+            const submitted = submittedResult.data;
+            if (submitResponse.status !== 202) {
+                if (!submitResponse.ok || !submitted.success) {
+                    throw metadataHttpError(submitResponse, submitted);
+                }
+                return submitted;
+            }
+            if (!submitted.job_id || !submitted.poll_url) {
+                throw new Error('元数据任务响应不完整');
+            }
+
+            const deadline = Date.now() + METADATA_JOB_TIMEOUT_MS;
+            while (Date.now() < deadline) {
+                await metadataDelay(METADATA_POLL_INTERVAL_MS);
+                const pollResult = await fetchMetadataJson(submitted.poll_url, {
+                    cache: 'no-store'
+                });
+                const pollResponse = pollResult.response;
+                const data = pollResult.data;
+                if (pollResponse.status === 202 && data.status === 'pending') continue;
+                if (!pollResponse.ok || !data.success) {
+                    throw metadataHttpError(pollResponse, data);
+                }
+                return data;
+            }
+            throw new Error('元数据查询超时');
+        }
+
+        async function updateMetadata(url, attempt = 1) {
+            if (!url || !videoInfo) return;
+            try {
+                const data = await fetchMetadata(url);
                 if (!data.success) throw new Error(data.msg || '元数据查询失败');
                 setThumbnail(data.thumbnail, data.title || '视频缩略图');
                 title.textContent = data.title || '标题未知';
@@ -397,9 +448,8 @@
                 if (totalSeconds > 0) {
                     duration.innerHTML = `<i class="fas fa-clock"></i> ${minutes}:${seconds.toString().padStart(2, '0')}`;
                 }
-            })
-            .catch(error => {
-                const isServerError = /^HTTP 5\d\d$/.test(error.message || '');
+            } catch (error) {
+                const isServerError = error.httpStatus >= 500;
                 const isRetryable = error.name === 'AbortError'
                     || error.name === 'TypeError'
                     || isServerError;
@@ -418,10 +468,7 @@
                     || title.textContent === '正在重试获取标题…'
                 )) title.textContent = '标题稍后显示';
                 if (uploader && uploader.classList.contains('metadata-pending')) uploader.textContent = '元数据暂时不可用';
-            })
-            .finally(() => {
-                window.clearTimeout(timeout);
-            });
+            }
         }
 
         if (taskItems.length > 0) {

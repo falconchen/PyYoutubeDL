@@ -8,6 +8,9 @@ import json
 import re
 import subprocess
 import sys
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from urllib.parse import parse_qs, unquote, urlparse
 import hashlib
@@ -78,6 +81,17 @@ TASK_STATE_EXTENSIONS = (
 DOWNLOADER_LOG_INITIAL_BYTES = 64 * 1024
 DOWNLOADER_LOG_MAX_BYTES = 128 * 1024
 PROGRESS_MARKER = 'PYDL_PROGRESS|'
+BASIC_VIDEO_INFO_MAX_WORKERS = 2
+BASIC_VIDEO_INFO_MAX_PENDING_JOBS = BASIC_VIDEO_INFO_MAX_WORKERS
+BASIC_VIDEO_INFO_MAX_JOBS = 50
+BASIC_VIDEO_INFO_JOB_TTL_SECONDS = 5 * 60
+BASIC_VIDEO_INFO_PROCESS_TIMEOUT_SECONDS = 90
+BASIC_VIDEO_INFO_EXECUTOR = ThreadPoolExecutor(
+    max_workers=BASIC_VIDEO_INFO_MAX_WORKERS,
+    thread_name_prefix='basic-video-info',
+)
+BASIC_VIDEO_INFO_JOBS = {}
+BASIC_VIDEO_INFO_JOBS_LOCK = threading.Lock()
 ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
 DEFAULT_PROGRESS_PATTERN = re.compile(
     r'\[download\]\s+(?P<percent>\d+(?:\.\d+)?)%'
@@ -2446,76 +2460,197 @@ def api_video_info():
         }), 500
 
 
-@app.route('/api/video_info_basic', methods=['POST'])
-def api_video_info_basic():
-    """只提取首页预览所需的标题、作者、时长和缩略图。"""
-    data = request.get_json() if request.is_json else request.form
-    url = extract_url(data.get('url'))
-
-    if not url:
-        return jsonify({"success": False, "msg": "Missing required parameter: url"}), 400
-
+def fetch_basic_video_info(url):
+    """在后台线程中调用 yt-dlp，只提取首页预览所需字段。"""
+    conf_path = _pick_ytdlp_conf('video')
+    cmd = [
+        sys.executable, '-m', 'yt_dlp',
+        '--config-location', conf_path,
+        '--sleep-requests', '0',
+        '--sleep-interval', '0',
+        '--max-sleep-interval', '0',
+        '--sleep-subtitles', '0',
+        '--no-progress',
+        '--no-write-subs',
+        '--no-write-auto-subs',
+        '--no-playlist',
+        '--no-warnings',
+        '--print', '%(title)j\t%(uploader)j\t%(duration)j\t%(thumbnail)j',
+        url,
+    ]
     try:
-        conf_path = _pick_ytdlp_conf('video')
-        cmd = [
-            sys.executable, '-m', 'yt_dlp',
-            '--config-location', conf_path,
-            '--sleep-requests', '0',
-            '--sleep-interval', '0',
-            '--max-sleep-interval', '0',
-            '--sleep-subtitles', '0',
-            '--no-progress',
-            '--no-write-subs',
-            '--no-write-auto-subs',
-            '--no-playlist',
-            '--no-warnings',
-            '--print', '%(title)j\t%(uploader)j\t%(duration)j\t%(thumbnail)j',
-            url,
-        ]
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             check=True,
+            timeout=BASIC_VIDEO_INFO_PROCESS_TIMEOUT_SECONDS,
         )
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or '').strip()
+        stdout = (exc.stdout or '').strip()
+        raise RuntimeError(stderr or stdout or str(exc)) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f'yt-dlp timed out after {BASIC_VIDEO_INFO_PROCESS_TIMEOUT_SECONDS} seconds'
+        ) from exc
 
-        output_line = next(
-            (line.strip() for line in reversed(result.stdout.splitlines()) if line.strip()),
-            '',
+    output_line = next(
+        (line.strip() for line in reversed(result.stdout.splitlines()) if line.strip()),
+        '',
+    )
+    values = output_line.split('\t', 3)
+    if len(values) != 4:
+        raise ValueError('yt-dlp returned incomplete basic video info')
+
+    def parse_printed_value(value):
+        if value in {'NA', 'N/A', 'null', 'None', ''}:
+            return None
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+
+    title, uploader, duration, thumbnail = (
+        parse_printed_value(value) for value in values
+    )
+    return {
+        'title': title,
+        'uploader': uploader,
+        'duration': duration,
+        'thumbnail': thumbnail,
+    }
+
+
+def cleanup_basic_video_info_jobs(now=None):
+    """移除已结束且超过保留时间的预览任务。调用方必须持有任务锁。"""
+    now = time.monotonic() if now is None else now
+    expired_job_ids = [
+        job_id
+        for job_id, job in BASIC_VIDEO_INFO_JOBS.items()
+        if job['future'].done()
+        and now - job['created_at'] >= BASIC_VIDEO_INFO_JOB_TTL_SECONDS
+    ]
+    for job_id in expired_job_ids:
+        BASIC_VIDEO_INFO_JOBS.pop(job_id, None)
+
+
+def pending_basic_video_info_response(job_id):
+    response = jsonify({
+        'success': True,
+        'status': 'pending',
+        'job_id': job_id,
+        'poll_url': url_for('api_video_info_basic_job', job_id=job_id),
+    })
+    response.status_code = 202
+    response.headers['Retry-After'] = '1'
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+@app.route('/api/video_info_basic', methods=['POST'])
+def api_video_info_basic():
+    """创建轻量视频预览任务，不在请求内同步等待 yt-dlp。"""
+    data = request.get_json(silent=True) if request.is_json else request.form
+    url = extract_url((data or {}).get('url'))
+
+    if not url:
+        return jsonify({"success": False, "msg": "Missing required parameter: url"}), 400
+
+    with BASIC_VIDEO_INFO_JOBS_LOCK:
+        cleanup_basic_video_info_jobs()
+
+        for job_id, job in list(BASIC_VIDEO_INFO_JOBS.items()):
+            if job['url'] != url:
+                continue
+            if job['future'].done() and job['future'].exception() is not None:
+                BASIC_VIDEO_INFO_JOBS.pop(job_id, None)
+                continue
+            return pending_basic_video_info_response(job_id)
+
+        if len(BASIC_VIDEO_INFO_JOBS) >= BASIC_VIDEO_INFO_MAX_JOBS:
+            completed_jobs = sorted(
+                (
+                    (job['created_at'], job_id)
+                    for job_id, job in BASIC_VIDEO_INFO_JOBS.items()
+                    if job['future'].done()
+                ),
+            )
+            for _, completed_job_id in completed_jobs:
+                BASIC_VIDEO_INFO_JOBS.pop(completed_job_id, None)
+                if len(BASIC_VIDEO_INFO_JOBS) < BASIC_VIDEO_INFO_MAX_JOBS:
+                    break
+
+        if len(BASIC_VIDEO_INFO_JOBS) >= BASIC_VIDEO_INFO_MAX_JOBS:
+            response = jsonify({
+                'success': False,
+                'msg': 'Too many pending basic video info jobs',
+            })
+            response.status_code = 503
+            response.headers['Retry-After'] = '2'
+            return response
+
+        pending_job_count = sum(
+            not job['future'].done()
+            for job in BASIC_VIDEO_INFO_JOBS.values()
         )
-        values = output_line.split('\t', 3)
-        if len(values) != 4:
-            raise ValueError('yt-dlp returned incomplete basic video info')
+        if pending_job_count >= BASIC_VIDEO_INFO_MAX_PENDING_JOBS:
+            response = jsonify({
+                'success': False,
+                'msg': 'Basic video info workers are busy',
+            })
+            response.status_code = 503
+            response.headers['Retry-After'] = '2'
+            return response
 
-        def parse_printed_value(value):
-            if value in {'NA', 'N/A', 'null', 'None', ''}:
-                return None
-            try:
-                return json.loads(value)
-            except json.JSONDecodeError:
-                return value
+        job_id = uuid.uuid4().hex
+        BASIC_VIDEO_INFO_JOBS[job_id] = {
+            'url': url,
+            'created_at': time.monotonic(),
+            'future': BASIC_VIDEO_INFO_EXECUTOR.submit(fetch_basic_video_info, url),
+        }
 
-        title, uploader, duration, thumbnail = (
-            parse_printed_value(value) for value in values
-        )
-        return jsonify({
-            'success': True,
-            'title': title,
-            'uploader': uploader,
-            'duration': duration,
-            'thumbnail': thumbnail,
-        })
-    except Exception as e:
-        if isinstance(e, subprocess.CalledProcessError):
-            stderr = (e.stderr or '').strip()
-            stdout = (e.stdout or '').strip()
-            detail = stderr or stdout or str(e)
-        else:
-            detail = str(e)
+    return pending_basic_video_info_response(job_id)
+
+
+@app.route('/api/video_info_basic/jobs/<job_id>', methods=['GET'])
+def api_video_info_basic_job(job_id):
+    """查询轻量视频预览任务。"""
+    with BASIC_VIDEO_INFO_JOBS_LOCK:
+        cleanup_basic_video_info_jobs()
+        job = BASIC_VIDEO_INFO_JOBS.get(job_id)
+
+    if job is None:
         return jsonify({
             'success': False,
-            'msg': f'Failed to get basic video info: {detail}',
-        }), 500
+            'status': 'missing',
+            'msg': 'Basic video info job not found',
+        }), 404
+
+    future = job['future']
+    if not future.done():
+        return pending_basic_video_info_response(job_id)
+
+    try:
+        video_info = future.result()
+    except Exception as exc:
+        response = jsonify({
+            'success': False,
+            'status': 'failed',
+            'msg': f'Failed to get basic video info: {exc}',
+        })
+        response.status_code = 500
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+
+    response = jsonify({
+        'success': True,
+        'status': 'completed',
+        'job_id': job_id,
+        **video_info,
+    })
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 def get_youtube_cookie():
     """从API获取YouTube cookie并保存到文件"""
