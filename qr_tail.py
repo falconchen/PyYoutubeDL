@@ -6,6 +6,7 @@
 带二进制数据流）就跳过并记日志，不影响下载本身。
 """
 
+import functools
 import json
 import os
 import re
@@ -93,6 +94,37 @@ def tail_duration(config):
     if isinstance(duration, bool) or not isinstance(duration, (int, float)):
         return 5.0
     return float(duration) if 0 < duration <= 60 else 5.0
+
+
+def allowed_codecs(config):
+    """配置里允许生成片尾的片源编码；内存紧张的机器可以只留 h264。"""
+    configured = tail_settings(config).get('CODECS')
+    if not isinstance(configured, list):
+        return set(VIDEO_ENCODERS)
+    allowed = {
+        str(codec).strip().lower() for codec in configured
+        if isinstance(codec, str) and str(codec).strip()
+    }
+    return allowed & set(VIDEO_ENCODERS)
+
+
+@functools.lru_cache(maxsize=1)
+def available_encoders():
+    """ffmpeg 构建里实际带的编码器；不同发行版的包不一定都编进了 x265 和 SVT-AV1。"""
+    try:
+        result = subprocess.run(
+            ['ffmpeg', '-hide_banner', '-encoders'],
+            capture_output=True, text=True, timeout=30, check=True,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return frozenset()
+    names = set()
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        # 形如 " V....D libx265  libx265 H.265 / HEVC ..."
+        if len(parts) >= 2 and len(parts[0]) == 6:
+            names.add(parts[1])
+    return frozenset(names)
 
 
 def normalize_source_url(value):
@@ -192,7 +224,7 @@ def timescale_from_time_base(time_base):
     return timescale if timescale > 0 else None
 
 
-def describe_layout(payload):
+def describe_layout(payload, config=None):
     """检查流布局能否无损拼接，返回生成片尾所需的参数。"""
     streams = payload.get('streams')
     if not isinstance(streams, list) or not streams:
@@ -222,6 +254,11 @@ def describe_layout(payload):
     codec_name = video.get('codec_name')
     if codec_name not in VIDEO_ENCODERS:
         raise TailSkipped(f'视频编码 {codec_name} 无法无损拼接')
+    if codec_name not in allowed_codecs(config or {}):
+        raise TailSkipped(f'配置未启用 {codec_name} 片尾')
+    encoder_name = VIDEO_ENCODERS[codec_name]['encoder']
+    if encoder_name not in available_encoders():
+        raise TailSkipped(f'ffmpeg 缺少 {encoder_name} 编码器')
     pix_fmt = video.get('pix_fmt')
     if pix_fmt not in SUPPORTED_PIXEL_FORMATS:
         raise TailSkipped(f'像素格式 {pix_fmt} 暂不支持')
@@ -451,7 +488,12 @@ def build_tail_clip(image_path, layout, duration, output_path, logger):
         '-g', '25',
     ]
     if layout['video_encoder'] == 'libsvtav1':
-        command += ['-preset', '8', '-crf', '32']
+        # SVT-AV1 默认要 640MB 以上内存，1GB 的小机器容易被挤爆；关掉前瞻并限制
+        # 线程后峰值降到 260MB 左右，5 秒片尾的耗时几乎不变。
+        command += [
+            '-preset', '8', '-crf', '32',
+            '-svtav1-params', 'lp=1:lookahead=0',
+        ]
     else:
         command += ['-preset', 'veryfast', '-crf', '20', '-sc_threshold', '0']
     if layout['profile']:
@@ -615,7 +657,7 @@ def append_qr_tail(video_path, source_url, config, logger):
         )
         if not url:
             raise TailSkipped('没有可用的原始链接')
-        layout = describe_layout(payload)
+        layout = describe_layout(payload, config)
         duration = tail_duration(config)
 
         prefix = f'.qr-tail-{os.getpid()}-'

@@ -23,6 +23,8 @@ DEFAULT_CONFIG = {
     "VIDEO_QR_TAIL": {
         "ENABLED": False,        # 默认关闭
         "DURATION_SECONDS": 5,   # 片尾时长（秒）
+        # 允许生成片尾的片源编码；内存或 CPU 紧张的机器可只留 ["h264"]
+        "CODECS": ["h264", "hevc", "av1"],
         "FONT_PATH": "",         # 留空按系统常见字体路径依次尝试
         "BACKGROUND": "#101820",
         "TEXT_COLOR": "#FFFFFF",

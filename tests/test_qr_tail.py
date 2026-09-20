@@ -95,6 +95,25 @@ class TestLayoutChecks(unittest.TestCase):
         h264 = qr_tail.describe_layout(probe_payload(pix_fmt='yuv420p10le'))
         self.assertEqual(h264['profile'], 'high10')
 
+    def test_codecs_config_can_limit_the_feature_to_h264(self):
+        """HEVC 片尾单核要八九秒、AV1 吃几百 MB 内存，小机器可以只留 h264。"""
+        config = {'VIDEO_QR_TAIL': {'ENABLED': True, 'CODECS': ['h264']}}
+        layout = qr_tail.describe_layout(probe_payload(), config)
+        self.assertEqual(layout['video_encoder'], 'libx264')
+
+        with self.assertRaises(qr_tail.TailSkipped):
+            qr_tail.describe_layout(
+                probe_payload(video_codec='hevc', codec_tag='hvc1'), config
+            )
+
+    def test_missing_encoder_is_reported_clearly(self):
+        with patch('qr_tail.available_encoders', return_value=frozenset({'libx264'})):
+            with self.assertRaises(qr_tail.TailSkipped) as caught:
+                qr_tail.describe_layout(
+                    probe_payload(video_codec='hevc', codec_tag='hvc1')
+                )
+        self.assertIn('libx265', str(caught.exception))
+
     def test_unsupported_codec_is_skipped(self):
         with self.assertRaises(qr_tail.TailSkipped):
             qr_tail.describe_layout(probe_payload(video_codec='vp9'))
@@ -154,6 +173,15 @@ class TestTailCommand(unittest.TestCase):
         # SVT-AV1 没有内嵌参数集的开关，靠拼接后的解码校验兜底
         self.assertNotIn('-x265-params', av1)
         self.assertNotIn('-x264-params', av1)
+
+    def test_av1_tail_limits_memory_use(self):
+        """SVT-AV1 默认要 640MB 以上，1GB 的小机器扛不住。"""
+        command = self.build_command(
+            video_codec='av1', codec_tag='av01', profile='Main',
+        )
+        self.assertEqual(
+            command[command.index('-svtav1-params') + 1], 'lp=1:lookahead=0'
+        )
 
     def test_ten_bit_tail_keeps_the_pixel_format(self):
         command = self.build_command(
