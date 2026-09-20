@@ -119,6 +119,49 @@ class TestTailCommand(unittest.TestCase):
         self.assertNotIn('anullsrc', ' '.join(command))
 
 
+class TestConcatCommand(unittest.TestCase):
+    def test_concat_copies_metadata_from_the_original_file(self):
+        """concat 输入不带原片标签，少了 comment/purl 媒体库就没有封面和原始链接。"""
+        with TemporaryDirectory() as directory:
+            list_path = str(Path(directory, 'list.txt'))
+            with patch('qr_tail.run_ffmpeg') as run:
+                qr_tail.concat_clips(
+                    '/tmp/video.mp4', '/tmp/tail.mp4', list_path, '/tmp/out.mp4', LOGGER,
+                )
+            command = run.call_args.args[0]
+
+        self.assertEqual(command[command.index('-map_metadata') + 1], '1')
+        self.assertEqual(command[command.index('-map_chapters') + 1], '1')
+        # 第二路输入就是原片，元数据从它来
+        inputs = [command[i + 1] for i, item in enumerate(command) if item == '-i']
+        self.assertEqual(inputs, [list_path, '/tmp/video.mp4'])
+
+    def test_dropped_tags_keep_the_original_file(self):
+        source = probe_payload(tags={'title': '标题', 'comment': 'https://e.com/v'})
+        with TemporaryDirectory() as directory:
+            video = Path(directory, 'video.mp4')
+            video.write_bytes(b'original')
+
+            def fake_concat(video_path, tail_path, list_path, output_path, logger):
+                Path(output_path).write_bytes(b'joined')
+
+            with (
+                patch('qr_tail.probe_media', side_effect=[
+                    source,
+                    probe_payload(duration='65.0', tags={}),  # 标签丢了
+                ]),
+                patch('qr_tail.render_tail_image'),
+                patch('qr_tail.build_tail_clip'),
+                patch('qr_tail.concat_clips', side_effect=fake_concat),
+            ):
+                appended = qr_tail.append_qr_tail(
+                    str(video), 'https://e.com/v', ENABLED_CONFIG, LOGGER
+                )
+
+            self.assertFalse(appended)
+            self.assertEqual(video.read_bytes(), b'original')
+
+
 class TestAppendQrTail(unittest.TestCase):
     def test_disabled_config_does_nothing(self):
         with patch('qr_tail.probe_media') as probe:
@@ -256,6 +299,20 @@ class TestAppendQrTailEndToEnd(unittest.TestCase):
         )
         return path
 
+    def tags(self, path):
+        result = subprocess.run(
+            [
+                'ffprobe', '-v', 'error', '-show_entries', 'format_tags',
+                '-of', 'json', path,
+            ],
+            check=True, capture_output=True, text=True,
+        )
+        tags = json.loads(result.stdout)['format'].get('tags', {})
+        return {
+            key: value for key, value in tags.items()
+            if key.lower() in {'title', 'artist', 'comment'}
+        }
+
     def describe(self, path):
         result = subprocess.run(
             [
@@ -272,8 +329,13 @@ class TestAppendQrTailEndToEnd(unittest.TestCase):
 
     def test_tail_is_appended_without_changing_stream_layout(self):
         with TemporaryDirectory() as directory:
-            sample = self.make_sample(directory)
+            sample = self.make_sample(directory, extra_args=(
+                '-metadata', 'title=样片',
+                '-metadata', 'artist=作者',
+                '-metadata', 'comment=https://www.youtube.com/watch?v=abc',
+            ))
             duration_before, streams_before = self.describe(sample)
+            tags_before = self.tags(sample)
 
             appended = qr_tail.append_qr_tail(
                 sample,
@@ -286,6 +348,9 @@ class TestAppendQrTailEndToEnd(unittest.TestCase):
             self.assertTrue(appended)
             self.assertAlmostEqual(duration_after, duration_before + 2, delta=0.5)
             self.assertEqual(streams_after, streams_before)
+            # 标题、作者和原始链接必须还在，媒体库靠它们显示封面和信息
+            self.assertEqual(self.tags(sample), tags_before)
+            self.assertEqual(tags_before['title'], '样片')
             # 临时文件不留在目录里
             self.assertEqual(
                 sorted(p.name for p in Path(directory).iterdir()), ['sample.mp4']

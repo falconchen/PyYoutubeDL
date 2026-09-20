@@ -141,7 +141,8 @@ def probe_media(video_path, logger):
         [
             'ffprobe', '-v', 'error',
             '-show_entries',
-            'format=duration:format_tags=purl,comment'
+            'format=duration:format_tags=title,artist,album,date,genre'
+            ',description,synopsis,purl,comment'
             ':stream=index,codec_type,codec_name,width,height,r_frame_rate'
             ',pix_fmt,profile,sample_rate,channels,time_base',
             '-of', 'json', video_path,
@@ -441,8 +442,11 @@ def concat_clips(video_path, tail_path, list_path, output_path, logger):
         [
             'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
             '-f', 'concat', '-safe', '0', '-i', list_path,
-            '-c', 'copy', '-map', '0',
-            '-movflags', '+faststart', output_path,
+            # concat 输入不带原文件的标签，把原片作为第二路输入专门取元数据：
+            # 少了 purl / comment，媒体库就没有封面、原始链接、作者和简介。
+            '-i', video_path,
+            '-map', '0', '-map_metadata', '1', '-map_chapters', '1',
+            '-c', 'copy', '-movflags', '+faststart', output_path,
         ],
         logger,
         stdin=subprocess.DEVNULL,
@@ -465,11 +469,25 @@ def media_duration(payload):
         return None
 
 
+def display_tags(payload):
+    """只比较展示用标签；容器自身的 major_brand、encoder 等会被重写，不算数。"""
+    tags = (payload.get('format') or {}).get('tags') or {}
+    return {
+        key.lower(): value for key, value in tags.items()
+        if key.lower() in {
+            'title', 'artist', 'album', 'date', 'genre',
+            'description', 'synopsis', 'purl', 'comment',
+        }
+    }
+
+
 def verify_output(output_path, source_payload, duration, logger):
-    """拼接后长度和流布局都要对得上，否则宁可保留原文件。"""
+    """拼接后长度、流布局和展示标签都要对得上，否则宁可保留原文件。"""
     payload = probe_media(output_path, logger)
     if stream_counts(payload) != stream_counts(source_payload):
         raise TailSkipped('拼接后的流布局与原文件不一致')
+    if display_tags(payload) != display_tags(source_payload):
+        raise TailSkipped('拼接后丢失了标题、作者或原始链接等标签')
     source_duration = media_duration(source_payload)
     output_duration = media_duration(payload)
     if source_duration is None or output_duration is None:
