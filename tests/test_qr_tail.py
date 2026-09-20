@@ -193,6 +193,49 @@ class TestAppendQrTail(unittest.TestCase):
             self.assertEqual(video.read_bytes(), b'original')
 
 
+class TestTailImage(unittest.TestCase):
+    """链接不能画出画面之外：竖屏和超长链接都要收进可用宽度。"""
+
+    def render(self, width, height, url):
+        from PIL import Image
+
+        layout = qr_tail.describe_layout(probe_payload())
+        layout.update(width=width, height=height)
+        with TemporaryDirectory() as directory:
+            output = str(Path(directory, 'tail.png'))
+            qr_tail.render_tail_image(url, layout, ENABLED_CONFIG, output, LOGGER)
+            with Image.open(output) as image:
+                self.assertEqual(image.size, (width, height))
+                mask = image.convert('L').point(lambda value: 255 if value > 60 else 0)
+                return mask.getbbox()
+
+    def assert_inside(self, bbox, width, height):
+        left, top, right, bottom = bbox
+        self.assertGreater(left, 0)
+        self.assertLess(right, width)
+        self.assertGreater(top, 0)
+        self.assertLess(bottom, height)
+
+    def test_portrait_video_keeps_url_inside_the_frame(self):
+        self.assert_inside(
+            self.render(608, 1080, 'https://www.youtube.com/shorts/pJWK-ZExAbc'),
+            608, 1080,
+        )
+
+    def test_long_url_wraps_instead_of_overflowing(self):
+        long_url = (
+            'https://www.bilibili.com/video/BV1xx411c7mD'
+            '?spm_id_from=333.1007.tianma.1-1-1.click&vd_source=abcdef123456'
+        )
+        self.assert_inside(self.render(1280, 720, long_url), 1280, 720)
+
+    def test_display_url_drops_the_scheme(self):
+        self.assertEqual(
+            qr_tail.strip_url_scheme('https://www.youtube.com/watch?v=abc'),
+            'www.youtube.com/watch?v=abc',
+        )
+
+
 @unittest.skipUnless(
     shutil.which('ffmpeg') and shutil.which('ffprobe'), '需要 ffmpeg 与 ffprobe'
 )

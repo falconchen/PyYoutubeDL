@@ -325,7 +325,6 @@ def render_tail_image(source_url, layout, config, output_path, logger):
     canvas.paste(plate, (plate_x, plate_y))
 
     draw = ImageDraw.Draw(canvas)
-    font = resolve_font(config, max(18, height // 28), logger)
     hint, hint_font = resolve_hint(config, max(20, height // 26), logger)
 
     def centered(text, drawing_font, top):
@@ -338,13 +337,56 @@ def render_tail_image(source_url, layout, config, output_path, logger):
         )
         return lower - upper
 
+    def text_width(text, drawing_font):
+        left, _, right, _ = draw.textbbox((0, 0), text, font=drawing_font)
+        return right - left
+
+    # 竖屏视频按高度算出来的字号会把链接顶出画面，所以按可用宽度往下收字号
+    max_text_width = int(width * 0.88)
+    url_size = max(14, min(height // 28, width // 16))
+    font = resolve_font(config, url_size, logger)
+    display_url = strip_url_scheme(source_url)
+    min_size = max(12, width // 48)
+    while url_size > min_size and text_width(display_url, font) > max_text_width:
+        url_size -= 2
+        font = resolve_font(config, url_size, logger)
+
     text_top = plate_y + plate.height + max(16, height // 36)
     text_top += centered(hint, hint_font, text_top) + max(10, height // 60)
-    # 链接过长时截断，二维码才是主要入口，文字只是给人看的提示
-    display_url = source_url if len(source_url) <= 72 else source_url[:69] + '...'
-    centered(display_url, font, text_top)
+    # 收到最小字号还放不下就折行；二维码才是主要入口，文字只是给人看的提示
+    for line in wrap_to_width(display_url, font, text_width, max_text_width):
+        text_top += centered(line, font, text_top) + max(4, height // 120)
 
     canvas.save(output_path)
+
+
+def strip_url_scheme(url):
+    """显示时去掉 https:// 前缀，省出来的宽度留给真正有信息量的部分。"""
+    for scheme in ('https://', 'http://'):
+        if url.lower().startswith(scheme):
+            return url[len(scheme):]
+    return url
+
+
+def wrap_to_width(text, font, measure, max_width, max_lines=2):
+    """按像素宽度折行，超出行数上限就省略，保证不会画出画面之外。"""
+    if measure(text, font) <= max_width:
+        return [text]
+    lines, current = [], ''
+    for character in text:
+        if measure(current + character, font) <= max_width:
+            current += character
+            continue
+        if len(lines) + 1 == max_lines:
+            while current and measure(current + '…', font) > max_width:
+                current = current[:-1]
+            lines.append(current + '…')
+            return lines
+        lines.append(current)
+        current = character
+    if current:
+        lines.append(current)
+    return lines
 
 
 def build_tail_clip(image_path, layout, duration, output_path, logger):
