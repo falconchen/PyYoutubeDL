@@ -445,6 +445,16 @@ def test_lyrics_follow_audio_access_rules():
     assert missing.status_code == 404
 
 
+def test_source_link_drops_tracking_params():
+    """播放页显示的原始链接不带来源统计参数。"""
+    assert app_module.extract_media_source_url({
+        'comment': 'https://www.bilibili.com/video/BV1pdet6MEBD?spm_id_from=333.1007',
+    }) == 'https://www.bilibili.com/video/BV1pdet6MEBD'
+    assert app_module.extract_media_source_url({
+        'purl': 'https://www.youtube.com/watch?v=abc&pp=0gcJCR4MAYcqIYzv',
+    }) == 'https://www.youtube.com/watch?v=abc'
+
+
 def test_media_list_marks_items_that_can_be_summarized():
     with logged_in_client() as (client, _user, _db), TemporaryDirectory() as files_dir:
         for name in ['clip.mp4', 'plain.mp4', 'song.mp3', 'silent.mp3']:

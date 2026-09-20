@@ -331,6 +331,16 @@ class TestTailImage(unittest.TestCase):
         )
         self.assert_inside(self.render(1280, 720, long_url), 1280, 720)
 
+    def test_tracking_params_are_stripped_from_the_qr_and_the_text(self):
+        """B 站分享链接的跟踪参数会把画面上的文字挤满，二维码里也没必要带。"""
+        self.assertEqual(
+            qr_tail.normalize_source_url(
+                'https://www.bilibili.com/video/BV1pdet6MEBD'
+                '?trackid=web_pegasus_0.abc&spm_id_from=333.1007'
+            ),
+            'https://www.bilibili.com/video/BV1pdet6MEBD',
+        )
+
     def test_display_url_drops_the_scheme(self):
         self.assertEqual(
             qr_tail.strip_url_scheme('https://www.youtube.com/watch?v=abc'),

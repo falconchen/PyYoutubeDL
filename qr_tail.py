@@ -13,6 +13,8 @@ import subprocess
 import tempfile
 from urllib.parse import urlparse
 
+import media_url
+
 FFMPEG_TIMEOUT_SECONDS = 120
 
 # 片尾按正片的编码重新生成，才能无损拼接；每种编码对应一个编码器和默认容器 tag。
@@ -106,7 +108,8 @@ def normalize_source_url(value):
         return ''
     if parsed.scheme.lower() not in {'http', 'https'} or not parsed.hostname:
         return ''
-    return candidate
+    # 二维码和下面的文字都用清理过的链接：跟踪参数会让文字挤满画面
+    return media_url.strip_tracking_params(candidate)
 
 
 def source_url_from_tags(tags):

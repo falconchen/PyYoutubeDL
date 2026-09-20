@@ -24,6 +24,7 @@ from requests.auth import HTTPBasicAuth
 from log_util import setup_logger
 import ai_summary_store
 import anonymous_cleanup
+import media_url
 import task_queue
 import user_store
 import youtube_auth
@@ -1490,7 +1491,8 @@ def extract_media_source_url(tags):
             except ValueError:
                 continue
             if parsed.scheme.lower() in {'http', 'https'} and parsed.hostname:
-                return source_url
+                # 分享链接里的来源统计参数对打开视频没用，只会让界面上的链接很长
+                return media_url.strip_tracking_params(source_url)
     return ''
 
 
