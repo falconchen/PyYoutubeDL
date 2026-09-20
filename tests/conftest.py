@@ -1,18 +1,27 @@
 """全局测试夹具。
 
-app.py 在导入时读取本机 config.json。Flask 测试客户端默认主机名是
-localhost，若本机开启了 REDIRECT_LOCALHOST_TO_LOOPBACK，所有请求都会被
-重定向，测试结果随开发机配置变化。这里统一关闭，需要验证重定向的用例在
-测试内显式打开。
+app.py 与 downloader.py 在导入时读取本机 config.json，测试结果不应随开发机
+配置变化：localhost 重定向和视频片尾二维码都在这里统一关闭，需要验证它们的
+用例在测试内显式打开。片尾尤其要关——它会对测试用的假媒体文件真的调用
+ffprobe，而且有些用例 mock 了 subprocess，连带影响到它。
 """
 from unittest.mock import patch
 
 import pytest
 
 import app as app_module
+import downloader as downloader_module
 
 
 @pytest.fixture(autouse=True)
 def disable_localhost_redirect():
     with patch.dict(app_module.config, {'REDIRECT_LOCALHOST_TO_LOOPBACK': False}):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def disable_video_qr_tail():
+    with patch.dict(
+        downloader_module.config, {'VIDEO_QR_TAIL': {'ENABLED': False}}
+    ):
         yield
