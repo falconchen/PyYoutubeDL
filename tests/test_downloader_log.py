@@ -117,7 +117,7 @@ class TestDownloaderLogAPI(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
 
-    def test_task_log_returns_only_matching_task_logs(self):
+    def test_task_log_returns_ordered_task_log_without_global_duplicate(self):
         with tempfile.TemporaryDirectory() as root_dir:
             urls_dir = Path(root_dir, 'urls')
             log_dir = Path(root_dir, 'logs')
@@ -130,7 +130,8 @@ class TestDownloaderLogAPI(unittest.TestCase):
             project_root = Path(app_module.__file__).resolve().parent
             Path(log_dir, f'{task_id}.log').write_text(
                 f'task line\n[download] Destination: '
-                f'{project_root}/tmp/{task_id}/file.m4a\n',
+                f'{project_root}/tmp/{task_id}/file.m4a\n'
+                'PYDL_PROGRESS|downloading|12.0%|1MiB|8MiB|1MiB/s|00:07|mp4|136|avc1|none\n',
                 encoding='utf-8',
             )
             Path(log_dir, 'downloader.log').write_text(
@@ -148,9 +149,10 @@ class TestDownloaderLogAPI(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         text = response.get_json()['text']
         self.assertIn('task line', text)
-        self.assertIn('matching https://example.com/video', text)
         self.assertIn('📁/tmp/v20260831172600AbC/file.m4a', text)
+        self.assertLess(text.index('[download] Destination:'), text.index('PYDL_PROGRESS|'))
         self.assertNotIn(str(project_root), text)
+        self.assertNotIn('matching https://example.com/video', text)
         self.assertNotIn('other task secret', text)
 
 

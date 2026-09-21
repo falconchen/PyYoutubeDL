@@ -9,6 +9,13 @@
   "DOWNLOAD_MIN_INTERVAL_SECONDS": 10,
   // 启动下载器时是否恢复遗留的 .downloading 任务
   "RESUME_INTERRUPTED_DOWNLOADS": false,
+  // SSRF 防护：拒绝本机、内网、链路本地及其他非公网下载地址
+  "DOWNLOAD_URL_BLOCK_PRIVATE_NETWORKS": true,
+  // 对域名做 DNS 校验，拒绝解析到非公网地址的下载地址
+  "DOWNLOAD_URL_RESOLVE_HOSTS": true,
+  // 可追加主机名、IP、CIDR 或通配符主机名，例如 ["bad.example.com", "203.0.113.0/24"]
+  "DOWNLOAD_URL_BLOCKED_HOSTS": [],
+  "DOWNLOAD_URL_MAX_LENGTH": 4096,
   "MAX_LOG_SIZE": 10485760,
   "BACKUP_COUNT": 5,
   "YT_DLP_OUTPUT_TEMPLATE": "%(title).60s【%(extractor|未知平台).20s】-%(height)s.%(ext)s",

@@ -46,6 +46,14 @@ class TestDownloadRateGateInterval(unittest.TestCase):
 class TestDownloadGateIntegration(unittest.TestCase):
     def setUp(self):
         self.handler = downloader.DownloadHandler(executor=None)
+        # 这些测试使用 example.com 作为不联网的 yt-dlp 假 URL；避免本机
+        # 合成 DNS 解析结果影响节流逻辑本身的断言。
+        self.dns_patch = patch.dict(
+            downloader.config,
+            {'DOWNLOAD_URL_RESOLVE_HOSTS': False},
+        )
+        self.dns_patch.start()
+        self.addCleanup(self.dns_patch.stop)
 
     def test_download_acquires_gate_on_success(self):
         with tempfile.TemporaryDirectory() as root:

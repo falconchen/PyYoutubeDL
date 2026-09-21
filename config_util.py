@@ -19,6 +19,10 @@ DEFAULT_CONFIG = {
     "PLAYLIST_MAX_ITEMS": DEFAULT_PLAYLIST_MAX_ITEMS, # 单个播放列表只下载前 N 个条目
     "DOWNLOAD_MIN_INTERVAL_SECONDS": 10, # 两次下载启动的最小间隔（秒），0 表示不限速
     "RESUME_INTERRUPTED_DOWNLOADS": False, # 下载器启动时是否恢复遗留的 .downloading 任务
+    "DOWNLOAD_URL_BLOCK_PRIVATE_NETWORKS": True, # 拒绝本机、内网、链路本地及其他非公网地址
+    "DOWNLOAD_URL_RESOLVE_HOSTS": True, # 下载前解析域名并拒绝解析到非公网地址的域名
+    "DOWNLOAD_URL_BLOCKED_HOSTS": [], # 额外禁止的主机名、IP、CIDR 或 *.example.com
+    "DOWNLOAD_URL_MAX_LENGTH": 4096, # 单个下载 URL 最大长度
     "MAX_LOG_SIZE": 10 * 1024 * 1024, # 单个日志文件最大字节数
     "BACKUP_COUNT": 5,              # 日志备份保留数量
     "YT_DLP_OUTPUT_TEMPLATE": "%(title.0:20)s-%(id)s.%(ext)s", # yt-dlp 文件名输出模板

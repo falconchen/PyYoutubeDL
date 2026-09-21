@@ -12,6 +12,14 @@ import downloader
 class TestDownloaderMove(unittest.TestCase):
     def setUp(self):
         self.handler = downloader.DownloadHandler(executor=None)
+        # 移动和命令构造测试不应依赖外部 DNS；SSRF 的 DNS 解析分支由
+        # tests/test_url_security.py 使用固定解析结果单独覆盖。
+        self.dns_patch = patch.dict(
+            downloader.config,
+            {'DOWNLOAD_URL_RESOLVE_HOSTS': False},
+        )
+        self.dns_patch.start()
+        self.addCleanup(self.dns_patch.stop)
 
     def test_extract_ytdlp_error_removes_prefix_and_ansi(self):
         line = (

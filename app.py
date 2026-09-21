@@ -25,6 +25,7 @@ from log_util import setup_logger
 import ai_summary_store
 import task_queue
 import youtube_auth
+from url_security import validate_download_url
 import click
 from flask.cli import with_appcontext
 
@@ -174,6 +175,32 @@ def extract_url(text):
         return matches[0].rstrip('.,;:)]\'"。，；：）、）')
 
     return text
+
+
+def validate_submitted_url(url):
+    """校验会交给 yt-dlp 的用户输入，返回面向用户的错误说明。"""
+    validation_config = config
+    # 测试环境可能把所有外部域名解析到合成代理网段；worker 级校验仍
+    # 使用完整配置，生产请求不会跳过 DNS 防护。
+    if app.testing:
+        validation_config = {
+            **config,
+            "DOWNLOAD_URL_RESOLVE_HOSTS": False,
+        }
+    reason = validate_download_url(url, validation_config)
+    if reason:
+        app.logger.warning("拒绝不安全下载地址: %s", reason)
+        return f"该地址被安全策略拒绝：{reason}"
+    return None
+
+
+def validate_submitted_urls(urls):
+    """校验播放列表展开后的每个地址，避免只校验列表入口。"""
+    for url in urls:
+        error = validate_submitted_url(url)
+        if error:
+            return error
+    return None
 
 def get_current_time():
     timezone = pytz.timezone(config["TIMEZONE"])
@@ -1616,6 +1643,19 @@ def index():
                 is_authorized=is_authorized,
             ), 400
 
+        url_error = validate_submitted_urls(urls)
+        if url_error:
+            return render_template(
+                'index.html',
+                url=url,
+                types=types,
+                tasks=[],
+                error=url_error,
+                show_waline=config.get("SHOW_WALINE_ON_INDEX", False),
+                youtube_user=youtube_user,
+                is_authorized=is_authorized,
+            ), 400
+
         task_ids = create_tasks(urls, types)
 
         # 构建重定向URL，包含所有参数
@@ -2180,6 +2220,10 @@ def api_add_task():
     if error:
         return jsonify({"success": False, "msg": error}), 400
 
+    url_error = validate_submitted_urls(urls)
+    if url_error:
+        return jsonify({"success": False, "msg": url_error}), 400
+
     # 使用新的辅助函数创建任务
     tasks = create_tasks(urls, types)
 
@@ -2257,7 +2301,12 @@ def redact_task_log_text(text):
 
 @app.route('/api/task_log', methods=['POST'])
 def api_task_log():
-    """返回指定任务相关的日志，供首页侧栏使用。"""
+    """返回指定任务的有序日志，供首页侧栏使用。
+
+    任务专属日志由下载器按 yt-dlp 输出顺序逐行写入。不要在这里再拼接
+    ``downloader.log``：全局日志与任务日志是两份独立副本，追加会把较早
+    的 ``Destination`` 等行放到最新进度之后，破坏日志顺序。
+    """
     data = request.get_json() if request.is_json else request.form
     tasks = data.get('tasks')
     if not tasks:
@@ -2268,12 +2317,9 @@ def api_task_log():
     if not tasks or len(tasks) > 20:
         return jsonify({"success": False, "msg": "Invalid task list"}), 400
 
-    task_urls = {}
-    for task in tasks:
-        task_info = get_task_info(task)
-        if task_info.get('exists'):
-            task_urls[task] = task_info.get('url', '')
-
+    existing_tasks = [
+        task for task in tasks if get_task_info(task).get('exists')
+    ]
     relevant_lines = []
     seen_lines = set()
 
@@ -2284,18 +2330,9 @@ def api_task_log():
                 seen_lines.add(line)
                 relevant_lines.append(line)
 
-    for task, task_url in task_urls.items():
+    for task in existing_tasks:
         task_log_path = os.path.join(config['LOG_DIR'], f'{task}.log')
         append_lines(read_task_log_tail(task_log_path))
-
-    global_log_path = os.path.join(config['LOG_DIR'], 'downloader.log')
-    global_log = read_task_log_tail(global_log_path)
-    for line in global_log.splitlines():
-        if any(
-            marker and marker in line
-            for marker in [*task_urls.keys(), *task_urls.values()]
-        ):
-            append_lines(line)
 
     return jsonify({
         'success': True,
@@ -2384,6 +2421,10 @@ def api_video_info():
 
     if not url:
         return jsonify({"success": False, "msg": "Missing required parameter: url"}), 400
+
+    url_error = validate_submitted_url(url)
+    if url_error:
+        return jsonify({"success": False, "msg": url_error}), 400
     
     try:
         conf_path = _pick_ytdlp_conf('video')
@@ -2556,6 +2597,10 @@ def api_video_info_basic():
 
     if not url:
         return jsonify({"success": False, "msg": "Missing required parameter: url"}), 400
+
+    url_error = validate_submitted_url(url)
+    if url_error:
+        return jsonify({"success": False, "msg": url_error}), 400
 
     with BASIC_VIDEO_INFO_JOBS_LOCK:
         cleanup_basic_video_info_jobs()

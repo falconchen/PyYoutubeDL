@@ -25,6 +25,7 @@ from config_util import (
     load_config,
 )
 from log_util import setup_logger
+from url_security import validate_download_url
 
 # 加载配置
 config = load_config()
@@ -564,6 +565,11 @@ class DownloadHandler(FileSystemEventHandler):
         Returns:
             bool: 下载成功返回 True，失败返回 False。
         """
+        security_error = validate_download_url(url, config)
+        if security_error:
+            logger.warning("拒绝下载不安全地址: %s", security_error)
+            return False
+
         logger.info(f"开始下载: {url} ({mode})")
         conf_path = get_ytdlp_config_path(mode)
         logger.info(f"使用配置文件: {conf_path}")

@@ -314,6 +314,8 @@ journalctl -u pyyoutubedl -f    # 实时日志
 
 批量提交（尤其是大播放列表展开出的数百个任务）时，下载器默认每 10 秒最多启动一个新下载（`DOWNLOAD_MIN_INTERVAL_SECONDS`），避免短时间连续请求 YouTube 触发风控；同时运行的下载数由 `MAX_WORKERS` 线程池控制。节流等待期间任务显示为“准备下载”。该节流全局生效，若希望关闭可把 `DOWNLOAD_MIN_INTERVAL_SECONDS` 设为 `0`。
 
+下载地址启用了 SSRF 防护：Web 提交、视频信息接口和后台 downloader worker 都只允许 `http`/`https`，默认拒绝回环、内网、链路本地、保留和其他非公网 IP（包括 `127.0.0.1`、`169.254.169.254`、IPv6 `::1`），并拒绝解析到这些地址的域名。worker 会再次校验，因此直接写入 `URLS_DIR` 的恶意任务也只会被标记为 `.fail`，不会交给 yt-dlp。可在 `config.json` 中通过 `DOWNLOAD_URL_BLOCKED_HOSTS` 追加主机名、IP、CIDR 或 `*.example.com` 形式的黑名单；修改配置后需重启 Web 和 downloader。`DOWNLOAD_URL_RESOLVE_HOSTS` 默认开启，生产环境不要关闭。
+
 下载器异常退出时，正在处理的任务可能遗留为 `.downloading`。将 `RESUME_INTERRUPTED_DOWNLOADS` 设为 `true` 后，下载器每次启动都会扫描这些任务，并沿用原任务 ID 和 `TMP_DIR` 中的临时目录重新调用 yt-dlp；仍存在的 `.part` 文件通常可由 yt-dlp 断点续传，临时文件已经丢失时则会重新下载。该配置默认是 `false`，避免升级或重启后自动执行历史遗留任务；启用前应先检查 `URLS_DIR` 中的 `.downloading` 文件。恢复逻辑不会重新执行 `.ok` 或 `.fail` 任务。
 
 播放器会先在 `FILES_DIR` 查找与 MP4 同 stem 的外挂字幕，例如 `video.srt`、`video.zh-Hans.srt`。支持 VTT、SRT、ASS、SSA 和 TTML；同一语言存在多种格式时依次优先 VTT、SRT、ASS、SSA、TTML。发现外挂字幕后只显示外挂轨道，避免与内嵌轨道重复；没有外挂字幕时才使用 `ffprobe` 识别 MP4 内嵌字幕。浏览器请求任一来源的字幕时都会通过 `ffmpeg` 转换为 WebVTT。该功能不修改原视频，但运行环境必须能够直接执行 `ffprobe` 和 `ffmpeg`；无法识别或转换字幕时，视频仍可正常播放，只是不显示对应字幕。
@@ -407,7 +409,7 @@ curl http://localhost:5100/api/ai_summaries/jobs/<job_id> \
 
 `/api/task_info` 会返回任务的 `state`（`queued`、`downloading`、`completed`、`failed` 或 `missing`）和 `progress`。下载中任务的 `progress` 包含可用的 `percent`、`downloaded`、`total`、`speed`、`eta` 等字段；新任务完成后包含 `final_size_bytes`、`elapsed_seconds`、`average_speed_bytes_per_second`。视频或音频任务完成并且主媒体产物仍在本地时，还会返回对应的 `player_url`。
 
-`/api/task_log` 只返回请求任务对应的任务日志，以及 `downloader.log` 中包含这些任务 ID 或任务 URL 的日志行，供首页右侧日志侧栏滚动显示；不会把完整全局日志或日志访问令牌发送给浏览器。返回前会将项目绝对路径替换为 `📁`，避免把服务器目录结构暴露给用户。
+`/api/task_log` 只返回请求任务对应的任务日志末尾，供首页右侧日志侧栏按下载器实际输出顺序滚动显示；不会拼接 `downloader.log`，也不会把完整全局日志或日志访问令牌发送给浏览器。返回前会将项目绝对路径替换为 `📁`，避免把服务器目录结构暴露给用户。
 
 `/api/video_info_basic` 不在 HTTP 请求内等待 `yt-dlp`。创建任务时返回 HTTP 202、`job_id` 和 `poll_url`，首页每秒轮询一次；完成后返回标题、作者、时长和缩略图，失败返回错误信息。后台最多同时执行两个预览任务，繁忙时返回 HTTP 503 和 `Retry-After`。任务在 Web 进程内存中保存 5 分钟，Web 服务重启后旧 `job_id` 会失效；当前实现适用于项目现有的单 Web 进程部署。
 
@@ -463,6 +465,10 @@ video (2).mp4
 | `PLAYLIST_MAX_ITEMS` | int | 单个播放列表只解析并下载前 N 个条目，默认 20；无效值回退为 20 |
 | `DOWNLOAD_MIN_INTERVAL_SECONDS` | int | 两次下载启动的最小间隔（秒），0 表示不限速，默认 10 |
 | `RESUME_INTERRUPTED_DOWNLOADS` | bool | 下载器启动时是否恢复遗留的 `.downloading` 任务，默认 `false` |
+| `DOWNLOAD_URL_BLOCK_PRIVATE_NETWORKS` | bool | 是否拒绝本机、内网、链路本地及其他非公网下载地址，默认 `true` |
+| `DOWNLOAD_URL_RESOLVE_HOSTS` | bool | 是否解析域名并拒绝解析到非公网地址的下载 URL，默认 `true`；生产环境不要关闭 |
+| `DOWNLOAD_URL_BLOCKED_HOSTS` | array | 额外禁止的主机名、IP、CIDR 或 `*.example.com` 通配符，默认 `[]` |
+| `DOWNLOAD_URL_MAX_LENGTH` | int | 单个下载 URL 最大长度，默认 4096 |
 | `MAX_LOG_SIZE` | int | 单个日志文件最大字节数，默认 10MB |
 | `BACKUP_COUNT` | int | 日志文件保留数量，默认 5 |
 | `YT_DLP_OUTPUT_TEMPLATE` | string | 视频文件名主体模板；下载时自动添加 `MMDDHHmm-` 前缀 |
