@@ -159,6 +159,34 @@
 
     <script src="https://unpkg.com/video.js/dist/video.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked@18.0.7/lib/marked.umd.js"></script>
+    <script>
+        // CommonMark 的定界规则要求 `**说明：**字幕` 里收尾的 ** 后面是空白或标点，
+        // 中文紧跟时不会加粗；这里放宽为只要 ** 内侧不是空白就算粗体。
+        // 视频和音频的 AI 总结共用这个全局 marked。
+        if (typeof marked !== 'undefined' && typeof marked.use === 'function') {
+            marked.use({
+                extensions: [{
+                    name: 'cjkStrong',
+                    level: 'inline',
+                    start: function (src) {
+                        var index = src.indexOf('**');
+                        return index < 0 ? undefined : index;
+                    },
+                    tokenizer: function (src) {
+                        var match = /^\*\*(?=\S)([\s\S]*?\S)\*\*(?!\*)/.exec(src);
+                        if (match) {
+                            return {
+                                type: 'strong',
+                                raw: match[0],
+                                text: match[1],
+                                tokens: this.lexer.inlineTokens(match[1])
+                            };
+                        }
+                    }
+                }]
+            });
+        }
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.12/dist/purify.min.js"></script>
     <script src="{{ 'background-playback.js' | versioned }}"></script>
     <script>

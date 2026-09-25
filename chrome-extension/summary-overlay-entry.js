@@ -1,6 +1,30 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 
+// CommonMark 的定界规则要求 `**说明：**字幕` 里收尾的 ** 后面是空白或标点，
+// 中文紧跟时不会加粗；这里放宽为只要 ** 内侧不是空白就算粗体。
+marked.use({
+  extensions: [{
+    name: 'cjkStrong',
+    level: 'inline',
+    start(src) {
+      const index = src.indexOf('**');
+      return index < 0 ? undefined : index;
+    },
+    tokenizer(src) {
+      const match = /^\*\*(?=\S)([\s\S]*?\S)\*\*(?!\*)/.exec(src);
+      if (match) {
+        return {
+          type: 'strong',
+          raw: match[0],
+          text: match[1],
+          tokens: this.lexer.inlineTokens(match[1]),
+        };
+      }
+    },
+  }],
+});
+
 const HOST_ID = 'yter-ai-summary-overlay-host';
 let pollTimer = null;
 let dismissed = false;

@@ -2767,6 +2767,27 @@ Please report this to https://github.com/markedjs/marked.`, e) {
   var tn = x.lex;
 
   // summary-overlay-entry.js
+  g.use({
+    extensions: [{
+      name: "cjkStrong",
+      level: "inline",
+      start(src) {
+        const index = src.indexOf("**");
+        return index < 0 ? void 0 : index;
+      },
+      tokenizer(src) {
+        const match = /^\*\*(?=\S)([\s\S]*?\S)\*\*(?!\*)/.exec(src);
+        if (match) {
+          return {
+            type: "strong",
+            raw: match[0],
+            text: match[1],
+            tokens: this.lexer.inlineTokens(match[1])
+          };
+        }
+      }
+    }]
+  });
   var HOST_ID = "yter-ai-summary-overlay-host";
   var pollTimer = null;
   var dismissed = false;
