@@ -415,6 +415,8 @@ curl http://localhost:5100/api/ai_summaries/jobs/<job_id> \
 
 对于没有完成摘要的旧任务，任务 API 只从仍存在的主媒体文件读取最终大小，不使用最后一个下载阶段的耗时和速率；无法可靠恢复的总耗时及平均速率会省略。未生成 `result.json` 的旧任务还会尝试从 downloader 的文件移动日志中恢复最终文件名；只有日志记录和本地文件都仍然存在时才会返回播放链接。
 
+新生成的 AI 总结会在正文末尾附加“模型：模型名称”，名称取自本次请求使用的 `AI_API_MODEL`，随 Markdown 一起保存、展示和复制。已有缓存不会自动补写模型名称。
+
 AI 总结接口命中 SQLite 中当前接口、模型和提示词版本的记录时返回 HTTP 200；未命中时返回 HTTP 202、`job_id` 和 `Retry-After: 2`。播放器和 Chrome 扩展随后通过 NDJSON 流实时接收 AI 生成的 Markdown，增量会写入 SQLite，断线后可恢复；任务完成后返回原始 Markdown，无字幕等确定性失败返回 HTTP 422。扩展接口必须使用独立的 `AI_SUMMARY_ACCESS_TOKEN`，令牌只通过 `X-Yter-AI-Token` 请求头传递。
 
 总结永久保存在 `AI_SUMMARY_DB_PATH` 指定的 SQLite 数据库中。数据库使用 WAL、外键和任务租约；模型、接口地址或内部提示词版本变化时生成新版本。URL 任务下载的字幕只在 `TMP_DIR/ai-summary/` 临时存在并在任务结束后删除，本地任务直接读取 `FILES_DIR` 中的外挂字幕或 MP4 内嵌字幕；字幕正文不会写入数据库。完成和失败的任务记录默认保留 30 天。`ai_summary_worker.py` 独立处理 URL 字幕下载、本地字幕和 AI 请求；预检使用实际生效的 yt-dlp 视频配置，但只下载字幕，不下载视频。已有总结继续按原缓存返回，新增外挂字幕不会自动使已有总结失效。

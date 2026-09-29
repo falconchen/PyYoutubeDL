@@ -39,8 +39,8 @@ class TestAiSummaryWorker(unittest.TestCase):
                 '视频', '中文字幕', '字幕正文', on_delta=partials.append,
             )
 
-        self.assertEqual(result, '## 概述\n要点')
-        self.assertEqual(partials, ['## 概述', '## 概述\n要点'])
+        self.assertEqual(result, '## 概述\n要点\n\n---\n\n模型：test-model')
+        self.assertEqual(partials, ['## 概述', '## 概述\n要点', result])
         self.assertTrue(post.call_args.kwargs['json']['stream'])
         self.assertTrue(post.call_args.kwargs['stream'])
         self.assertFalse(post.return_value.decode_unicode)

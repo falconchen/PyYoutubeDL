@@ -1059,6 +1059,9 @@ def request_ai_summary(filename, subtitle_label, subtitle_text, on_delta=None):
     content = ai_summary_store.repair_utf8_mojibake(''.join(chunks)).strip()
     if not content:
         raise RuntimeError("AI 接口未返回总结内容")
+    content += f"\n\n---\n\n模型：{html.escape(api_model)}"
+    if on_delta:
+        on_delta(content)
     return content
 
 
