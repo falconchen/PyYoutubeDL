@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 import downloader
+from yt_dlp import YoutubeDL
 
 
 class TestDownloaderMove(unittest.TestCase):
@@ -493,7 +494,7 @@ class TestDownloaderMove(unittest.TestCase):
                     )
                     self.assertIn('--print', cmd)
                     self.assertIn(
-                        f'after_move:{downloader.ITEM_COMPLETE_PREFIX}%(filepath)j',
+                        f'after_move:{downloader.ITEM_COMPLETE_PREFIX}%(filepath)+j',
                         cmd,
                     )
                     self.assertGreater(
@@ -504,6 +505,18 @@ class TestDownloaderMove(unittest.TestCase):
                         cmd[cmd.index('--playlist-end') + 1],
                         '20',
                     )
+
+    def test_completed_item_template_preserves_unicode_and_json_path(self):
+        filepath = '/tmp/【陈一发儿】🍊橙子姐-"标题"\\文件.mp4'
+        with YoutubeDL({'quiet': True}) as ydl:
+            line = ydl.evaluate_outtmpl(
+                f'{downloader.ITEM_COMPLETE_PREFIX}%(filepath)+j',
+                {'filepath': filepath},
+            )
+
+        self.assertIn('【陈一发儿】🍊橙子姐', line)
+        self.assertNotIn('\\u', line)
+        self.assertEqual(downloader.parse_completed_item_path(line), filepath)
 
     def test_completed_playlist_item_is_moved_before_process_exits(self):
         with tempfile.TemporaryDirectory() as root:
