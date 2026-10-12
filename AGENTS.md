@@ -75,6 +75,7 @@ flask get-cookie
 - Shell 命令应尽量兼容 Linux、FreeBSD 和 macOS。
 - Python 代码应遵循现有文件风格，不引入不必要的新框架。
 - 与下载、上传、删除、cookie、WebDAV、日志清理相关的改动要特别谨慎。
+- WebDAV 远端清理由 `ENABLE_WEBDAV_CLEANUP` 控制（默认关闭），`WEBDAV_CLEANUP_DRY_RUN` 默认预演；视频、音频分别使用 `VIDEO_WEBDAV_RETENTION_DAYS` / `AUDIO_WEBDAV_RETENTION_DAYS`，0 表示不清理，旧 `*_WEBDAV_KEEP_COUNT` 已废弃。日期目录模式按 `TIMEZONE` 保留含今天在内的 N 个自然日；直接上传模式只清理 `WEBDAV_UPLOAD_DB_PATH` SQLite 中登记的根目录文件，按实际上传成功后的 N×24 小时判断，历史无记录文件不得按远端修改时间补录。上传和清理共用 `remote_operations_lock`，不要破坏成功上传后才登记、删除成功后才移除记录的顺序。启动、重连及上传器内部定期线程执行清理，无需新增 cron 或 Supervisor program。
 - `tests/test_video_info.py` 中的部分测试可能访问 YouTube，需要网络环境支持。
 - 本地验证服务时注意执行环境的进程生命周期：当前 Codex 命令执行器在命令结束后可能回收由命令启动的后台子进程，即使 `runner.sh` 使用了 `nohup` 也可能导致服务随后不可访问。需要保持服务运行时，应在用户自己的终端启动 `./runner.sh start`，或让验证会话保持前台；不要仅根据 `runner.sh` 的“启动成功”提示判断服务已持续运行，需另行检查 `http://127.0.0.1:5100/` 和相关进程。
 - 不要把真实 cookie、密钥、Token、服务器密码等敏感信息写入文档、日志或测试数据。

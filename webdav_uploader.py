@@ -12,6 +12,10 @@ from config_util import MOVE_STAGING_PREFIX, load_config
 from log_util import setup_logger
 import requests
 import pytz
+from webdav_cleanup import (
+    WebDAVUploadHistory, cleanup_date_directories, cleanup_uploaded_files,
+    webdav_target_id,
+)
 
 # 加载配置
 config = load_config()
@@ -61,63 +65,53 @@ def get_webdav_methods(url, username, password):
         logger.warning(f"OPTIONS 请求失败: {e}")
         return None
 
-def cleanup_webdav_directories(client, keep_count, host, category):
-    """
-    清理 WebDAV 服务器上的旧日期目录
-    """
-    if not client:
-        return
+# 清理与上传共用锁，避免定期清理和重试上传同时操作远端文件。
+remote_operations_lock = threading.RLock()
 
-    if type(keep_count) is not int or keep_count < 0:
-        logger.warning(f"[{category}] WebDAV目录保留数量必须是非负整数，跳过清理")
-        return
-    if keep_count == 0:
-        logger.info(f"[{category}] WebDAV目录保留数量为0，已关闭远端目录清理")
-        return
 
-    try:
-        # 获取根目录下的所有内容
-        items = client.list("/")
-        if not items:
-            return
-            
-        # 仅清理有效日期命名的真实目录，不能凭八位数字名称判断类型。
-        date_dirs = set()
-        for item in items:
-            # 去掉可能的末尾斜杠
-            name = item.strip('/')
-            if not re.fullmatch(r'[0-9]{8}', name):
-                continue
-            try:
-                datetime.strptime(name, '%Y%m%d')
-            except ValueError:
-                continue
-            try:
-                if client.is_dir(name) is True:
-                    date_dirs.add(name)
-            except Exception as e:
-                logger.warning(f"[{category}] 无法确认WebDAV目录类型，跳过 {name}: {e}")
-        
-        # 按日期排序（从旧到新）
-        date_dirs = sorted(date_dirs)
-        
-        if len(date_dirs) > keep_count:
-            to_delete = date_dirs[:-keep_count]
-            logger.info(f"[{category}] WebDAV ({host}) 发现 {len(date_dirs)} 个日期目录，保留最近 {keep_count} 个，将删除 {len(to_delete)} 个")
-            for dir_name in to_delete:
-                try:
-                    # webdav3 client.clean 用于删除文件或目录
-                    client.clean(dir_name)
-                    logger.info(f"[{category}] 已删除 WebDAV 过期目录: {dir_name}")
-                except Exception as e:
-                    logger.error(f"[{category}] 删除 WebDAV 目录失败 {dir_name}: {e}")
+def cleanup_webdav(client, host, category):
+    """按类别及当前上传模式执行远端按天清理。"""
+    if (
+        not client or not config.get("ENABLE_WEBDAV_UPLOAD", True)
+        or config.get("ENABLE_WEBDAV_CLEANUP", False) is not True
+    ):
+        return
+    with remote_operations_lock:
+        days = config.get(f"{category.upper()}_WEBDAV_RETENTION_DAYS", 7 if category == 'Video' else 30)
+        dry_run = config.get("WEBDAV_CLEANUP_DRY_RUN", True) is not False
+        logger.info(f"[{category}] 开始WebDAV按天清理检查 | 服务器: {host} | 预演: {dry_run}")
+        if config.get("WEBDAV_CREATE_DATE_DIR", True):
+            cleanup_date_directories(
+                client, days, config.get('TIMEZONE', 'UTC'), category,
+                dry_run=dry_run, log=logger,
+            )
         else:
-            logger.info(f"[{category}] WebDAV ({host}) 日期目录数量 ({len(date_dirs)}) 未超过保留限制 ({keep_count})")
-    except Exception as e:
-        logger.error(f"[{category}] 扫描 WebDAV 目录失败: {e}")
+            try:
+                history = WebDAVUploadHistory(config['WEBDAV_UPLOAD_DB_PATH'])
+                target_id = webdav_target_id(config[f"{category.upper()}_WEBDAV_OPTIONS"])
+                cleanup_uploaded_files(
+                    client, history, target_id, category, days,
+                    dry_run=dry_run, log=logger,
+                )
+            except Exception as e:
+                logger.error(f"[{category}] WebDAV清理初始化失败: {e}")
+
+
+def periodic_webdav_cleanup(stop_event):
+    """在上传器内部定期检查，无需额外定时任务。"""
+    if config.get('ENABLE_WEBDAV_CLEANUP', False) is not True:
+        return
+    hours = config.get('WEBDAV_CLEANUP_INTERVAL_HOURS', 24)
+    if type(hours) is not int or not 1 <= hours <= 8760:
+        logger.warning('WebDAV清理间隔必须是1至8760的整数小时，已跳过定期清理')
+        return
+    while not stop_event.wait(hours * 3600):
+        cleanup_webdav(video_webdav, video_webdav_host, 'Video')
+        cleanup_webdav(audio_webdav, audio_webdav_host, 'Audio')
+
 
 def initialize_webdav_clients():
-    """连接视频和音频 WebDAV，并执行启用上传时的远端目录清理。"""
+    """连接视频和音频 WebDAV，连接成功后检查启用的按天清理。"""
     global video_webdav, audio_webdav
     global video_webdav_host, audio_webdav_host
 
@@ -139,14 +133,7 @@ def initialize_webdav_clients():
             else:
                 logger.warning("无法获取视频服务器支持的方法")
 
-            if config.get("WEBDAV_CREATE_DATE_DIR", True):
-                video_keep = config.get("VIDEO_WEBDAV_KEEP_COUNT", 3)
-                cleanup_webdav_directories(
-                    video_webdav,
-                    video_keep,
-                    video_webdav_host,
-                    "Video",
-                )
+            cleanup_webdav(video_webdav, video_webdav_host, "Video")
         except Exception as e:
             logger.error(f"视频WebDAV连接失败: {e}")
             video_webdav = None
@@ -169,14 +156,7 @@ def initialize_webdav_clients():
             else:
                 logger.warning("无法获取音频服务器支持的方法")
 
-            if config.get("WEBDAV_CREATE_DATE_DIR", True):
-                audio_keep = config.get("AUDIO_WEBDAV_KEEP_COUNT", 5)
-                cleanup_webdav_directories(
-                    audio_webdav,
-                    audio_keep,
-                    audio_webdav_host,
-                    "Audio",
-                )
+            cleanup_webdav(audio_webdav, audio_webdav_host, "Audio")
         except Exception as e:
             logger.error(f"音频WebDAV连接失败: {e}")
             audio_webdav = None
@@ -288,6 +268,10 @@ class WebDAVUploadHandler(FileSystemEventHandler):
                 self.process_file(file_path)
 
     def process_file(self, file_path):
+        with remote_operations_lock:
+            self._process_file(file_path)
+
+    def _process_file(self, file_path):
         """
         处理文件上传流程：判断分类、连接WebDAV、执行上传、清理本地文件
         
@@ -400,6 +384,15 @@ class WebDAVUploadHandler(FileSystemEventHandler):
                     os.remove(upload_marker)
                 except FileNotFoundError:
                     pass
+
+            # 只登记实际上传成功的根目录文件，重复文件和历史文件不补记时间。
+            if not remote_dir:
+                try:
+                    history = WebDAVUploadHistory(config['WEBDAV_UPLOAD_DB_PATH'])
+                    target_id = webdav_target_id(config[f"{category.upper()}_WEBDAV_OPTIONS"])
+                    history.record(target_id, category, remote_path)
+                except Exception as e:
+                    logger.error(f"[{category}] 上传成功但记录保存失败，该文件无法按记录清理: {e}")
 
             elapsed = time.time() - start_time
             speed = file_size_mb / elapsed if elapsed > 0 else 0
@@ -555,6 +548,13 @@ def main():
         daemon=True,
     )
     reconnect_thread.start()
+    cleanup_thread = threading.Thread(
+        target=periodic_webdav_cleanup,
+        args=(reconnect_stop_event,),
+        name="webdav-cleanup",
+        daemon=True,
+    )
+    cleanup_thread.start()
 
     try:
         while True:
@@ -567,6 +567,7 @@ def main():
 
     observer.join()
     reconnect_thread.join(timeout=1)
+    cleanup_thread.join(timeout=1)
 
 if __name__ == '__main__':
     main() 

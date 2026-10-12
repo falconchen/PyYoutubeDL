@@ -484,14 +484,18 @@ video (2).mp4
 | `PLAYER_FILENAME_EXCLUDE_KEYWORDS` | array | 播放器列表排除的文件名关键词，任一非空关键词命中即隐藏，默认 `[]` |
 | `AUDIO_PLAYER_FALLBACK_COVER_URL` | string | YouTube 音频封面不可用时的图片 URL，默认 `/static/images/audio-cover-default.svg` |
 | `ENABLE_WEBDAV_UPLOAD` | bool | 是否将下载完成的文件上传到 WebDAV，默认 `true`；关闭时文件保留在本地 |
-| `WEBDAV_CREATE_DATE_DIR` | bool | 是否按日期创建 WebDAV 子目录，默认 `true`；关闭时直接上传到各自的 `webdav_root`，并跳过远端日期目录清理 |
+| `WEBDAV_CREATE_DATE_DIR` | bool | 是否按日期创建 WebDAV 子目录，默认 `true`；关闭时直接上传到各自的 `webdav_root`，远端清理使用上传成功记录 |
 | `WEBDAV_UPLOAD_EXCLUDE_KEYWORDS` | array | WebDAV 上传排除的文件名关键词，命中任一非空关键词即跳过上传，默认 `[]` |
 | `DELETE_AFTER_UPLOAD` | bool | WebDAV 上传后是否删除本地文件 |
 | `FILES_EXPIRE_DAYS` | int | 启动时清理超过 N 天的旧文件，0 表示不清理 |
 | `VIDEO_WEBDAV_OPTIONS` | object | 视频 WebDAV 远程存储配置 |
 | `AUDIO_WEBDAV_OPTIONS` | object | 音频 WebDAV 远程存储配置 |
-| `VIDEO_WEBDAV_KEEP_COUNT` | int | 视频 WebDAV 保留的日期目录数量，默认 3；必须为非负整数，0 表示不清理 |
-| `AUDIO_WEBDAV_KEEP_COUNT` | int | 音频 WebDAV 保留的日期目录数量，默认 5；必须为非负整数，0 表示不清理 |
+| `ENABLE_WEBDAV_CLEANUP` | bool | 是否启用远端按天清理，默认 `false` |
+| `VIDEO_WEBDAV_RETENTION_DAYS` | int | 视频远端保留天数，默认 7；非负整数，0 表示不清理视频 |
+| `AUDIO_WEBDAV_RETENTION_DAYS` | int | 音频远端保留天数，默认 30；非负整数，0 表示不清理音频 |
+| `WEBDAV_CLEANUP_INTERVAL_HOURS` | int | 上传器内部定期清理检查间隔，默认 24；1 至 8760 的整数小时 |
+| `WEBDAV_CLEANUP_DRY_RUN` | bool | 清理预演，默认 `true`；仅显式设为 `false` 才删除远端文件或目录 |
+| `WEBDAV_UPLOAD_DB_PATH` | string | 直接上传模式的 SQLite 上传记录，默认 `./data/webdav_uploads.sqlite3`；相对路径基于项目根目录 |
 | `UPLOAD_MAX_RETRIES` | int | 首次上传失败后的最大重试次数，默认 1；每次失败都会立即发送 Bark 通知 |
 | `UPLOAD_RETRY_DELAY` | int | WebDAV 上传重试间隔（秒），默认 60 |
 | `WEBDAV_RECONNECT_INTERVAL` | int | 上传器启动时 WebDAV 不可用的重连间隔（秒），默认 30；等待期间发现的媒体文件会排队并在连接恢复后上传 |
@@ -643,9 +647,7 @@ grep OAUTH_AUTH_USERNAME config.json
 
 ## WebDAV 上传
 
-支持将下载完成的文件自动上传到 WebDAV 远程存储，区分视频和音频不同目标路径，支持自动重试和保留最新 N 个日期目录。
-
-远端清理仅识别日期有效且确认为目录的 `YYYYMMDD` 条目，普通文件、无效日期名称及目录类型查询失败的条目均跳过。`VIDEO_WEBDAV_KEEP_COUNT` 和 `AUDIO_WEBDAV_KEEP_COUNT` 设为 `0` 时不清理；负数或非整数会记录警告并跳过对应类别的清理。清理仍只在上传器启动或连接恢复时执行。
+支持将下载完成的文件自动上传到 WebDAV 远程存储，视频和音频使用不同目标路径，支持自动重试及分别按保留天数清理远端内容。
 
 `WEBDAV_CREATE_DATE_DIR` 默认 `true`，按 `TIMEZONE` 指定时区在各自的 `webdav_root` 下创建 `YYYYMMDD` 日期目录。需要直接上传到配置根目录时，在 `config.json` 中设置：
 
@@ -653,7 +655,35 @@ grep OAUTH_AUTH_USERNAME config.json
 "WEBDAV_CREATE_DATE_DIR": false
 ```
 
-修改后重启上传器（`./runner.sh restart webdav`；使用 Supervisor 时执行 `./supervisor-runner.sh restart webdav`）。关闭后不创建日期子目录，也不执行远端日期目录清理，`VIDEO_WEBDAV_KEEP_COUNT` 和 `AUDIO_WEBDAV_KEEP_COUNT` 不再生效；已有日期目录及其文件会保留，不会自动迁移。根目录已有同名文件时仍按现有规则跳过上传，并根据 `DELETE_AFTER_UPLOAD` 决定是否删除本地文件。
+关闭后不创建日期子目录，已有日期目录及其文件不会自动迁移，也不参与直接上传模式的清理。根目录已有同名文件时仍按现有规则跳过上传，并根据 `DELETE_AFTER_UPLOAD` 决定是否删除本地文件。
+
+远端按天清理默认关闭，预演默认开启。以下配置启用检查，视频保留 7 天、音频保留 30 天，每 24 小时检查一次，先只在 `LOG_DIR/downloader.log` 中记录待删除项：
+
+```json
+"ENABLE_WEBDAV_CLEANUP": true,
+"VIDEO_WEBDAV_RETENTION_DAYS": 7,
+"AUDIO_WEBDAV_RETENTION_DAYS": 30,
+"WEBDAV_CLEANUP_INTERVAL_HOURS": 24,
+"WEBDAV_CLEANUP_DRY_RUN": true,
+"WEBDAV_UPLOAD_DB_PATH": "./data/webdav_uploads.sqlite3"
+```
+
+核对预演路径后，将 `WEBDAV_CLEANUP_DRY_RUN` 显式设为 `false` 执行真实删除。每次修改配置后重启上传器；Supervisor 管理方式使用：
+
+```bash
+./supervisor-runner.sh restart webdav
+```
+
+上传器连接成功时检查对应类别，随后由内部线程按配置间隔检查，无需新增 cron 或 Supervisor program。停用 WebDAV 上传或停用远端清理时均不执行远端清理；单个类别的保留天数为 `0` 时不清理该类别。负数、非整数及布尔值会记录警告并跳过对应类别。间隔配置非法时仅跳过定期检查，启动和重连检查仍然有效。
+
+两种上传模式的过期依据不同：
+
+- **日期目录模式**：按 `TIMEZONE` 计算自然日，保留天数包含今天。例如今天为 2026-10-12，保留 7 天时保留 10-06 至 10-12，删除 10-05 及更早的有效日期目录；未来日期保留。只处理根目录下有效 `YYYYMMDD` 日期命名且确认为目录的条目，不要求目录数量达到阈值。删除目录会同时删除其中所有内容，因此该根目录应专用于本服务；普通文件、无效日期及目录类型查询失败的条目跳过。
+- **直接上传模式**：按实际上传成功时间计算 `N × 24` 小时，达到保留时长即可删除。根目录上传成功时会登记 SQLite，即使清理关闭或处于预演也会登记；上传失败、重复文件、历史无记录文件不会补记。只处理当前服务器、`webdav_root`、账户及媒体类别的记录，且远端必须确认为普通文件。记录不含连接密码。删除失败保留记录，下次重试；删除成功后移除记录。非预演时，已不存在的远端文件也会移除记录。
+
+`VIDEO_WEBDAV_KEEP_COUNT` 和 `AUDIO_WEBDAV_KEEP_COUNT` 已废弃并不再生效，不能将旧目录数量直接理解为保留天数。升级后需显式配置新的保留天数并开启清理。切换直接上传模式不会清理原日期目录；切换回日期目录模式后，旧日期目录重新受日期保留规则约束。
+
+请持久化保存 `WEBDAV_UPLOAD_DB_PATH` 指向的数据库；删除或丢失数据库会让原已上传的根目录文件失去清理依据，不会扫描远端修改时间补录历史文件。上传记录写入失败仅记录错误，不改变上传成功结果。直接上传模式按记录路径识别文件，手工替换同一路径的文件仍会沿用原上传记录的过期时间；需长期保存的文件应移到本服务管理范围之外。定期清理与上传在同一进程内互斥，但不能协调其他程序对远端内容的操作。
 
 ## 播放进度
 

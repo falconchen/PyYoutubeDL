@@ -35,6 +35,8 @@ class TestWebDAVUploadToggle(unittest.TestCase):
                     media_file.write_bytes(b'media')
                     runtime_config = DEFAULT_CONFIG.copy()
                     runtime_config['DELETE_AFTER_UPLOAD'] = False
+                    runtime_config['VIDEO_WEBDAV_OPTIONS'] = {}
+                    runtime_config['AUDIO_WEBDAV_OPTIONS'] = {}
                     if create_date_dir is None:
                         runtime_config.pop('WEBDAV_CREATE_DATE_DIR')
                     else:
@@ -49,6 +51,8 @@ class TestWebDAVUploadToggle(unittest.TestCase):
                         patch.object(webdav_uploader, client_name, client),
                         patch.object(webdav_uploader, 'datetime') as mock_datetime,
                         patch.object(webdav_uploader, 'bark_notify'),
+                        patch.object(webdav_uploader, 'WebDAVUploadHistory') as history_factory,
+                        patch.object(webdav_uploader, 'webdav_target_id', return_value='target'),
                     ):
                         mock_datetime.now.return_value.strftime.return_value = '20261012'
                         handler.process_file(str(media_file))
@@ -60,9 +64,13 @@ class TestWebDAVUploadToggle(unittest.TestCase):
                         client.check.assert_called_once_with(remote_path)
                         client.mkdir.assert_not_called()
                         mock_datetime.now.assert_not_called()
+                        history_factory.return_value.record.assert_called_once_with(
+                            'target', 'Video' if extension == '.mp4' else 'Audio', remote_path,
+                        )
                     else:
                         self.assertEqual(client.check.call_args_list[0].args, (prefix,))
                         client.mkdir.assert_called_once_with(prefix)
+                        history_factory.assert_not_called()
                     self.assertTrue(media_file.exists())
                     self.assertFalse(Path(f'{media_file}.uploading').exists())
 
@@ -91,7 +99,7 @@ class TestWebDAVUploadToggle(unittest.TestCase):
                 client.upload_sync.assert_not_called()
                 self.assertEqual(media_file.exists(), not delete_after_upload)
 
-    def test_remote_date_cleanup_runs_only_with_date_directories(self):
+    def test_connection_success_dispatches_cleanup_for_both_categories(self):
         for create_date_dir in (True, False, None):
             with self.subTest(setting=create_date_dir):
                 runtime_config = DEFAULT_CONFIG.copy()
@@ -117,12 +125,12 @@ class TestWebDAVUploadToggle(unittest.TestCase):
                     patch.object(webdav_uploader, 'audio_webdav_host', None),
                     patch.object(webdav_uploader, 'Client') as client_factory,
                     patch.object(webdav_uploader, 'get_webdav_methods', return_value='PROPFIND'),
-                    patch.object(webdav_uploader, 'cleanup_webdav_directories') as cleanup,
+                    patch.object(webdav_uploader, 'cleanup_webdav') as cleanup,
                 ):
                     webdav_uploader.initialize_webdav_clients()
 
                 self.assertEqual(client_factory.call_count, 2)
-                self.assertEqual(cleanup.call_count, 0 if create_date_dir is False else 2)
+                self.assertEqual(cleanup.call_count, 2)
 
     def test_excluded_keyword_matching_ignores_empty_and_invalid_values(self):
         self.assertEqual(
@@ -450,6 +458,7 @@ start_services downloader
                     webdav_uploader.config,
                     {
                         'ENABLE_WEBDAV_UPLOAD': True,
+                        'WEBDAV_CREATE_DATE_DIR': True,
                         'WEBDAV_UPLOAD_EXCLUDE_KEYWORDS': [],
                     },
                 ),

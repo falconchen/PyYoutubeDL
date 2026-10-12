@@ -86,6 +86,17 @@ class TestConfigLoading(unittest.TestCase):
             str(root_path / 'commented-urls'),
         )
 
+    def test_webdav_upload_database_path_is_resolved_from_project_root(self):
+        result, root_path = self.load_config_text(
+            '{"WEBDAV_UPLOAD_DB_PATH": "./data/custom_uploads.sqlite3"}',
+            {'WEBDAV_UPLOAD_DB_PATH': './data/webdav_uploads.sqlite3'},
+            config_keys=config_util.PATH_CONFIG_KEYS,
+        )
+        self.assertEqual(
+            result['WEBDAV_UPLOAD_DB_PATH'],
+            str(root_path / 'data' / 'custom_uploads.sqlite3'),
+        )
+
     def test_invalid_jsonc_falls_back_to_defaults(self):
         output = io.StringIO()
         with redirect_stdout(output):

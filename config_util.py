@@ -49,8 +49,12 @@ DEFAULT_CONFIG = {
     "WEBDAV_RECONNECT_INTERVAL": 30, # WebDAV 启动连接失败后的重连间隔（秒）
     "DELETE_AFTER_UPLOAD": True,    # 上传成功后是否删除本地文件
     "FILES_EXPIRE_DAYS": 1,         # 本地文件过期时间（天），超过此时间将被清理，0表示不清理
-    "VIDEO_WEBDAV_KEEP_COUNT": 3,   # 视频 WebDAV 保留的日期目录数量；0 表示不清理
-    "AUDIO_WEBDAV_KEEP_COUNT": 5,   # 音频 WebDAV 保留的日期目录数量；0 表示不清理
+    "ENABLE_WEBDAV_CLEANUP": False, # 是否启用远端按天清理
+    "VIDEO_WEBDAV_RETENTION_DAYS": 7, # 视频远端保留天数；0 表示不清理
+    "AUDIO_WEBDAV_RETENTION_DAYS": 30, # 音频远端保留天数；0 表示不清理
+    "WEBDAV_CLEANUP_INTERVAL_HOURS": 24, # 远端清理检查间隔（正整数小时）
+    "WEBDAV_CLEANUP_DRY_RUN": True, # 仅记录待删除项，不执行远端删除
+    "WEBDAV_UPLOAD_DB_PATH": "./data/webdav_uploads.sqlite3", # 根目录上传成功记录
     
     # 通用配置
     "TIMEZONE": "Asia/Shanghai",    # 系统使用的时区
@@ -77,7 +81,7 @@ DEFAULT_CONFIG = {
 # 需要转换为绝对路径的配置项
 PATH_CONFIG_KEYS = [
     "URLS_DIR",  "TMP_DIR",
-    "FILES_DIR", "LOG_DIR", "AI_SUMMARY_DB_PATH",
+    "FILES_DIR", "LOG_DIR", "AI_SUMMARY_DB_PATH", "WEBDAV_UPLOAD_DB_PATH",
     "GOOGLE_OAUTH_TOKEN_FILE", "GOOGLE_OAUTH_FAIL_LOCK_FILE",
     "GOOGLE_OAUTH_USER_FILE",
 ]

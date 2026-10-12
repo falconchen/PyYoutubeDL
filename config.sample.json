@@ -59,14 +59,18 @@
   "UPLOAD_RETRY_DELAY": 60,
   "WEBDAV_RECONNECT_INTERVAL": 30,
   "ENABLE_WEBDAV_UPLOAD": true,
-  // false：直接上传到各自的 webdav_root，并跳过远端日期目录清理
+  // false：直接上传到各自的 webdav_root，按上传记录清理文件
   "WEBDAV_CREATE_DATE_DIR": true,
   "WEBDAV_UPLOAD_EXCLUDE_KEYWORDS": [],
   "DELETE_AFTER_UPLOAD": true,
   "FILES_EXPIRE_DAYS": 1,
-  // 远端日期目录保留数量：非负整数，0 表示不清理
-  "VIDEO_WEBDAV_KEEP_COUNT": 3,
-  "AUDIO_WEBDAV_KEEP_COUNT": 5,
+  // 远端按天清理：先开启预演核对路径，再关闭 DRY_RUN 执行删除
+  "ENABLE_WEBDAV_CLEANUP": false,
+  "VIDEO_WEBDAV_RETENTION_DAYS": 7,
+  "AUDIO_WEBDAV_RETENTION_DAYS": 30,
+  "WEBDAV_CLEANUP_INTERVAL_HOURS": 24,
+  "WEBDAV_CLEANUP_DRY_RUN": true,
+  "WEBDAV_UPLOAD_DB_PATH": "./data/webdav_uploads.sqlite3",
 
   // 通用运行配置
   "TIMEZONE": "Asia/Shanghai",
