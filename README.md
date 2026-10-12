@@ -484,6 +484,7 @@ video (2).mp4
 | `PLAYER_FILENAME_EXCLUDE_KEYWORDS` | array | 播放器列表排除的文件名关键词，任一非空关键词命中即隐藏，默认 `[]` |
 | `AUDIO_PLAYER_FALLBACK_COVER_URL` | string | YouTube 音频封面不可用时的图片 URL，默认 `/static/images/audio-cover-default.svg` |
 | `ENABLE_WEBDAV_UPLOAD` | bool | 是否将下载完成的文件上传到 WebDAV，默认 `true`；关闭时文件保留在本地 |
+| `WEBDAV_CREATE_DATE_DIR` | bool | 是否按日期创建 WebDAV 子目录，默认 `true`；关闭时直接上传到各自的 `webdav_root`，并跳过远端日期目录清理 |
 | `WEBDAV_UPLOAD_EXCLUDE_KEYWORDS` | array | WebDAV 上传排除的文件名关键词，命中任一非空关键词即跳过上传，默认 `[]` |
 | `DELETE_AFTER_UPLOAD` | bool | WebDAV 上传后是否删除本地文件 |
 | `FILES_EXPIRE_DAYS` | int | 启动时清理超过 N 天的旧文件，0 表示不清理 |
@@ -640,7 +641,15 @@ grep OAUTH_AUTH_USERNAME config.json
 
 ## WebDAV 上传
 
-支持将下载完成的文件自动上传到 WebDAV 远程存储，区分视频和音频不同目标路径，支持自动重试和保留最新 N 个文件。
+支持将下载完成的文件自动上传到 WebDAV 远程存储，区分视频和音频不同目标路径，支持自动重试和保留最新 N 个日期目录。
+
+`WEBDAV_CREATE_DATE_DIR` 默认 `true`，按 `TIMEZONE` 指定时区在各自的 `webdav_root` 下创建 `YYYYMMDD` 日期目录。需要直接上传到配置根目录时，在 `config.json` 中设置：
+
+```json
+"WEBDAV_CREATE_DATE_DIR": false
+```
+
+修改后重启上传器（`./runner.sh restart webdav`；使用 Supervisor 时执行 `./supervisor-runner.sh restart webdav`）。关闭后不创建日期子目录，也不执行远端日期目录清理，`VIDEO_WEBDAV_KEEP_COUNT` 和 `AUDIO_WEBDAV_KEEP_COUNT` 不再生效；已有日期目录及其文件会保留，不会自动迁移。根目录已有同名文件时仍按现有规则跳过上传，并根据 `DELETE_AFTER_UPLOAD` 决定是否删除本地文件。
 
 ## 播放进度
 

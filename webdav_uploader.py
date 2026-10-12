@@ -123,13 +123,14 @@ def initialize_webdav_clients():
             else:
                 logger.warning("无法获取视频服务器支持的方法")
 
-            video_keep = config.get("VIDEO_WEBDAV_KEEP_COUNT", 3)
-            cleanup_webdav_directories(
-                video_webdav,
-                video_keep,
-                video_webdav_host,
-                "Video",
-            )
+            if config.get("WEBDAV_CREATE_DATE_DIR", True):
+                video_keep = config.get("VIDEO_WEBDAV_KEEP_COUNT", 3)
+                cleanup_webdav_directories(
+                    video_webdav,
+                    video_keep,
+                    video_webdav_host,
+                    "Video",
+                )
         except Exception as e:
             logger.error(f"视频WebDAV连接失败: {e}")
             video_webdav = None
@@ -152,13 +153,14 @@ def initialize_webdav_clients():
             else:
                 logger.warning("无法获取音频服务器支持的方法")
 
-            audio_keep = config.get("AUDIO_WEBDAV_KEEP_COUNT", 5)
-            cleanup_webdav_directories(
-                audio_webdav,
-                audio_keep,
-                audio_webdav_host,
-                "Audio",
-            )
+            if config.get("WEBDAV_CREATE_DATE_DIR", True):
+                audio_keep = config.get("AUDIO_WEBDAV_KEEP_COUNT", 5)
+                cleanup_webdav_directories(
+                    audio_webdav,
+                    audio_keep,
+                    audio_webdav_host,
+                    "Audio",
+                )
         except Exception as e:
             logger.error(f"音频WebDAV连接失败: {e}")
             audio_webdav = None
@@ -326,11 +328,12 @@ class WebDAVUploadHandler(FileSystemEventHandler):
             )
             return
 
-        timezone_str = config.get('TIMEZONE', 'UTC')
-        tz = pytz.timezone(timezone_str)
-        today_str = datetime.now(tz).strftime('%Y%m%d')
-
-        remote_dir = f"/{today_str}"
+        remote_dir = ""
+        if config.get("WEBDAV_CREATE_DATE_DIR", True):
+            timezone_str = config.get('TIMEZONE', 'UTC')
+            tz = pytz.timezone(timezone_str)
+            today_str = datetime.now(tz).strftime('%Y%m%d')
+            remote_dir = f"/{today_str}"
         
         # 处理文件名中的特殊字符，避免WebDAV上传问题
         original_filename = os.path.basename(file_path)
@@ -342,7 +345,7 @@ class WebDAVUploadHandler(FileSystemEventHandler):
             logger.info(f"文件名已清理: '{original_filename}' -> '{safe_filename}'")
 
         try:
-            if not webdav_client.check(remote_dir):
+            if remote_dir and not webdav_client.check(remote_dir):
                 webdav_client.mkdir(remote_dir)
 
             if webdav_client.check(remote_path):

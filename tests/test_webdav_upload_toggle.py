@@ -20,9 +20,109 @@ class TestWebDAVUploadToggle(unittest.TestCase):
 
     def test_upload_is_enabled_by_default(self):
         self.assertIs(DEFAULT_CONFIG['ENABLE_WEBDAV_UPLOAD'], True)
+        self.assertIs(DEFAULT_CONFIG['WEBDAV_CREATE_DATE_DIR'], True)
         self.assertEqual(DEFAULT_CONFIG['WEBDAV_UPLOAD_EXCLUDE_KEYWORDS'], [])
         self.assertEqual(DEFAULT_CONFIG['WEBDAV_RECONNECT_INTERVAL'], 30)
         self.assertTrue(is_webdav_upload_enabled({}))
+
+    def test_upload_destination_with_date_directory_enabled_disabled_or_missing(self):
+        handler = webdav_uploader.WebDAVUploadHandler()
+
+        for create_date_dir in (True, False, None):
+            for extension, client_name in (('.mp4', 'video_webdav'), ('.mp3', 'audio_webdav')):
+                with self.subTest(setting=create_date_dir, extension=extension), tempfile.TemporaryDirectory() as root:
+                    media_file = Path(root) / f'episode:demo{extension}'
+                    media_file.write_bytes(b'media')
+                    runtime_config = DEFAULT_CONFIG.copy()
+                    runtime_config['DELETE_AFTER_UPLOAD'] = False
+                    if create_date_dir is None:
+                        runtime_config.pop('WEBDAV_CREATE_DATE_DIR')
+                    else:
+                        runtime_config['WEBDAV_CREATE_DATE_DIR'] = create_date_dir
+                    client = MagicMock()
+                    client.check.return_value = False
+                    prefix = '' if create_date_dir is False else '/20261012'
+                    remote_path = f'{prefix}/episode_demo{extension}'
+
+                    with (
+                        patch.dict(webdav_uploader.config, runtime_config, clear=True),
+                        patch.object(webdav_uploader, client_name, client),
+                        patch.object(webdav_uploader, 'datetime') as mock_datetime,
+                        patch.object(webdav_uploader, 'bark_notify'),
+                    ):
+                        mock_datetime.now.return_value.strftime.return_value = '20261012'
+                        handler.process_file(str(media_file))
+
+                    client.upload_sync.assert_called_once_with(
+                        remote_path=remote_path, local_path=str(media_file),
+                    )
+                    if create_date_dir is False:
+                        client.check.assert_called_once_with(remote_path)
+                        client.mkdir.assert_not_called()
+                        mock_datetime.now.assert_not_called()
+                    else:
+                        self.assertEqual(client.check.call_args_list[0].args, (prefix,))
+                        client.mkdir.assert_called_once_with(prefix)
+                    self.assertTrue(media_file.exists())
+                    self.assertFalse(Path(f'{media_file}.uploading').exists())
+
+    def test_root_upload_skips_existing_file_and_respects_local_delete_setting(self):
+        handler = webdav_uploader.WebDAVUploadHandler()
+
+        for delete_after_upload in (True, False):
+            with self.subTest(delete=delete_after_upload), tempfile.TemporaryDirectory() as root:
+                media_file = Path(root) / 'episode.mp4'
+                media_file.write_bytes(b'media')
+                client = MagicMock()
+                client.check.return_value = True
+                with (
+                    patch.dict(webdav_uploader.config, {
+                        'ENABLE_WEBDAV_UPLOAD': True,
+                        'WEBDAV_CREATE_DATE_DIR': False,
+                        'WEBDAV_UPLOAD_EXCLUDE_KEYWORDS': [],
+                        'DELETE_AFTER_UPLOAD': delete_after_upload,
+                    }),
+                    patch.object(webdav_uploader, 'video_webdav', client),
+                ):
+                    handler.process_file(str(media_file))
+
+                client.check.assert_called_once_with('/episode.mp4')
+                client.mkdir.assert_not_called()
+                client.upload_sync.assert_not_called()
+                self.assertEqual(media_file.exists(), not delete_after_upload)
+
+    def test_remote_date_cleanup_runs_only_with_date_directories(self):
+        for create_date_dir in (True, False, None):
+            with self.subTest(setting=create_date_dir):
+                runtime_config = DEFAULT_CONFIG.copy()
+                runtime_config.update({
+                    'VIDEO_WEBDAV_OPTIONS': {
+                        'webdav_hostname': 'https://video.example.test',
+                        'webdav_login': 'test', 'webdav_password': 'test',
+                    },
+                    'AUDIO_WEBDAV_OPTIONS': {
+                        'webdav_hostname': 'https://audio.example.test',
+                        'webdav_login': 'test', 'webdav_password': 'test',
+                    },
+                })
+                if create_date_dir is None:
+                    runtime_config.pop('WEBDAV_CREATE_DATE_DIR')
+                else:
+                    runtime_config['WEBDAV_CREATE_DATE_DIR'] = create_date_dir
+                with (
+                    patch.dict(webdav_uploader.config, runtime_config, clear=True),
+                    patch.object(webdav_uploader, 'video_webdav', None),
+                    patch.object(webdav_uploader, 'audio_webdav', None),
+                    patch.object(webdav_uploader, 'video_webdav_host', None),
+                    patch.object(webdav_uploader, 'audio_webdav_host', None),
+                    patch.object(webdav_uploader, 'Client') as client_factory,
+                    patch.object(webdav_uploader, 'get_webdav_methods', return_value='PROPFIND'),
+                    patch.object(webdav_uploader, 'cleanup_webdav_directories') as cleanup,
+                ):
+                    webdav_uploader.initialize_webdav_clients()
+
+                self.assertEqual(client_factory.call_count, 2)
+                self.assertEqual(cleanup.call_count, 0 if create_date_dir is False else 2)
 
     def test_excluded_keyword_matching_ignores_empty_and_invalid_values(self):
         self.assertEqual(

@@ -41,6 +41,7 @@ DEFAULT_CONFIG = {
     
     # WebDAV上传器配置
     "ENABLE_WEBDAV_UPLOAD": True,  # 是否将下载完成的文件上传到 WebDAV
+    "WEBDAV_CREATE_DATE_DIR": True, # 是否按日期创建 WebDAV 子目录；关闭时直接上传到配置根目录
     "WEBDAV_UPLOAD_EXCLUDE_KEYWORDS": [], # WebDAV 上传排除的文件名关键词
     "WEBDAV_OPTIONS": {},           # WebDAV 连接选项 (hostname, login, password 等)
     "UPLOAD_MAX_RETRIES": 1,        # 首次上传失败后的最大重试次数

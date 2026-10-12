@@ -59,6 +59,8 @@
   "UPLOAD_RETRY_DELAY": 60,
   "WEBDAV_RECONNECT_INTERVAL": 30,
   "ENABLE_WEBDAV_UPLOAD": true,
+  // false：直接上传到各自的 webdav_root，并跳过远端日期目录清理
+  "WEBDAV_CREATE_DATE_DIR": true,
   "WEBDAV_UPLOAD_EXCLUDE_KEYWORDS": [],
   "DELETE_AFTER_UPLOAD": true,
   "FILES_EXPIRE_DAYS": 1,
