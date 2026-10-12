@@ -298,6 +298,8 @@ journalctl -u pyyoutubedl -f    # 实时日志
 
 启动后访问 `http://<host>:5100`，通过网页提交 YouTube/小红书/Bilibili 等链接，选择视频或音频模式即可下载。
 
+首页支持用查询参数预填表单，例如 `http://<host>:5100/?url=<URL 编码后的链接>&types=audio`：`url` 预填链接，`types` 预选下载类型，取值为 `video`、`audio`，多个类型用逗号分隔（`types=video,audio`）。`type` 是 `types` 的别名，两者同时出现时以 `types` 为准。参数只负责预填和勾选，仍需点击“开始下载”提交；未带类型参数或参数中没有有效取值时，沿用浏览器 `localStorage` 中上次提交的选择（默认视频）。
+
 站点提供以下公开信息页面，并在下载页、视频播放器和音频播放器页脚提供入口：
 
 - `/about`：项目介绍与工作方式
@@ -406,6 +408,8 @@ curl -X POST http://localhost:5100/api/ai_summaries \
 curl http://localhost:5100/api/ai_summaries/jobs/<job_id> \
   -H "X-Yter-AI-Token: <AI_SUMMARY_ACCESS_TOKEN>"
 ```
+
+`/api/add_task` 的 `url` 和 `types` 均为必填，没有默认下载类型。`types` 取值为 `video`、`audio`，JSON 请求可传数组或单个字符串，每种类型各创建一个任务；表单请求只读取一个值，一次只能指定一种类型。`type` 是 `types` 的别名，两者同时出现时以 `types` 为准。返回的 `tasks` 是任务 ID 列表，`v` 开头为视频任务，`a` 开头为音频任务。
 
 `/api/task_info` 会返回任务的 `state`（`queued`、`downloading`、`completed`、`failed` 或 `missing`）和 `progress`。下载中任务的 `progress` 包含可用的 `percent`、`downloaded`、`total`、`speed`、`eta` 等字段；新任务完成后包含 `final_size_bytes`、`elapsed_seconds`、`average_speed_bytes_per_second`。视频或音频任务完成并且主媒体产物仍在本地时，还会返回对应的 `player_url`。
 
