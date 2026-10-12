@@ -1671,7 +1671,9 @@ def index():
 
     # GET请求处理
     url = request.args.get('url', '')
-    types = request.args.get('types', '').split(',') if request.args.get('types') else []
+    # type 是 types 的别名，兼容误传单数形式的客户端
+    types_arg = request.args.get('types') or request.args.get('type') or ''
+    types = types_arg.split(',') if types_arg else []
     tasks = request.args.get('tasks', '').split(',') if request.args.get('tasks') else []
     
     return render_template('index.html', 
@@ -2207,7 +2209,8 @@ def api_ai_summary_job_stream(job_id):
 def api_add_task():
     data = request.get_json() if request.is_json else request.form
     url = data.get('url')
-    types = data.get('types')
+    # type 是 types 的别名，兼容误传单数形式的客户端
+    types = data.get('types') or data.get('type')
 
     # 从分享文本中提取URL
     url = extract_url(url)
