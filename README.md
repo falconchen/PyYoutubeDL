@@ -490,6 +490,8 @@ video (2).mp4
 | `FILES_EXPIRE_DAYS` | int | 启动时清理超过 N 天的旧文件，0 表示不清理 |
 | `VIDEO_WEBDAV_OPTIONS` | object | 视频 WebDAV 远程存储配置 |
 | `AUDIO_WEBDAV_OPTIONS` | object | 音频 WebDAV 远程存储配置 |
+| `VIDEO_WEBDAV_KEEP_COUNT` | int | 视频 WebDAV 保留的日期目录数量，默认 3；必须为非负整数，0 表示不清理 |
+| `AUDIO_WEBDAV_KEEP_COUNT` | int | 音频 WebDAV 保留的日期目录数量，默认 5；必须为非负整数，0 表示不清理 |
 | `UPLOAD_MAX_RETRIES` | int | 首次上传失败后的最大重试次数，默认 1；每次失败都会立即发送 Bark 通知 |
 | `UPLOAD_RETRY_DELAY` | int | WebDAV 上传重试间隔（秒），默认 60 |
 | `WEBDAV_RECONNECT_INTERVAL` | int | 上传器启动时 WebDAV 不可用的重连间隔（秒），默认 30；等待期间发现的媒体文件会排队并在连接恢复后上传 |
@@ -642,6 +644,8 @@ grep OAUTH_AUTH_USERNAME config.json
 ## WebDAV 上传
 
 支持将下载完成的文件自动上传到 WebDAV 远程存储，区分视频和音频不同目标路径，支持自动重试和保留最新 N 个日期目录。
+
+远端清理仅识别日期有效且确认为目录的 `YYYYMMDD` 条目，普通文件、无效日期名称及目录类型查询失败的条目均跳过。`VIDEO_WEBDAV_KEEP_COUNT` 和 `AUDIO_WEBDAV_KEEP_COUNT` 设为 `0` 时不清理；负数或非整数会记录警告并跳过对应类别的清理。清理仍只在上传器启动或连接恢复时执行。
 
 `WEBDAV_CREATE_DATE_DIR` 默认 `true`，按 `TIMEZONE` 指定时区在各自的 `webdav_root` 下创建 `YYYYMMDD` 日期目录。需要直接上传到配置根目录时，在 `config.json` 中设置：
 

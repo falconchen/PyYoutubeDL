@@ -67,23 +67,39 @@ def cleanup_webdav_directories(client, keep_count, host, category):
     """
     if not client:
         return
-        
+
+    if type(keep_count) is not int or keep_count < 0:
+        logger.warning(f"[{category}] WebDAV目录保留数量必须是非负整数，跳过清理")
+        return
+    if keep_count == 0:
+        logger.info(f"[{category}] WebDAV目录保留数量为0，已关闭远端目录清理")
+        return
+
     try:
         # 获取根目录下的所有内容
         items = client.list("/")
         if not items:
             return
             
-        # 过滤出日期格式的目录 (YYYYMMDD)
-        date_dirs = []
+        # 仅清理有效日期命名的真实目录，不能凭八位数字名称判断类型。
+        date_dirs = set()
         for item in items:
             # 去掉可能的末尾斜杠
             name = item.strip('/')
-            if re.match(r'^\d{8}$', name):
-                date_dirs.append(name)
+            if not re.fullmatch(r'[0-9]{8}', name):
+                continue
+            try:
+                datetime.strptime(name, '%Y%m%d')
+            except ValueError:
+                continue
+            try:
+                if client.is_dir(name) is True:
+                    date_dirs.add(name)
+            except Exception as e:
+                logger.warning(f"[{category}] 无法确认WebDAV目录类型，跳过 {name}: {e}")
         
         # 按日期排序（从旧到新）
-        date_dirs.sort()
+        date_dirs = sorted(date_dirs)
         
         if len(date_dirs) > keep_count:
             to_delete = date_dirs[:-keep_count]
