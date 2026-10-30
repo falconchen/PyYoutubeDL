@@ -25,6 +25,26 @@ class TestWebDAVUploadToggle(unittest.TestCase):
         self.assertEqual(DEFAULT_CONFIG['WEBDAV_RECONNECT_INTERVAL'], 30)
         self.assertTrue(is_webdav_upload_enabled({}))
 
+    def test_upload_marker_events_do_not_delete_marker_or_fail_when_delayed(self):
+        handler = webdav_uploader.WebDAVUploadHandler()
+        with tempfile.TemporaryDirectory() as root:
+            marker = Path(root) / 'episode.mp4.uploading'
+            marker.touch()
+            with patch.dict(webdav_uploader.config, {'ENABLE_WEBDAV_UPLOAD': True}):
+                handler.process_file(str(marker))
+                self.assertTrue(marker.exists())
+                marker.unlink()
+                handler.process_file(str(marker))
+
+    def test_missing_unsupported_file_does_not_raise(self):
+        handler = webdav_uploader.WebDAVUploadHandler()
+        with tempfile.TemporaryDirectory() as root:
+            with patch.dict(webdav_uploader.config, {
+                'ENABLE_WEBDAV_UPLOAD': True,
+                'WEBDAV_UPLOAD_EXCLUDE_KEYWORDS': [],
+            }):
+                handler.process_file(str(Path(root) / 'missing.tmp'))
+
     def test_upload_destination_with_date_directory_enabled_disabled_or_missing(self):
         handler = webdav_uploader.WebDAVUploadHandler()
 

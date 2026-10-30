@@ -283,6 +283,9 @@ class WebDAVUploadHandler(FileSystemEventHandler):
             return
 
         filename = os.path.basename(file_path)
+        # 上传标记由上传流程创建和删除，也会产生延迟到达的文件系统事件。
+        if filename.endswith('.uploading'):
+            return
         if filename.startswith(MOVE_STAGING_PREFIX):
             logger.debug(f"跳过尚未完成的跨文件系统移动暂存文件: {file_path}")
             return
@@ -316,7 +319,10 @@ class WebDAVUploadHandler(FileSystemEventHandler):
             webdav_host = audio_webdav_host
         else:
             logger.info(f"文件类型不支持，跳过上传,并删除文件: {file_path}")
-            os.remove(file_path)
+            try:
+                os.remove(file_path)
+            except FileNotFoundError:
+                logger.info(f"文件已不存在，跳过删除: {file_path}")
             return
 
         if not webdav_client:
