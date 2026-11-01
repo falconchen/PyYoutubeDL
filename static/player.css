@@ -51,10 +51,17 @@
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.72);
     color: #59616d;
+    font: inherit;
     font-size: 0.9rem;
     font-weight: 600;
     box-shadow: 0 1px 2px rgba(24, 32, 45, 0.05);
     white-space: nowrap;
+    cursor: pointer;
+}
+
+.player-nav .btn-secondary:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 .player-nav .btn-secondary i {
@@ -204,9 +211,49 @@
     letter-spacing: 0.08em;
 }
 
+.media-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.65rem 1rem;
+    margin: 0 0 0.75rem;
+}
+
 .media-source {
     margin: 0 0 0.75rem;
     font-size: 0.9rem;
+}
+
+.media-actions .media-source {
+    margin: 0;
+}
+
+.media-download-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.75rem;
+    border: 1px solid rgba(255, 0, 0, 0.24);
+    border-radius: 999px;
+    background: #fff7f7;
+    color: var(--primary-color);
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.media-download-btn:hover:not(:disabled),
+.media-download-btn:focus-visible:not(:disabled) {
+    border-color: var(--primary-color);
+    background: var(--primary-color);
+    color: #fff;
+}
+
+.media-download-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 .media-source a {

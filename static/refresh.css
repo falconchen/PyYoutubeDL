@@ -51,6 +51,8 @@
 .redesigned-page .no-videos { padding: 48px 16px; color: #829081; }
 .redesigned-page .ai-summary-button { background: #294e40; }
 .redesigned-page .ai-summary-button-secondary { background: #edf2e9; color: #294e40; }
+.redesigned-page .media-download-btn { background: #edf2e9; border-color: #d5dfd0; color: #294e40; }
+.redesigned-page .media-download-btn:hover:not(:disabled), .redesigned-page .media-download-btn:focus-visible:not(:disabled) { background: #294e40; border-color: #294e40; color: #fff; }
 .redesigned-page .site-footer { color: #7c887e; }
 @media (max-width: 900px) {
     .library-layout { grid-template-columns: minmax(0, 1fr); }

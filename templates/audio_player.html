@@ -24,9 +24,15 @@
                     <p class="now-playing-label">正在播放</p>
                     <h2 id="current-audio-title">{{ audio_items[0].title if audio_items else '暂无音频' }}</h2>
                     {% set initial_audio_source_url = audio_items[0].source_url if audio_items else '' %}
-                    <p id="current-audio-source" class="media-source" {% if not initial_audio_source_url %}hidden{% endif %}>
-                        <a href="{{ initial_audio_source_url }}" target="_blank" rel="noopener noreferrer">原始链接 <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
-                    </p>
+                    <div class="media-actions">
+                        <p id="current-audio-source" class="media-source" {% if not initial_audio_source_url %}hidden{% endif %}>
+                            <a href="{{ initial_audio_source_url }}" target="_blank" rel="noopener noreferrer">原始链接 <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
+                        </p>
+                        <button type="button" id="download-current-audio" class="media-download-btn"
+                            onclick="downloadCurrentAudio()" {% if not audio_items %}disabled hidden{% endif %}>
+                            <i class="fas fa-download" aria-hidden="true"></i> 下载音频
+                        </button>
+                    </div>
                     {% set initial_audio_metadata = audio_items[0] if audio_items else {} %}
                     <div id="current-audio-metadata" class="media-metadata"
                         {% if not initial_audio_metadata.get('artist') and not initial_audio_metadata.get('album') and not initial_audio_metadata.get('date') and not initial_audio_metadata.get('genre') and not initial_audio_metadata.get('description') %}hidden{% endif %}>

@@ -631,6 +631,15 @@
             var sourceUrl = audioItem.source_url || '';
             sourceLink.href = sourceUrl;
             source.hidden = !sourceUrl;
+            var downloadBtn = document.getElementById('download-current-audio');
+            if (downloadBtn) {
+                var hasAudio = Boolean(audioItem && audioItem.filename);
+                downloadBtn.disabled = !hasAudio;
+                downloadBtn.hidden = !hasAudio;
+            }
+            if (typeof window.updateActiveMediaDownloadButton === 'function') {
+                window.updateActiveMediaDownloadButton('audio');
+            }
             updateMediaMetadata('current-audio-metadata', audioItem);
         }
 
@@ -922,5 +931,6 @@
             }
         });
             window.switchAudio = switchAudio;
+            window.downloadCurrentAudio = downloadCurrentAudio;
     })();
     </script>

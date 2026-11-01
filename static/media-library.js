@@ -16,6 +16,9 @@
         const active = document.querySelector('#' + media + '-list .playlist-item.active');
         if (active) url.searchParams.set('file', active.dataset.filename);
         else url.searchParams.delete('file');
+        if (typeof window.updateActiveMediaDownloadButton === 'function') {
+            window.updateActiveMediaDownloadButton(media);
+        }
         window.history.replaceState({}, '', url);
         window.dispatchEvent(new Event('resize'));
     }

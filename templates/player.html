@@ -20,6 +20,11 @@
             <div class="player-header-row">
                 <h1><i class="fab fa-youtube"></i> 媒体库</h1>
                 <nav class="player-nav" aria-label="播放器导航">
+                    {% set initial_active_download_file = (audio_items[0].filename if audio_items else '') if active_media == 'audio' else (video_files[0] if video_files else '') %}
+                    <button type="button" id="download-current-media" class="btn-secondary player-download-btn"
+                        onclick="downloadActiveMedia()" {% if not initial_active_download_file %}disabled{% endif %}>
+                        <i class="fas fa-download" aria-hidden="true"></i> 下载当前媒体
+                    </button>
                     <a href="{{ url_for('index') }}" class="btn-secondary">
                         <i class="fas fa-arrow-left" aria-hidden="true"></i> 返回下载页
                     </a>
@@ -51,9 +56,15 @@
                 <div class="video-info-panel">
                     <h2 id="current-video-title">正在播放: {{ initial_video_metadata.get('title', '暂无视频') }}</h2>
                     {% set initial_video_source_url = initial_video_metadata.get('source_url', '') %}
-                    <p id="current-video-source" class="media-source" {% if not initial_video_source_url %}hidden{% endif %}>
-                        <a href="{{ initial_video_source_url }}" target="_blank" rel="noopener noreferrer">原始链接 <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
-                    </p>
+                    <div class="media-actions">
+                        <p id="current-video-source" class="media-source" {% if not initial_video_source_url %}hidden{% endif %}>
+                            <a href="{{ initial_video_source_url }}" target="_blank" rel="noopener noreferrer">原始链接 <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
+                        </p>
+                        <button type="button" id="download-current-video" class="media-download-btn"
+                            onclick="downloadCurrentVideo()" {% if not video_files %}disabled hidden{% endif %}>
+                            <i class="fas fa-download" aria-hidden="true"></i> 下载视频
+                        </button>
+                    </div>
                     <div id="current-video-metadata" class="media-metadata"
                         {% if not initial_video_metadata.get('artist') and not initial_video_metadata.get('album') and not initial_video_metadata.get('date') and not initial_video_metadata.get('genre') and not initial_video_metadata.get('description') %}hidden{% endif %}>
                         <dl class="media-metadata-list">
@@ -259,6 +270,46 @@
             link.click();
             link.remove();
         }
+
+        /**
+         * 获取当前激活的媒体标签页类型（video 或 audio）。
+         * @returns {string} 当前激活的媒体类型
+         */
+        function getActiveMediaTab() {
+            var activeTab = document.querySelector('[role="tab"][data-media][aria-selected="true"]');
+            return activeTab ? activeTab.dataset.media : 'video';
+        }
+
+        /**
+         * 更新顶部导航栏“下载当前媒体”按钮的可用状态。
+         * @param {string} [media] 指定的媒体类型（video 或 audio），默认读取当前激活标签页
+         */
+        function updateActiveMediaDownloadButton(media) {
+            var navButton = document.getElementById('download-current-media');
+            if (!navButton) {
+                return;
+            }
+            var targetMedia = media || getActiveMediaTab();
+            var activeItem = document.querySelector('#' + targetMedia + '-list .playlist-item.active');
+            var hasFile = Boolean(activeItem && activeItem.dataset.filename);
+            navButton.disabled = !hasFile;
+        }
+
+        /**
+         * 根据当前激活的媒体标签页触发当前视频或音频下载。
+         */
+        function downloadActiveMedia() {
+            if (getActiveMediaTab() === 'audio') {
+                if (typeof window.downloadCurrentAudio === 'function') {
+                    window.downloadCurrentAudio();
+                }
+                return;
+            }
+            downloadCurrentVideo();
+        }
+
+        window.updateActiveMediaDownloadButton = updateActiveMediaDownloadButton;
+        window.downloadActiveMedia = downloadActiveMedia;
 
         function updatePlayerUrl(filename) {
             var url = new URL(window.location.href);
@@ -834,6 +885,12 @@
             var sourceUrl = metadata.source_url || '';
             link.href = sourceUrl;
             source.hidden = !sourceUrl;
+            var downloadBtn = document.getElementById('download-current-video');
+            if (downloadBtn) {
+                downloadBtn.disabled = !filename;
+                downloadBtn.hidden = !filename;
+            }
+            updateActiveMediaDownloadButton('video');
             updateMediaMetadata('current-video-metadata', metadata);
         }
 
