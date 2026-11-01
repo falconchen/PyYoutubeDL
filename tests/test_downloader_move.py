@@ -503,7 +503,7 @@ class TestDownloaderMove(unittest.TestCase):
                     )
                     self.assertEqual(
                         cmd[cmd.index('--playlist-end') + 1],
-                        '20',
+                        '20' if mode == 'video' else '200',
                     )
 
     def test_completed_item_template_preserves_unicode_and_json_path(self):

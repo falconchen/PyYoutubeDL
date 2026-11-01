@@ -6,6 +6,7 @@
   "LOG_DIR": "./logs",
   "MAX_WORKERS": 4,
   "PLAYLIST_MAX_ITEMS": 20,
+  "PLAYLIST_AUDIO_MAX_ITEMS": 200,
   "DOWNLOAD_MIN_INTERVAL_SECONDS": 10,
   // 启动下载器时是否恢复遗留的 .downloading 任务
   "RESUME_INTERRUPTED_DOWNLOADS": false,

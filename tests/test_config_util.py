@@ -169,6 +169,24 @@ class TestPlaylistMonitorConfig(unittest.TestCase):
     def test_poll_interval_default(self):
         self.assertEqual(DEFAULT_CONFIG['PLAYLIST_POLL_INTERVAL_SECONDS'], 300)
 
+    def test_playlist_max_items_by_mode(self):
+        self.assertEqual(config_util.get_playlist_max_items({}), 20)
+        self.assertEqual(config_util.get_playlist_max_items({}, 'video'), 20)
+        self.assertEqual(config_util.get_playlist_max_items({}, 'audio'), 200)
+        runtime = {'PLAYLIST_MAX_ITEMS': 5, 'PLAYLIST_AUDIO_MAX_ITEMS': 50}
+        self.assertEqual(config_util.get_playlist_max_items(runtime, 'video'), 5)
+        self.assertEqual(config_util.get_playlist_max_items(runtime, 'audio'), 50)
+
+    def test_invalid_audio_playlist_limit_falls_back_to_default(self):
+        for value in (0, -1, '100', True, None):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    config_util.get_playlist_max_items(
+                        {'PLAYLIST_AUDIO_MAX_ITEMS': value}, 'audio',
+                    ),
+                    200,
+                )
+
     def test_monitor_playlists_default_empty(self):
         self.assertEqual(DEFAULT_CONFIG['MONITOR_PLAYLISTS'], {})
 

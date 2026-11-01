@@ -617,7 +617,8 @@ class DownloadHandler(FileSystemEventHandler):
             # +j 保留中文和 emoji，同时保留 JSON 路径转义供完成标记解析。
             f'after_move:{ITEM_COMPLETE_PREFIX}%(filepath)+j',
             '--no-quiet',          # --print 默认启用 quiet，保留原有详细下载日志
-            '--playlist-end', str(get_playlist_max_items(config)),
+            # 视频按 PLAYLIST_MAX_ITEMS、音频按 PLAYLIST_AUDIO_MAX_ITEMS 限制条目数
+            '--playlist-end', str(get_playlist_max_items(config, mode)),
             *dynamic_subtitle_args,
             '-o', os.path.join(task_tmp_dir, output_template),
             url

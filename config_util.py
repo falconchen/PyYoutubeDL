@@ -6,6 +6,7 @@ import pytz
 
 MOVE_STAGING_PREFIX = '.pyyoutubedl-moving-'
 DEFAULT_PLAYLIST_MAX_ITEMS = 20
+DEFAULT_PLAYLIST_AUDIO_MAX_ITEMS = 200
 RUNTIME_CONFIG_DIR_ENV = 'PYYOUTUBEDL_RUNTIME_CONFIG_DIR'
 
 # 默认配置
@@ -16,7 +17,8 @@ DEFAULT_CONFIG = {
     "FILES_DIR": "./files",         # 下载完成后的文件存放目录
     "LOG_DIR": "../logs",           # 日志存放目录
     "MAX_WORKERS": 4,               # 最大并行下载数
-    "PLAYLIST_MAX_ITEMS": DEFAULT_PLAYLIST_MAX_ITEMS, # 单个播放列表只下载前 N 个条目
+    "PLAYLIST_MAX_ITEMS": DEFAULT_PLAYLIST_MAX_ITEMS, # 单个播放列表的视频只下载前 N 个条目
+    "PLAYLIST_AUDIO_MAX_ITEMS": DEFAULT_PLAYLIST_AUDIO_MAX_ITEMS, # 单个播放列表的音频只下载前 N 个条目
     "DOWNLOAD_MIN_INTERVAL_SECONDS": 10, # 两次下载启动的最小间隔（秒），0 表示不限速
     "RESUME_INTERRUPTED_DOWNLOADS": False, # 下载器启动时是否恢复遗留的 .downloading 任务
     "DOWNLOAD_URL_BLOCK_PRIVATE_NETWORKS": True, # 拒绝本机、内网、链路本地及其他非公网地址
@@ -108,19 +110,31 @@ def is_ai_summary_enabled(runtime_config):
     )
 
 
-def get_playlist_max_items(runtime_config):
-    """返回有效的播放列表下载条目数，无效配置回退为默认值。"""
-    max_items = runtime_config.get(
+def _positive_int_config(runtime_config, key, default):
+    """读取正整数配置，无效值回退为默认值。"""
+    value = runtime_config.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        return default
+    return value
+
+
+def get_playlist_max_items(runtime_config, mode='video'):
+    """返回播放列表按下载类型允许的条目数，无效配置回退为默认值。
+
+    视频读取 PLAYLIST_MAX_ITEMS（默认 20），音频读取
+    PLAYLIST_AUDIO_MAX_ITEMS（默认 200）。
+    """
+    if mode == 'audio':
+        return _positive_int_config(
+            runtime_config,
+            "PLAYLIST_AUDIO_MAX_ITEMS",
+            DEFAULT_PLAYLIST_AUDIO_MAX_ITEMS,
+        )
+    return _positive_int_config(
+        runtime_config,
         "PLAYLIST_MAX_ITEMS",
         DEFAULT_PLAYLIST_MAX_ITEMS,
     )
-    if (
-        not isinstance(max_items, int)
-        or isinstance(max_items, bool)
-        or max_items <= 0
-    ):
-        return DEFAULT_PLAYLIST_MAX_ITEMS
-    return max_items
 
 
 def is_playlist_monitor_switch_on(runtime_config):

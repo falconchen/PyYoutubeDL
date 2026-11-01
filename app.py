@@ -319,11 +319,13 @@ def resolve_playlist_urls(url, conf_path, max_items=None):
     return urls, None
 
 
-def expand_task_urls(url):
+def expand_task_urls(url, types=None):
     """将提交的 URL 展开为待下载的 URL 列表。
 
-    疑似播放列表的 URL 会被解析成逐集 URL，并只返回配置数量的前几个
-    条目；普通视频 URL 原样返回。解析失败时返回错误，由调用方提示用户。
+    疑似播放列表的 URL 会被解析成逐集 URL；普通视频 URL 原样返回。
+    解析条目数取所选类型中最大的上限（视频 PLAYLIST_MAX_ITEMS、音频
+    PLAYLIST_AUDIO_MAX_ITEMS），各类型的任务数由 create_tasks 再分别截取。
+    解析失败时返回错误，由调用方提示用户。
 
     Returns:
         tuple: (urls, error)。成功时 urls 为 URL 列表、error 为 None。
@@ -331,7 +333,10 @@ def expand_task_urls(url):
     if not looks_like_playlist(url):
         return [url], None
 
-    max_items = get_playlist_max_items(config)
+    modes = [t for t in (types or ['video']) if t in ('video', 'audio')]
+    max_items = max(
+        get_playlist_max_items(config, mode) for mode in (modes or ['video'])
+    )
 
     urls, error = resolve_playlist_urls(
         url,
@@ -349,6 +354,10 @@ def expand_task_urls(url):
 def create_tasks(urls, types):
     """创建下载任务并返回任务ID列表（委托 task_queue 共享实现）。
 
+    视频任务最多创建 PLAYLIST_MAX_ITEMS 个，音频任务最多创建
+    PLAYLIST_AUDIO_MAX_ITEMS 个；同时选择时，超出较小上限的条目只创建
+    剩余类型的任务。
+
     Args:
         urls (list): 要下载的 URL 列表（播放列表已展开为逐集 URL）。
         types (list): 下载类型列表，可以是 ['video'] 或 ['audio'] 或两者都有
@@ -356,7 +365,18 @@ def create_tasks(urls, types):
     Returns:
         list: 创建的任务ID列表
     """
-    return task_queue.create_tasks(urls, types, URLS_DIR, config["TIMEZONE"])
+    limits = {
+        mode: get_playlist_max_items(config, mode)
+        for mode in ('video', 'audio')
+    }
+    task_ids = []
+    for index, url in enumerate(urls):
+        active_types = [t for t in types if index < limits.get(t, len(urls))]
+        if active_types:
+            task_ids += task_queue.create_tasks(
+                [url], active_types, URLS_DIR, config["TIMEZONE"],
+            )
+    return task_ids
 
 
 def classify_download_stage(extension, vcodec, acodec):
@@ -1633,7 +1653,7 @@ def index():
             ), 400
 
         # 播放列表展开为逐集 URL，再逐个创建任务
-        urls, error = expand_task_urls(url)
+        urls, error = expand_task_urls(url, types)
         if error:
             return render_template(
                 'index.html',
@@ -2222,7 +2242,7 @@ def api_add_task():
         types = [types]
 
     # 播放列表展开为逐集 URL，再逐个创建任务
-    urls, error = expand_task_urls(url)
+    urls, error = expand_task_urls(url, types)
     if error:
         return jsonify({"success": False, "msg": error}), 400
 

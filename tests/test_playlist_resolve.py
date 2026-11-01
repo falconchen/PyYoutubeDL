@@ -204,6 +204,40 @@ class TestExpandTaskUrls(unittest.TestCase):
         self.assertEqual(urls, many[:20])
         self.assertEqual(resolve.call_args.kwargs['max_items'], 20)
 
+    def test_audio_playlist_uses_audio_limit(self):
+        many = [f'https://www.youtube.com/watch?v=vid{i}' for i in range(250)]
+        for types in (['audio'], ['video', 'audio']):
+            with self.subTest(types=types):
+                with (
+                    patch('app.looks_like_playlist', return_value=True),
+                    patch(
+                        'app.resolve_playlist_urls',
+                        return_value=(many, None),
+                    ) as resolve,
+                    patch.dict(app.config, {
+                        'PLAYLIST_MAX_ITEMS': 20,
+                        'PLAYLIST_AUDIO_MAX_ITEMS': 200,
+                    }),
+                ):
+                    urls, error = app.expand_task_urls('playlist', types)
+
+                self.assertIsNone(error)
+                self.assertEqual(urls, many[:200])
+                self.assertEqual(resolve.call_args.kwargs['max_items'], 200)
+
+    def test_video_only_playlist_is_truncated(self):
+        many = [f'https://www.youtube.com/watch?v=vid{i}' for i in range(50)]
+        with (
+            patch('app.looks_like_playlist', return_value=True),
+            patch('app.resolve_playlist_urls', return_value=(many, None)) as resolve,
+            patch.dict(app.config, {'PLAYLIST_MAX_ITEMS': 20}),
+        ):
+            urls, error = app.expand_task_urls('playlist', ['video'])
+
+        self.assertIsNone(error)
+        self.assertEqual(urls, many[:20])
+        self.assertEqual(resolve.call_args.kwargs['max_items'], 20)
+
     def test_playlist_resolve_failure_returns_error(self):
         with (
             patch('app.looks_like_playlist', return_value=True),
@@ -246,6 +280,37 @@ class TestCreateTasks(unittest.TestCase):
         for active_patch in reversed(self.patches):
             active_patch.stop()
         self.temp_dir.cleanup()
+
+    def test_video_and_audio_tasks_use_separate_limits(self):
+        urls = [f'https://www.youtube.com/watch?v=vid{i}' for i in range(6)]
+        with patch.dict(app.config, {
+            'PLAYLIST_MAX_ITEMS': 2,
+            'PLAYLIST_AUDIO_MAX_ITEMS': 4,
+        }):
+            task_ids = app.create_tasks(urls, ['video', 'audio'])
+
+        prefixes = [task_id[0] for task_id in task_ids]
+        self.assertEqual(prefixes, ['v', 'a', 'v', 'a', 'a', 'a'])
+        files = list(self.urls_dir.glob('*.txt'))
+        self.assertEqual(len(files), 6)
+        video_urls = sorted(
+            f.read_text(encoding='utf-8') for f in files if f.name.startswith('v')
+        )
+        audio_urls = sorted(
+            f.read_text(encoding='utf-8') for f in files if f.name.startswith('a')
+        )
+        self.assertEqual(video_urls, sorted(urls[:2]))
+        self.assertEqual(audio_urls, sorted(urls[:4]))
+
+    def test_audio_only_tasks_use_audio_limit(self):
+        urls = [f'https://www.youtube.com/watch?v=vid{i}' for i in range(5)]
+        with patch.dict(app.config, {
+            'PLAYLIST_MAX_ITEMS': 2,
+            'PLAYLIST_AUDIO_MAX_ITEMS': 3,
+        }):
+            task_ids = app.create_tasks(urls, ['audio'])
+
+        self.assertEqual(len(task_ids), 3)
 
     def test_creates_one_task_per_url_and_type(self):
         urls = [
