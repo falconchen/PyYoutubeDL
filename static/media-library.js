@@ -8,7 +8,13 @@
             tab.tabIndex = selected ? 0 : -1;
             document.getElementById(tab.getAttribute('aria-controls')).hidden = !selected;
             document.getElementById(tab.dataset.media + '-list').hidden = !selected;
-            if (!selected) videojs.getPlayer(tab.dataset.media + '-player').pause();
+        });
+        // Finish the tab switch even if Video.js failed to load or initialize.
+        tabs.forEach(function (tab) {
+            if (tab.dataset.media === media) return;
+            if (!window.videojs || typeof window.videojs.getPlayer !== 'function') return;
+            const player = window.videojs.getPlayer(tab.dataset.media + '-player');
+            if (player) player.pause();
         });
         const url = new URL(window.location.href);
         url.pathname = document.querySelector('.media-tabs').dataset.playerUrl;
