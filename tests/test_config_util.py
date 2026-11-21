@@ -236,6 +236,31 @@ class TestPlaylistMonitorConfig(unittest.TestCase):
         }
         self.assertFalse(config_util.is_playlist_monitor_enabled(cfg))
 
+    def test_mcp_defaults_disabled_and_path_resolution(self):
+        self.assertIs(DEFAULT_CONFIG['ENABLE_MCP_SERVER'], False)
+        self.assertIs(DEFAULT_CONFIG['ENABLE_MCP_OAUTH'], False)
+        self.assertEqual(DEFAULT_CONFIG['MCP_PATH'], '/mcp')
+        self.assertIn('MCP_OAUTH_DB_PATH', config_util.PATH_CONFIG_KEYS)
+
+        self.assertFalse(config_util.is_mcp_server_enabled({}))
+        self.assertFalse(config_util.is_mcp_server_enabled({'ENABLE_MCP_SERVER': True}))
+        self.assertTrue(config_util.is_mcp_server_enabled({
+            'ENABLE_MCP_SERVER': True,
+            'MCP_ACCESS_TOKEN': 'tok',
+        }))
+        self.assertFalse(config_util.is_mcp_oauth_enabled({
+            'ENABLE_MCP_SERVER': True,
+            'ENABLE_MCP_OAUTH': True,
+            'MCP_OAUTH_ADMIN_PASSWORD_SHA256': '',
+        }))
+        self.assertTrue(config_util.is_mcp_oauth_enabled({
+            'ENABLE_MCP_SERVER': True,
+            'ENABLE_MCP_OAUTH': True,
+            'MCP_OAUTH_ADMIN_PASSWORD_SHA256': 'a' * 64,
+        }))
+        self.assertEqual(config_util.get_mcp_path({'MCP_PATH': '/mcp/'}), '/mcp')
+        self.assertEqual(config_util.get_mcp_path({'MCP_PATH': 'invalid'}), '/mcp')
+
 
 if __name__ == '__main__':
     unittest.main()

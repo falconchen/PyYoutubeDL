@@ -23,6 +23,8 @@ import requests
 from requests.auth import HTTPBasicAuth
 from log_util import setup_logger
 import ai_summary_store
+import mcp_oauth
+import mcp_server
 import task_queue
 import youtube_auth
 from url_security import validate_download_url
@@ -2791,6 +2793,135 @@ def api_get_cookie():
             status=500,
             mimetype='application/json'
         )
+
+
+class _AppMcpBackend:
+    """将 app.py 既有业务函数桥接给 mcp_server，保持运行时配置与测试 patch 动态生效。"""
+
+    def get_config(self):
+        return config
+
+    def get_logger(self):
+        return app.logger
+
+    def get_urls_dir(self):
+        return URLS_DIR
+
+    def get_files_dir(self):
+        return FILES_DIR
+
+    def get_log_dir(self):
+        return config['LOG_DIR']
+
+    def get_video_extensions(self):
+        return VIDEO_EXTENSIONS
+
+    def get_audio_extensions(self):
+        return AUDIO_EXTENSIONS
+
+    def extract_url(self, text):
+        return extract_url(text)
+
+    def validate_submitted_url(self, url):
+        return validate_submitted_url(url)
+
+    def validate_submitted_urls(self, urls):
+        return validate_submitted_urls(urls)
+
+    def looks_like_playlist(self, url):
+        return looks_like_playlist(url)
+
+    def resolve_playlist_urls(self, url, conf_path, max_items=None):
+        return resolve_playlist_urls(url, conf_path, max_items=max_items)
+
+    def create_tasks(self, urls, types):
+        return create_tasks(urls, types)
+
+    def get_task_info(self, task_id):
+        return get_task_info(task_id)
+
+    def read_task_log_tail(self, filepath):
+        return read_task_log_tail(filepath)
+
+    def redact_task_log_text(self, text):
+        return redact_task_log_text(text)
+
+    def get_player_exclude_keywords(self):
+        return get_player_exclude_keywords()
+
+    def get_media_source_url(self, filename):
+        return get_media_source_url(filename)
+
+    def get_local_summary_tracks(self, filename):
+        return get_local_summary_tracks(filename)
+
+    def extract_sidecar_subtitle_text(self, filepath):
+        return extract_sidecar_subtitle_text(filepath)
+
+    def extract_subtitle_text(self, filepath, stream_index):
+        return extract_subtitle_text(filepath, stream_index)
+
+    def ai_summary_is_configured(self):
+        return ai_summary_is_configured()
+
+    def pick_ytdlp_conf(self, mode='video'):
+        return _pick_ytdlp_conf(mode)
+
+
+_mcp_oauth_bp = mcp_oauth.create_mcp_oauth_blueprint(
+    get_config=lambda: config,
+    is_testing=lambda: bool(app.testing),
+)
+_mcp_server_bp = mcp_server.create_mcp_blueprint(_AppMcpBackend())
+app.register_blueprint(_mcp_oauth_bp)
+app.register_blueprint(_mcp_server_bp)
+app.mcp_rate_limiter = _mcp_server_bp.rate_limiter
+
+
+@app.cli.command("mcp-grants")
+@click.option("--all", "include_revoked", is_flag=True, help="同时显示已撤销的授权记录")
+@with_appcontext
+def mcp_grants_command(include_revoked):
+    """列出已授权访问 MCP 的 OAuth 应用。"""
+    grants = mcp_oauth.list_grants(
+        config["MCP_OAUTH_DB_PATH"],
+        include_revoked=include_revoked,
+    )
+    if not grants:
+        click.echo("当前没有 MCP OAuth 授权记录。")
+        return
+    tz = pytz.timezone(config.get("TIMEZONE", "UTC"))
+    for grant in grants:
+        created = datetime.fromtimestamp(grant["created_at"], tz).strftime("%Y-%m-%d %H:%M:%S")
+        last_used = datetime.fromtimestamp(grant["last_used_at"], tz).strftime("%Y-%m-%d %H:%M:%S")
+        status = "已撤销" if grant.get("revoked_at") else "有效"
+        domain_tag = f"（已核实: {grant['verified_domain']}）" if grant.get("verified_domain") else ""
+        click.echo(
+            f"{grant['id']}  [{status}]  {grant['client_name']}{domain_tag}  "
+            f"回调: {grant['redirect_host']}  创建: {created}  最近使用: {last_used}"
+        )
+
+
+@app.cli.command("mcp-revoke")
+@click.argument("grant_id", required=False)
+@click.option("--all", "revoke_all", is_flag=True, help="撤销全部有效的 MCP OAuth 授权")
+@with_appcontext
+def mcp_revoke_command(grant_id, revoke_all):
+    """撤销指定或全部 MCP OAuth 授权。"""
+    db_path = config["MCP_OAUTH_DB_PATH"]
+    if revoke_all:
+        count = mcp_oauth.revoke_all_grants(db_path)
+        click.echo(f"已撤销 {count} 条 MCP OAuth 授权。")
+        return
+    if not grant_id:
+        click.echo("请提供 grant_id，或使用 --all 撤销全部授权。", err=True)
+        sys.exit(2)
+    if mcp_oauth.revoke_grant(db_path, grant_id):
+        click.echo(f"已撤销授权：{grant_id}")
+    else:
+        click.echo(f"未找到有效授权记录：{grant_id}", err=True)
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     # 启动时获取cookie

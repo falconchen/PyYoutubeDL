@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>MCP 授权访问 · PyYoutubeDL</title>
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="referrer" content="no-referrer">
+    <style>
+        :root {
+            --bg: #f5f7fa;
+            --card: #ffffff;
+            --border: #e2e8f0;
+            --text: #0f172a;
+            --muted: #475569;
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --danger-bg: #fef2f2;
+            --danger-border: #fecaca;
+            --danger-text: #991b1b;
+            --warn-bg: #fffbeb;
+            --warn-border: #fde68a;
+            --warn-text: #92400e;
+            --ok-bg: #ecfdf5;
+            --ok-border: #a7f3d0;
+            --ok-text: #065f46;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            line-height: 1.55;
+        }
+        .card {
+            width: 100%;
+            max-width: 480px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 26px 24px;
+            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+        }
+        h1 {
+            margin: 0 0 12px;
+            font-size: 20px;
+            font-weight: 700;
+        }
+        .lead {
+            margin: 0 0 8px;
+            font-size: 15px;
+        }
+        .badge {
+            display: inline-block;
+            font-size: 12px;
+            padding: 3px 8px;
+            border-radius: 6px;
+            margin-bottom: 14px;
+        }
+        .badge-verified {
+            background: var(--ok-bg);
+            border: 1px solid var(--ok-border);
+            color: var(--ok-text);
+        }
+        .badge-unverified {
+            background: var(--warn-bg);
+            border: 1px solid var(--warn-border);
+            color: var(--warn-text);
+        }
+        .facts {
+            margin: 12px 0 16px;
+            padding: 12px 14px;
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            font-size: 14px;
+        }
+        .facts dt {
+            color: var(--muted);
+            font-size: 12px;
+            margin-bottom: 2px;
+        }
+        .facts dd {
+            margin: 0;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            word-break: break-all;
+            font-weight: 600;
+        }
+        .alert {
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin: 12px 0;
+        }
+        .alert-danger {
+            background: var(--danger-bg);
+            border: 1px solid var(--danger-border);
+            color: var(--danger-text);
+        }
+        .alert-warn {
+            background: var(--warn-bg);
+            border: 1px solid var(--warn-border);
+            color: var(--warn-text);
+        }
+        .scopes {
+            margin: 14px 0 18px;
+            font-size: 14px;
+        }
+        .scopes-title {
+            font-size: 13px;
+            color: var(--muted);
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        .scopes ul {
+            margin: 0;
+            padding-left: 18px;
+        }
+        .scopes li {
+            margin-bottom: 4px;
+        }
+        .field {
+            margin: 16px 0;
+        }
+        .field label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        .field input[type="password"] {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 15px;
+        }
+        .field input[type="password"]:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        }
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 18px;
+        }
+        .btn {
+            flex: 1;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+        .btn-primary {
+            background: var(--primary);
+            color: #fff;
+        }
+        .btn-primary:hover {
+            background: var(--primary-hover);
+        }
+        .btn-secondary {
+            background: #fff;
+            color: var(--text);
+            border-color: #cbd5e1;
+        }
+        .btn-secondary:hover {
+            background: #f8fafc;
+        }
+        .foot {
+            margin: 16px 0 0;
+            font-size: 12px;
+            color: var(--muted);
+        }
+    </style>
+</head>
+<body>
+    <main class="card">
+        <h1>授权访问 PyYoutubeDL</h1>
+
+        {% if error %}
+            <div class="alert alert-danger" role="alert">{{ error }}</div>
+        {% elif auth_request %}
+            <p class="lead"><strong>{{ auth_request.client_name }}</strong> 申请通过 MCP 访问你的 PyYoutubeDL 服务</p>
+
+            {% if auth_request.verified_domain %}
+                <span class="badge badge-verified">由 {{ auth_request.verified_domain }} 发布（身份已核实）</span>
+            {% else %}
+                <span class="badge badge-unverified">应用名称未经过核实，请以回调域名为准</span>
+            {% endif %}
+
+            <dl class="facts">
+                <dt>授权后跳转到</dt>
+                <dd>{{ auth_request.redirect_host }}</dd>
+            </dl>
+
+            {% if auth_request.redirect_is_loopback %}
+                <div class="alert alert-warn" role="alert">
+                    这会把访问权限交给你本机设备上的一个程序（{{ auth_request.redirect_host }}）。仅在你刚主动发起本地连接时才继续。
+                </div>
+            {% endif %}
+
+            <div class="scopes">
+                <div class="scopes-title">同意后该应用可以：</div>
+                <ul>
+                    <li>解析视频与播放列表信息</li>
+                    <li>提交视频与音频下载任务（播放列表需二次确认）</li>
+                    <li>查询任务进度、失败原因、已下载文件列表与字幕</li>
+                    <li>查询或触发视频 AI 总结，查看下载器运行状态</li>
+                </ul>
+            </div>
+
+            {% if form_error %}
+                <div class="alert alert-danger" role="alert">{{ form_error }}</div>
+            {% endif %}
+
+            <form method="post" autocomplete="off">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                {% for key, value in raw_params.items() %}
+                    <input type="hidden" name="{{ key }}" value="{{ value }}">
+                {% endfor %}
+
+                <div class="field">
+                    <label for="admin_password">管理员授权口令</label>
+                    <input
+                        id="admin_password"
+                        name="admin_password"
+                        type="password"
+                        placeholder="请输入 config.json 对应的授权口令"
+                        autocomplete="current-password"
+                    >
+                </div>
+
+                <div class="actions">
+                    <button type="submit" name="decision" value="deny" class="btn btn-secondary">拒绝</button>
+                    <button type="submit" name="decision" value="approve" class="btn btn-primary">同意授权</button>
+                </div>
+            </form>
+
+            <p class="foot">你可以随时在服务器执行 <code>flask mcp-grants</code> 与 <code>flask mcp-revoke</code> 查看或撤销授权。</p>
+        {% endif %}
+    </main>
+    <script>
+        if (window.top !== window.self) {
+            document.body.innerHTML = '<main class="card"><h1>安全拦截</h1><p>授权页不允许被嵌入其他页面。</p></main>';
+        }
+    </script>
+</body>
+</html>

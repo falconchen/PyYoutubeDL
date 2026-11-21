@@ -78,12 +78,31 @@ DEFAULT_CONFIG = {
     "MONITOR_PLAYLISTS": {},         # {playlistId: [types]}
     "ENABLE_PLAYLIST_MONITOR": True, # 是否启动播放列表监控 worker；默认启动，设为 false 可禁用
     "FLASK_SECRET_KEY": "",          # OAuth state 会话签名密钥
+
+    # MCP 服务（支持 Claude / ChatGPT 网页版 OAuth 2.1 及本地客户端 Bearer Token）
+    "ENABLE_MCP_SERVER": False,      # 是否启用 MCP 服务；默认关闭
+    "MCP_PATH": "/mcp",              # MCP Streamable HTTP 端点路径
+    "MCP_ACCESS_TOKEN": "",          # 静态 Bearer 令牌（可选，供本地/桌面 MCP 客户端使用）
+    "MCP_PUBLIC_BASE_URL": "",       # 对外公网 HTTPS 地址（如 https://yter.cellmean.com），留空则按请求推导
+    "MCP_MAX_PENDING_TASKS": 50,     # 排队与下载中任务总数上限，防止 LLM 循环下单打满队列
+    "MCP_RATE_LIMIT_PER_MINUTE": 120, # 单授权主体每分钟最大工具调用次数
+    "MCP_WRITE_RATE_LIMIT_PER_MINUTE": 30, # 单授权主体每分钟最大写操作次数
+
+    # MCP OAuth 2.1（供 Claude / ChatGPT 网页版自定义 MCP 连接器授权）
+    "ENABLE_MCP_OAUTH": False,       # 是否启用内置 OAuth 2.1（CIMD + DCR + PKCE）
+    "MCP_OAUTH_DB_PATH": "./data/mcp_oauth.sqlite3", # MCP OAuth 客户端与令牌哈希数据库
+    "MCP_OAUTH_ADMIN_PASSWORD_SHA256": "", # 授权确认页管理员口令的 sha256 十六进制哈希，禁止明文
+    "MCP_OAUTH_ENABLE_CIMD": True,   # 是否启用 Client ID Metadata Document（Claude 网页版默认使用）
+    "MCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS": 3600, # Access Token 有效期（秒）
+    "MCP_OAUTH_REFRESH_TOKEN_IDLE_TTL_SECONDS": 90 * 24 * 60 * 60, # Refresh Token 闲置过期时间（秒，默认 90 天）
+    "MCP_OAUTH_ALLOWED_REDIRECT_HOSTS": [], # 可选：限制 DCR 允许的回调域名白名单；留空允许任意 HTTPS 或本机回环
 }
 
 # 需要转换为绝对路径的配置项
 PATH_CONFIG_KEYS = [
     "URLS_DIR",  "TMP_DIR",
     "FILES_DIR", "LOG_DIR", "AI_SUMMARY_DB_PATH", "WEBDAV_UPLOAD_DB_PATH",
+    "MCP_OAUTH_DB_PATH",
     "GOOGLE_OAUTH_TOKEN_FILE", "GOOGLE_OAUTH_FAIL_LOCK_FILE",
     "GOOGLE_OAUTH_USER_FILE",
 ]
@@ -153,6 +172,37 @@ def is_playlist_monitor_enabled(runtime_config):
         and runtime_config.get("GOOGLE_OAUTH_CLIENT_SECRET").strip()
         and runtime_config.get("MONITOR_PLAYLISTS")
     )
+
+
+def get_mcp_path(runtime_config):
+    """返回规范化后的 MCP 端点路径（默认 /mcp）。"""
+    raw_path = runtime_config.get("MCP_PATH", "/mcp")
+    if not isinstance(raw_path, str):
+        return "/mcp"
+    normalized = raw_path.strip()
+    if not normalized or not normalized.startswith("/"):
+        return "/mcp"
+    normalized = normalized.rstrip("/")
+    return normalized or "/mcp"
+
+
+def is_mcp_oauth_enabled(runtime_config):
+    """MCP 与 OAuth 开关均开启且已配置管理员口令哈希时启用内置 OAuth 2.1。"""
+    if not bool(runtime_config.get("ENABLE_MCP_SERVER", False)):
+        return False
+    if not bool(runtime_config.get("ENABLE_MCP_OAUTH", False)):
+        return False
+    password_hash = runtime_config.get("MCP_OAUTH_ADMIN_PASSWORD_SHA256")
+    return isinstance(password_hash, str) and bool(password_hash.strip())
+
+
+def is_mcp_server_enabled(runtime_config):
+    """开关开启且至少配置了静态 Bearer 令牌或内置 OAuth 2.1 时启用 MCP。"""
+    if not bool(runtime_config.get("ENABLE_MCP_SERVER", False)):
+        return False
+    static_token = runtime_config.get("MCP_ACCESS_TOKEN")
+    has_static_token = isinstance(static_token, str) and bool(static_token.strip())
+    return has_static_token or is_mcp_oauth_enabled(runtime_config)
 
 
 def get_runtime_config_dir():

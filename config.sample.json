@@ -136,4 +136,28 @@
       "seen_video_ids": [],
     },
   ],
+
+  // MCP 服务（支持 Claude / ChatGPT 网页版 OAuth 2.1 及本地客户端静态 Bearer 令牌）
+  // 详细接入说明见 docs/MCP.md；默认关闭，开启前请配置令牌或 OAuth 口令哈希
+  "ENABLE_MCP_SERVER": false,
+  "MCP_PATH": "/mcp",
+  "MCP_ACCESS_TOKEN": "replace_with_a_long_random_mcp_token",
+  // 对外公网 HTTPS 地址（供 OAuth 发现端点及拼接完整播放/下载链接；留空则按请求推导）
+  "MCP_PUBLIC_BASE_URL": "https://yter.cellmean.com",
+  "MCP_MAX_PENDING_TASKS": 50,
+  "MCP_RATE_LIMIT_PER_MINUTE": 120,
+  "MCP_WRITE_RATE_LIMIT_PER_MINUTE": 30,
+
+  // MCP OAuth 2.1（供 Claude / ChatGPT 网页版添加自定义 MCP 连接器）
+  "ENABLE_MCP_OAUTH": false,
+  "MCP_OAUTH_DB_PATH": "./data/mcp_oauth.sqlite3",
+  // 授权确认页口令的 sha256 十六进制哈希，禁止填写明文：
+  // python -c "import hashlib;print(hashlib.sha256(b'你的口令').hexdigest())"
+  "MCP_OAUTH_ADMIN_PASSWORD_SHA256": "",
+  // 启用 CIMD（Claude 网页版默认方式）；ChatGPT 网页版可在高级 OAuth 设置中切到 DCR
+  "MCP_OAUTH_ENABLE_CIMD": true,
+  "MCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS": 3600,
+  "MCP_OAUTH_REFRESH_TOKEN_IDLE_TTL_SECONDS": 7776000,
+  // 可选：限制 DCR 允许的回调域名白名单，例如 ["chatgpt.com", "claude.ai"]；留空允许任意 HTTPS
+  "MCP_OAUTH_ALLOWED_REDIRECT_HOSTS": [],
 }
