@@ -60,3 +60,16 @@ def test_small_screens_hide_library_intro():
     mobile_css = css.split('@media (max-width: 480px)', 1)[1]
 
     assert '.player-page .library-intro { display: none; }' in mobile_css
+
+
+def test_desktop_playlist_section_matches_left_stage_height():
+    css = Path(app_module.app.static_folder, 'refresh.css').read_text(
+        encoding='utf-8',
+    )
+    layout_rule = css.split('.library-layout {', 1)[1].split('}', 1)[0]
+    desktop_css = css.split('@media (min-width: 901px)', 1)[1].split('@media (max-width: 900px)', 1)[0]
+
+    assert 'align-items: start' not in layout_rule
+    assert '.redesigned-page .playlist-items { min-height: 0; max-height: none;' in css
+    assert 'max-height: none;' in desktop_css
+    assert 'contain: size;' in desktop_css

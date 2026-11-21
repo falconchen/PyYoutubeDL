@@ -33,17 +33,17 @@
 .media-tabs span { font-size: .7rem; background: #edf0e9; padding: 0 6px; border-radius: 20px; }
 .redesigned-page :focus-visible { outline: 3px solid #a66c27; outline-offset: 3px; }
 .redesigned-page [role="tabpanel"][hidden] { display: none !important; }
-.library-layout { display: grid; gap: 24px; align-items: start; grid-template-columns: minmax(0, 1fr) 320px; }
+.library-layout { display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr) 320px; }
 .library-stage { min-width: 0; }
 .redesigned-page .player-content { display: block; }
 .redesigned-page .player-section { gap: 18px; }
 .redesigned-page .video-wrapper { border-radius: 16px; box-shadow: 0 8px 24px #25332f14; }
 .redesigned-page .video-info-panel, .redesigned-page .ai-summary-panel, .redesigned-page .player-comment-container { padding: 22px; border: 1px solid #e0e5db; border-radius: 14px; background: #fff; box-shadow: none; }
 .redesigned-page .video-info-panel h2 { font-size: 1.2rem; color: #25332f; overflow-wrap: anywhere; }
-.redesigned-page .playlist-section { border: 1px solid #dfe4da; border-radius: 16px; background: #fff; overflow: hidden; padding: 10px; box-shadow: none; }
+.redesigned-page .playlist-section { min-height: min(460px, 70vh); max-height: 70vh; border: 1px solid #dfe4da; border-radius: 16px; background: #fff; overflow: hidden; padding: 10px; box-shadow: none; }
 .redesigned-page .playlist-header { display: block; padding: 12px 10px 18px; }
 .redesigned-page .playlist-header h3 { font-size: .85rem; color: #738075; }
-.redesigned-page .playlist-items { max-height: 65vh; }
+.redesigned-page .playlist-items { min-height: 0; max-height: none; overscroll-behavior: contain; }
 .redesigned-page .playlist-item { border-radius: 9px; border: 1px solid transparent; margin-bottom: 5px; padding: 13px 10px; }
 .redesigned-page .playlist-item.active { background: #edf3e9; border-color: #d9e5d1; color: #294e40; }
 .redesigned-page .playlist-item.active .item-icon { color: #294e40; }
@@ -54,6 +54,14 @@
 .redesigned-page .media-download-btn { background: #edf2e9; border-color: #d5dfd0; color: #294e40; }
 .redesigned-page .media-download-btn:hover:not(:disabled), .redesigned-page .media-download-btn:focus-visible:not(:disabled) { background: #294e40; border-color: #294e40; color: #fff; }
 .redesigned-page .site-footer { color: #7c887e; }
+@media (min-width: 901px) {
+    /* 双栏时侧栏不参与行高计算，拉伸到左栏高度，条目多了在卡片内滚动。 */
+    .redesigned-page .playlist-section {
+        min-height: 620px;
+        max-height: none;
+        contain: size;
+    }
+}
 @media (max-width: 900px) {
     .library-layout { grid-template-columns: minmax(0, 1fr); }
     .redesigned-page .playlist-items { max-height: 340px; }
